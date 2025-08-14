@@ -40,12 +40,30 @@ local aetherReachedCapacity = Instance.new("RemoteEvent")
 aetherReachedCapacity.Name = "Aether_ReachedCapacity"
 aetherReachedCapacity.Parent = ReplicatedStorage
 
+local Economy = require(script:WaitForChild("Economy"))
+local Aether = require(script:WaitForChild("Aether"))
+local PlayerManager = require(script:WaitForChild("PlayerManager"))
+local DebugCommands = require(script:WaitForChild("DebugCommands"))
+local InventoryBridge = require(script:WaitForChild("InventoryBridge"))
+local SaveScheduler = require(script:WaitForChild("SaveScheduler"))
+
+DebugCommands.SetAetherSnapshot(aetherSnapshot)
+
+game:BindToClose(function()
+    SaveScheduler.flush()
+end)
+
 local function sendSnapshot(player, data)
     local payload = {
         aether = Aether.Snapshot(data),
         crumbs = data.crumbs,
+        v = 1,
     }
     aetherSnapshot:FireClient(player, payload)
+    InventoryBridge.OnSnapshotComposed(data, payload)
+    if payload.aether and payload.aether.atCap then
+        aetherReachedCapacity:FireClient(player)
+    end
 end
 
 
