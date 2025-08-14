@@ -2,6 +2,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local BurstService = require(script.Parent:WaitForChild("BurstService"))
 local PlacementService = require(script.Parent:WaitForChild("PlacementService"))
+local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local ItemsConfig = require(Shared:WaitForChild("ItemsConfig"))
 
 local rfFetch = Instance.new("RemoteFunction")
 rfFetch.Name = "Inventory_FetchPage"
@@ -39,11 +43,57 @@ rfRemove.OnServerInvoke = function(player, uid)
     return PlacementService.Remove(player, uid)
 end
 
+local evStartHolding = Instance.new("RemoteEvent")
+evStartHolding.Name = "StartHoldingItem"
+evStartHolding.Parent = ReplicatedStorage
+evStartHolding.OnServerEvent = function(player, uid)
+    local data = PlayerManager.GetPlayerData(player)
+    data.heldItem = uid
+end
+
+local evRequestPlace = Instance.new("RemoteEvent")
+evRequestPlace.Name = "RequestPlaceItem"
+evRequestPlace.Parent = ReplicatedStorage
+
+local evConfirm = Instance.new("RemoteEvent")
+evConfirm.Name = "ConfirmPlacement"
+evConfirm.Parent = ReplicatedStorage
+
+local evReject = Instance.new("RemoteEvent")
+evReject.Name = "PlacementRejected"
+evReject.Parent = ReplicatedStorage
+
+evRequestPlace.OnServerEvent = function(player, uid, position)
+    local data = PlayerManager.GetPlayerData(player)
+    if data.heldItem ~= uid then
+        evReject:FireClient(player)
+        return
+    end
+    local cfg = ItemsConfig.Types[uid]
+    if not cfg then
+        evReject:FireClient(player)
+        return
+    end
+    if not InventoryService.Consume(player, uid, 1) then
+        evReject:FireClient(player)
+        return
+    end
+    local model = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    model.CFrame = CFrame.new(position)
+    model.Parent = workspace
+    data.heldItem = nil
+    evConfirm:FireClient(player, model)
+end
+
 return {
     FetchPage = rfFetch,
     Equip = rfEquip,
     UseBurst = rfBurst,
     PlaceItem = rfPlace,
     RemovePlaced = rfRemove,
+    StartHolding = evStartHolding,
+    RequestPlace = evRequestPlace,
+    ConfirmPlacement = evConfirm,
+    PlacementRejected = evReject,
 }
 

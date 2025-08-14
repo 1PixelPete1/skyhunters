@@ -4,9 +4,9 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
+local HeldItemController = require(script.Parent:WaitForChild("HeldItemController"))
 
 local RF_Fetch = ReplicatedStorage:WaitForChild("Inventory_FetchPage")
-local RF_Equip = ReplicatedStorage:WaitForChild("Inventory_Equip")
 
 local localPlayer = Players.LocalPlayer
 
@@ -19,6 +19,7 @@ local currentCategory = InventoryConfig.Categories[1].id
 local currentSearch = ""
 local nextCursor
 local items = {}
+local itemLookup = {}
 local cells = {}
 local cellPool = {}
 local gridContainer
@@ -35,9 +36,9 @@ local function createCell()
         if not uid then
             return
         end
-        local result = RF_Equip:InvokeServer(uid)
-        if result and result.ok then
-            -- preview stub
+        local item = itemLookup[uid]
+        if item then
+            HeldItemController.startHold(item)
         end
     end)
     return frame
@@ -75,10 +76,12 @@ local function fetchPage(reset)
     if reset then
         nextCursor = nil
         items = {}
+        itemLookup = {}
     end
     local page, newCursor = RF_Fetch:InvokeServer(currentCategory, currentSearch, nextCursor)
     for _, item in ipairs(page) do
         table.insert(items, item)
+        itemLookup[item.uid] = item
     end
     nextCursor = newCursor
 end
