@@ -5,6 +5,37 @@ local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChil
 
 local PlacedRenderer = {}
 
+local function getModel(modelName)
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if not assets then
+        warn("[PlacedRenderer] Assets folder missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local models = assets:FindFirstChild("Models")
+    if not models then
+        warn("[PlacedRenderer] Models folder missing in Assets")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local model = models:FindFirstChild(modelName)
+    if not model then
+        warn("[PlacedRenderer] Model " .. modelName .. " missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    return model:Clone()
+end
+
 local function getFolder()
     local folder = workspace:FindFirstChild("ClientObjects")
     if not folder then
@@ -26,7 +57,7 @@ function PlacedRenderer.Render(params)
     if not cfg then
         return
     end
-    local model = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    local model = getModel(cfg.model)
     model.CFrame = params.worldCFrame
     model.Parent = getFolder()
 end

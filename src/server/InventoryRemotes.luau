@@ -63,6 +63,37 @@ local evReject = Instance.new("RemoteEvent")
 evReject.Name = "PlacementRejected"
 evReject.Parent = ReplicatedStorage
 
+local function getModel(modelName)
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if not assets then
+        warn("[InventoryRemotes] Assets folder missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local models = assets:FindFirstChild("Models")
+    if not models then
+        warn("[InventoryRemotes] Models folder missing in Assets")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local model = models:FindFirstChild(modelName)
+    if not model then
+        warn("[InventoryRemotes] Model " .. modelName .. " missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    return model:Clone()
+end
+
 evRequestPlace.OnServerEvent = function(player, uid, position)
     local data = PlayerManager.GetPlayerData(player)
     if data.heldItem ~= uid then
@@ -78,7 +109,7 @@ evRequestPlace.OnServerEvent = function(player, uid, position)
         evReject:FireClient(player)
         return
     end
-    local model = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    local model = getModel(cfg.model)
     model.CFrame = CFrame.new(position)
     model.Parent = workspace
     data.heldItem = nil

@@ -19,6 +19,37 @@ local heldModel
 local ghostModel
 local handsUpAnim
 
+local function getModel(modelName)
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if not assets then
+        warn("[HeldItemController] Assets folder missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local models = assets:FindFirstChild("Models")
+    if not models then
+        warn("[HeldItemController] Models folder missing in Assets")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    local model = models:FindFirstChild(modelName)
+    if not model then
+        warn("[HeldItemController] Model " .. modelName .. " missing")
+        local p = Instance.new("Part")
+        p.Name = modelName
+        p.Size = Vector3.new(1, 1, 1)
+        p.Anchored = true
+        return p
+    end
+    return model:Clone()
+end
+
 local plotBounds = {
     min = Vector3.new(-50, 0, -50),
     max = Vector3.new(50, 0, 50),
@@ -52,7 +83,7 @@ function HeldItemController.startHold(item)
         return
     end
 
-    local model = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    local model = getModel(cfg.model)
     local character = player.Character or player.CharacterAdded:Wait()
     local hrp = character:WaitForChild("HumanoidRootPart")
     local attach = hrp:FindFirstChild("HeldItemAttachment")
@@ -76,11 +107,16 @@ local function spawnGhost(position, cfg)
     if ghostModel then
         ghostModel:Destroy()
     end
-    ghostModel = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
-    for _, part in ipairs(ghostModel:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.Transparency = 0.5
-            part.CanCollide = false
+    ghostModel = getModel(cfg.model)
+    if ghostModel:IsA("BasePart") then
+        ghostModel.Transparency = 0.5
+        ghostModel.CanCollide = false
+    else
+        for _, part in ipairs(ghostModel:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Transparency = 0.5
+                part.CanCollide = false
+            end
         end
     end
     ghostModel.CFrame = CFrame.new(position)
