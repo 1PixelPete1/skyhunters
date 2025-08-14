@@ -220,6 +220,21 @@ local function runAetherTest()
     
     print("=== AETHER TEST COMPLETE ===\n")
 end
+-- Create static placement plane for item placement
+local function createPlacementArea()
+    local workspace = game:GetService("Workspace")
+
+    local plane = Instance.new("Part")
+    plane.Name = "PlacementArea"
+    plane.Size = Vector3.new(200, 1, 200)
+    plane.Position = Vector3.new(0, 0, 0)
+    plane.Anchored = true
+    plane.Material = Enum.Material.SmoothPlastic
+    plane.Color = Color3.new(0.8, 0.8, 0.8)
+    plane.Transparency = 0.5
+    plane.Parent = workspace
+end
+
 
 -- Create static placement plane for item placement
 local function createPlacementArea()
