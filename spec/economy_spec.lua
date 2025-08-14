@@ -6,6 +6,10 @@ if not time then
     end
 end
 
+if not Color3 then
+    Color3 = { fromRGB = function() return {} end }
+end
+
 local Economy = require("Economy")
 local Config = require("Config")
 
@@ -20,6 +24,7 @@ local function newPlayer()
             target = 20,
             decayRate = 0.08,
             purityBase = 0.55,
+            totalRate = 0,
         },
         timestamps = {},
     }
