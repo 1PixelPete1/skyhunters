@@ -20,6 +20,7 @@ local function newPlayer()
             target = 20,
             decayRate = 0.08,
             purityBase = 0.55,
+            totalRate = 0,
         },
         timestamps = {},
     }

@@ -6,6 +6,17 @@ if not ok then
     Config = require("Config")
 end
 
+local okAether, Aether = pcall(function()
+    if script and script.Parent then
+        return require(script.Parent:WaitForChild("Aether"))
+    else
+        return require("Aether")
+    end
+end)
+if not okAether then
+    Aether = require("Aether")
+end
+
 local MAX_DELTA = 1e9
 local RATE_WINDOW = 5
 local RATE_MAX = 10
@@ -63,9 +74,9 @@ function Economy.SellAether(player)
     if last and now - last < 0.5 then
         return 0
     end
-    local purityBase = aether.purityBase or 0
-    local purity = clamp(purityBase, 0.10, 1.00)
-    local gain = math.floor(current * purity * 8)
+    local stats = Aether.GetEffectiveStats(player)
+    local purity = clamp(stats.purity, 0.10, 1.00)
+    local gain = math.floor(current * purity * Config.SELL_MULT)
     if gain <= 0 then
         return 0
     end
