@@ -11,6 +11,7 @@ Config.ReasonWhitelist = {
 Config.SELL_MULT = 8
 Config.DEFAULT_CATEGORY = "producers"
 
+
 Config.ItemConfig = {
     { id = "shiny_pebble", displayName = "Shiny Pebble", sell_value = 10, stackable = true },
     { id = "copper_nugget", displayName = "Copper Nugget", sell_value = 20, stackable = true },

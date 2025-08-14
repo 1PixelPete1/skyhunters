@@ -1,3 +1,4 @@
+
 local okRS, ReplicatedStorage = pcall(function()
     return game:GetService("ReplicatedStorage")
 end)
@@ -38,7 +39,6 @@ end
 
 local InventoryBridge = {}
 
--- Existing hooks used by Aether for derived stats
 function InventoryBridge.GetDerivedAetherModifiers(player)
     return {
         target_add = 0,
@@ -101,6 +101,7 @@ end
 function InventoryBridge.GetDeltaSince(player, token)
     return {}, nil
 end
+
 
 return InventoryBridge
 
