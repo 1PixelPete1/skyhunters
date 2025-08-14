@@ -16,7 +16,7 @@ local function createNewPlayerData(player)
             decayRate = 0.08,
             purityBase = 0.55,
             totalRate = 0,
-            lastSettleTs = os.time(),
+            lastSettleTs = time(),
         },
         producers = {},
         timestamps = {},

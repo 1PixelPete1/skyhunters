@@ -5,6 +5,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 ReplicatedStorage:WaitForChild("GetPlayerData")
+local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "EconomyDebug"
@@ -35,6 +36,12 @@ crumbsLabel.TextColor3 = Color3.new(1, 1, 1)
 crumbsLabel.Font = Enum.Font.SourceSans
 crumbsLabel.TextSize = 14
 crumbsLabel.Parent = frame
+
+aetherSnapshot.OnClientEvent:Connect(function(payload)
+    if payload.crumbs ~= nil then
+        crumbsLabel.Text = "₡" .. payload.crumbs
+    end
+end)
 
 local function createButton(text, position, callback)
     local button = Instance.new("TextButton")

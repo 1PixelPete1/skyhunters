@@ -72,6 +72,7 @@ function Economy.SellAether(player)
     local success = Economy.ApplyCrumbsDelta(player, gain, "sell_aether")
     if success then
         aether.current = 0
+        aether.lastSettleTs = time()
         lastAetherSell[player] = now
         return gain
     end
