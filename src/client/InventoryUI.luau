@@ -21,6 +21,7 @@ local nextCursor
 local items = {}
 local cells = {}
 local cellPool = {}
+local gridContainer
 
 local function createCell()
     local frame = Instance.new("ImageButton")
@@ -29,37 +30,43 @@ local function createCell()
     frame.BorderSizePixel = 0
     local stroke = Instance.new("UIStroke")
     stroke.Parent = frame
+    frame.MouseButton1Click:Connect(function()
+        local uid = frame:GetAttribute("uid")
+        if not uid then
+            return
+        end
+        local result = RF_Equip:InvokeServer(uid)
+        if result and result.ok then
+            -- preview stub
+        end
+    end)
     return frame
 end
 
-local function getCell(index)
-    if cellPool[index] then
-        return cellPool[index]
+local function getCell()
+    local cell = table.remove(cellPool)
+    if cell then
+        return cell
     end
-    local cell = createCell()
-    cellPool[index] = cell
-    return cell
+    return createCell()
 end
 
-local function clearCells(grid)
+local function clearCells()
     for _, cell in pairs(cells) do
         cell.Parent = nil
+        cell:SetAttribute("uid", nil)
+        table.insert(cellPool, cell)
     end
     table.clear(cells)
 end
 
-local function renderGrid(grid)
-    clearCells(grid)
-    for i, item in ipairs(items) do
-        local cell = getCell(i)
+local function renderGrid()
+    clearCells()
+    for _, item in ipairs(items) do
+        local cell = getCell()
         cell.Image = item.icon
-        cell.Parent = grid
-        cell.MouseButton1Click:Connect(function()
-            local result = RF_Equip:InvokeServer(item.uid)
-            if result and result.ok then
-                -- preview stub
-            end
-        end)
+        cell:SetAttribute("uid", item.uid)
+        cell.Parent = gridContainer
         table.insert(cells, cell)
     end
 end
@@ -76,9 +83,9 @@ local function fetchPage(reset)
     nextCursor = newCursor
 end
 
-local function refresh(grid)
+local function refresh()
     fetchPage(true)
-    renderGrid(grid)
+    renderGrid()
 end
 
 function InventoryUI.Init()
@@ -123,7 +130,7 @@ function InventoryUI.Init()
         button.BackgroundColor3 = cat.color
         button.MouseButton1Click:Connect(function()
             currentCategory = cat.id
-            refresh(grid)
+            refresh()
         end)
         button.Parent = categoriesColumn
     end
@@ -147,12 +154,20 @@ function InventoryUI.Init()
     grid.Size = UDim2.new(1, -InventoryConfig.UI.GridPaddingPx * 2, 1, -40)
     grid.BackgroundTransparency = 1
     grid.CanvasSize = UDim2.new()
+    grid.AutomaticCanvasSize = Enum.AutomaticSize.Y
     grid.Parent = listPanel
+
+    gridContainer = Instance.new("Frame")
+    gridContainer.Name = "Container"
+    gridContainer.BackgroundTransparency = 1
+    gridContainer.Size = UDim2.new(1, 0, 0, 0)
+    gridContainer.AutomaticSize = Enum.AutomaticSize.Y
+    gridContainer.Parent = grid
 
     local gridLayout = Instance.new("UIGridLayout")
     gridLayout.CellSize = UDim2.new(0, InventoryConfig.UI.GridCellMinPx, 0, InventoryConfig.UI.GridCellMinPx)
     gridLayout.CellPadding = UDim2.new(0, InventoryConfig.UI.GridPaddingPx, 0, InventoryConfig.UI.GridPaddingPx)
-    gridLayout.Parent = grid
+    gridLayout.Parent = gridContainer
 
     local lastText
     search:GetPropertyChangedSignal("Text"):Connect(function()
@@ -163,10 +178,11 @@ function InventoryUI.Init()
         task.delay(debounceMs / 1000, function()
             if search.Text == lastText then
                 currentSearch = search.Text
-                refresh(grid)
+                refresh()
             end
         end)
     end)
+
 
     local open = false
     local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -185,6 +201,7 @@ function InventoryUI.Init()
     end)
 
     refresh(grid)
+
 end
 
 return InventoryUI
