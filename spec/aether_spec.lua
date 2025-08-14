@@ -62,5 +62,13 @@ assert(snap1.atCap == true, "atCap should be true on first snapshot")
 local snap2 = Aether.Snapshot(p4)
 assert(not snap2.atCap, "atCap should clear after first snapshot")
 
+-- Legacy timestamp migration
+local p5 = newPlayer()
+p5.aether.lastSettleTs = 1e9
+Aether.Settle(p5, 2)
+assert(p5.aether.lastSettleTs == 2, "lastSettleTs should reset to now")
+Aether.Settle(p5, 5)
+assert(p5.aether.current > 0, "should accumulate after timestamp reset")
+
 print("Aether tests passed!")
 

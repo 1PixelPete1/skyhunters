@@ -54,7 +54,11 @@ local function migrate(data)
     a.decayRate = a.decayRate or 0.08
     a.purityBase = a.purityBase or 0.55
     a.totalRate = a.totalRate or 0
-    a.lastSettleTs = a.lastSettleTs or time()
+        local now = time()
+    a.lastSettleTs = a.lastSettleTs or now
+    if a.lastSettleTs > now then
+        a.lastSettleTs = now
+    end
     data.producers = data.producers or {}
     data.timestamps = data.timestamps or {}
     return data

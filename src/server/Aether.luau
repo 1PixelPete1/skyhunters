@@ -40,6 +40,10 @@ function Aether.Settle(player, now)
     now = now or time()
     local aether = player.aether
     local dt = now - aether.lastSettleTs
+    if dt < 0 then
+        aether.lastSettleTs = now
+        return
+    end
 
     if dt <= 1e-4 then
         return
