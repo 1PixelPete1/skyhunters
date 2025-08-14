@@ -53,6 +53,7 @@ game:BindToClose(function()
     SaveScheduler.flush()
 end)
 
+
 local function sendSnapshot(player, data)
     local payload = {
         aether = Aether.Snapshot(data),
