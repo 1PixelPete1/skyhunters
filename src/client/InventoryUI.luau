@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
 
@@ -86,9 +87,23 @@ function InventoryUI.Init()
     screenGui.Name = "InventoryGUI"
     screenGui.Parent = playerGui
 
+    local toggleButton = Instance.new("ImageButton")
+    toggleButton.Name = "InventoryToggle"
+    toggleButton.Size = UDim2.new(0, 40, 0, 40)
+    toggleButton.Position = UDim2.new(1, -45, 0.5, -20)
+    toggleButton.AnchorPoint = Vector2.new(1, 0.5)
+    toggleButton.BackgroundTransparency = 1
+    toggleButton.Image = "rbxassetid://0"
+    toggleButton.ZIndex = 2
+    toggleButton.Parent = screenGui
+
     local root = Instance.new("Frame")
     root.Size = UDim2.new(1, 0, 1, 0)
     root.BackgroundTransparency = 1
+    root.AnchorPoint = Vector2.new(1, 0)
+    root.Position = UDim2.fromScale(2, 0)
+    root.Visible = false
+    root.ZIndex = 0
     root.Parent = screenGui
 
     local categoriesColumn = Instance.new("Frame")
@@ -151,6 +166,22 @@ function InventoryUI.Init()
                 refresh(grid)
             end
         end)
+    end)
+
+    local open = false
+    local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    toggleButton.MouseButton1Click:Connect(function()
+        open = not open
+        if open then
+            root.Visible = true
+            TweenService:Create(root, tweenInfo, {Position = UDim2.fromScale(1, 0)}):Play()
+        else
+            local tween = TweenService:Create(root, tweenInfo, {Position = UDim2.fromScale(2, 0)})
+            tween.Completed:Connect(function()
+                root.Visible = false
+            end)
+            tween:Play()
+        end
     end)
 
     refresh(grid)
