@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
 local Aether = require(script.Parent:WaitForChild("Aether"))
+local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
 
 local DebugCommands = {}
 local aetherSnapshot

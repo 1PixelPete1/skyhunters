@@ -268,17 +268,18 @@ ui.sellButton.MouseButton1Click:Connect(function()
 end)
 
 -- Handle server snapshots
-aetherSnapshot.OnClientEvent:Connect(function(serverData)
-	print("Received aether snapshot:", serverData.current, "/", serverData.target, "rate:", serverData.totalRate)
-	aetherState.current = serverData.current
-	aetherState.target = serverData.target
-	aetherState.totalRate = serverData.totalRate
-	aetherState.decayRate = serverData.decayRate
-	aetherState.purityBase = serverData.purityBase
+aetherSnapshot.OnClientEvent:Connect(function(payload)
+        local serverData = payload.aether or payload
+        print("Received aether snapshot:", serverData.current, "/", serverData.target, "rate:", serverData.totalRate)
+        aetherState.current = serverData.current
+        aetherState.target = serverData.target
+        aetherState.totalRate = serverData.totalRate
+        aetherState.decayRate = serverData.decayRate
+        aetherState.purityBase = serverData.purityBase
         aetherState.lastUpdateTime = serverData.serverNow
         aetherState.serverSynced = true
-	
-	updateUI()
+
+        updateUI()
 end)
 
 -- Main update loop for client-side prediction
