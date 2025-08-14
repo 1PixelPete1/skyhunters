@@ -3,16 +3,12 @@ local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local Aether = require(script.Parent:WaitForChild("Aether"))
 
 local function loadShared(name)
-    if script and script.Parent and script.Parent.Parent then
-        local shared = script.Parent.Parent:FindFirstChild("shared")
-        if shared then
-            local ok, mod = pcall(function()
-                return require(shared:WaitForChild(name))
-            end)
-            if ok then
-                return mod
-            end
-        end
+    local ok, ReplicatedStorage = pcall(function()
+        return game:GetService("ReplicatedStorage")
+    end)
+    if ok and ReplicatedStorage then
+        local Shared = ReplicatedStorage:WaitForChild("Shared")
+        return require(Shared:WaitForChild(name))
     end
     return require(name)
 end
@@ -52,7 +48,7 @@ function PlacementService.Place(player, typeId, plotId, worldCFrame)
     local record = {
         typeId = typeId,
         plotId = plotId,
-        local = toLocal(worldCFrame),
+        ["local"] = toLocal(worldCFrame),
         active = true,
     }
     data.placed[uid] = record
