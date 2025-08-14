@@ -43,6 +43,7 @@ function InventoryService.GetPage(player, category, search, cursor)
         local cfg = ItemsConfig.Types[typeId]
         if cfg and cfg.category == category then
             table.insert(items, {
+                uid = typeId,
                 typeId = typeId,
                 displayName = cfg.displayName,
                 count = count,

@@ -127,6 +127,17 @@ createButton("Spawn Producer", UDim2.new(0, 10, 0, 280), function()
     end
 end)
 
+createButton("Give Seed", UDim2.new(0, 10, 0, 320), function()
+    local success = pcall(function()
+        return ReplicatedStorage.DebugGiveSeed:InvokeServer()
+    end)
+    if success then
+        print("Gave seed item")
+    else
+        print("Failed to give seed item")
+    end
+end)
+
 -- Load AetherClient
 print("Loading AetherClient...")
 local success, AetherClient = pcall(function()

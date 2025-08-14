@@ -23,6 +23,10 @@ local debugAddCrumbs = Instance.new("RemoteFunction")
 debugAddCrumbs.Name = "DebugAddCrumbs"
 debugAddCrumbs.Parent = ReplicatedStorage
 
+local debugGiveSeed = Instance.new("RemoteFunction")
+debugGiveSeed.Name = "DebugGiveSeed"
+debugGiveSeed.Parent = ReplicatedStorage
+
 local spawnProducer = Instance.new("RemoteFunction")
 spawnProducer.Name = "SpawnProducer"
 spawnProducer.Parent = ReplicatedStorage
@@ -45,6 +49,7 @@ local Aether = require(script:WaitForChild("Aether"))
 local PlayerManager = require(script:WaitForChild("PlayerManager"))
 local DebugCommands = require(script:WaitForChild("DebugCommands"))
 local InventoryBridge = require(script:WaitForChild("InventoryBridge"))
+local InventoryService = require(script:WaitForChild("InventoryService"))
 local InventoryRemotes = require(script:WaitForChild("InventoryRemotes"))
 
 local SaveScheduler = require(script:WaitForChild("SaveScheduler"))
@@ -111,6 +116,13 @@ debugAddCrumbs.OnServerInvoke = function(player, amount)
     local success = Economy.ApplyCrumbsDelta(data, amount, "grant")
     PlayerManager.SavePlayerData(player, data)
     return success, data.crumbs
+end
+
+debugGiveSeed.OnServerInvoke = function(player)
+    InventoryService.Add(player, "prod_cube_basic", 1)
+    local data = PlayerManager.GetPlayerData(player)
+    PlayerManager.SavePlayerData(player, data)
+    return true
 end
 
 -- Aether RequestSell handler

@@ -4,11 +4,18 @@ local BurstService = require(script.Parent:WaitForChild("BurstService"))
 local PlacementService = require(script.Parent:WaitForChild("PlacementService"))
 
 local rfFetch = Instance.new("RemoteFunction")
-rfFetch.Name = "RF_InventoryFetch"
+rfFetch.Name = "Inventory_FetchPage"
 rfFetch.Parent = ReplicatedStorage
 rfFetch.OnServerInvoke = function(player, category, search, cursor)
     local result = InventoryService.GetPage(player, category, search, cursor)
     return result.items, result.nextCursor, result.total
+end
+
+local rfEquip = Instance.new("RemoteFunction")
+rfEquip.Name = "Inventory_Equip"
+rfEquip.Parent = ReplicatedStorage
+rfEquip.OnServerInvoke = function(player, uid)
+    return { ok = false }
 end
 
 local rfBurst = Instance.new("RemoteFunction")
@@ -33,7 +40,8 @@ rfRemove.OnServerInvoke = function(player, uid)
 end
 
 return {
-    InventoryFetch = rfFetch,
+    FetchPage = rfFetch,
+    Equip = rfEquip,
     UseBurst = rfBurst,
     PlaceItem = rfPlace,
     RemovePlaced = rfRemove,
