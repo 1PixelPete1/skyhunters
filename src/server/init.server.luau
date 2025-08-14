@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 print("Loading Economy...")
 local Economy = require(script:WaitForChild("Economy"))
@@ -39,10 +40,6 @@ local aetherSnapshot = Instance.new("RemoteEvent")
 aetherSnapshot.Name = "Aether_Snapshot"
 aetherSnapshot.Parent = ReplicatedStorage
 
-local aetherChanged = Instance.new("RemoteEvent")
-aetherChanged.Name = "Aether_Changed"
-aetherChanged.Parent = ReplicatedStorage
-
 local aetherRequestSell = Instance.new("RemoteFunction")
 aetherRequestSell.Name = "Aether_RequestSell"
 aetherRequestSell.Parent = ReplicatedStorage
@@ -51,14 +48,17 @@ local aetherReachedCapacity = Instance.new("RemoteEvent")
 aetherReachedCapacity.Name = "Aether_ReachedCapacity"
 aetherReachedCapacity.Parent = ReplicatedStorage
 
+local function sendSnapshot(player, data)
+    aetherSnapshot:FireClient(player, Aether.Payload(data))
+end
+
 getPlayerData.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
-    
+
     -- Send aether snapshot when player gets data
-    local aetherData = Aether.Snapshot(data)
-    print("Sending aether snapshot to", player.Name, "- Current:", aetherData.current, "Target:", aetherData.target)
-    aetherSnapshot:FireClient(player, aetherData)
-    
+    print("Sending aether snapshot to", player.Name)
+    sendSnapshot(player, data)
+
     return data
 end
 
@@ -66,11 +66,7 @@ sellAether.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
     local gain = Economy.SellAether(data)
     PlayerManager.SavePlayerData(player, data)
-    
-    -- Fire aether changed event
-    local aetherData = Aether.Snapshot(data)
-    aetherChanged:FireClient(player, aetherData)
-    
+    sendSnapshot(player, data)
     return gain, data.crumbs
 end
 
@@ -78,6 +74,7 @@ sellItem.OnServerInvoke = function(player, itemId, qty)
     local data = PlayerManager.GetPlayerData(player)
     local gain = Economy.SellItem(data, itemId, qty)
     PlayerManager.SavePlayerData(player, data)
+    sendSnapshot(player, data)
     return gain, data.crumbs
 end
 
@@ -85,14 +82,13 @@ purchaseUpgrade.OnServerInvoke = function(player, upgradeId)
     local data = PlayerManager.GetPlayerData(player)
     local success = Economy.PurchaseUpgrade(data, upgradeId)
     PlayerManager.SavePlayerData(player, data)
-    
-    -- Apply aether upgrade and fire changed event if successful
+
+    -- Apply aether upgrade and send snapshot if successful
     if success then
         Aether.ApplyUpgrade(data, upgradeId)
-        local aetherData = Aether.Snapshot(data)
-        aetherChanged:FireClient(player, aetherData)
+        sendSnapshot(player, data)
     end
-    
+
     return success, data.crumbs
 end
 
@@ -100,6 +96,7 @@ debugAddCrumbs.OnServerInvoke = function(player, amount)
     local data = PlayerManager.GetPlayerData(player)
     local success = Economy.ApplyCrumbsDelta(data, amount, "grant")
     PlayerManager.SavePlayerData(player, data)
+    sendSnapshot(player, data)
     return success, data.crumbs
 end
 
@@ -108,11 +105,7 @@ aetherRequestSell.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
     local gain = Aether.RequestSell(data)
     PlayerManager.SavePlayerData(player, data)
-    
-    -- Fire aether changed event after sell
-    local aetherData = Aether.Snapshot(data)
-    aetherChanged:FireClient(player, aetherData)
-    
+    sendSnapshot(player, data)
     return gain, data.crumbs
 end
 
@@ -136,12 +129,14 @@ spawnProducer.OnServerInvoke = function(player)
     -- Add producer to aether system
     local uid = Aether.AddProducer(data, "Spawned", 0.5)
     PlayerManager.SavePlayerData(player, data)
+    sendSnapshot(player, data)
     
     -- Make it clickable to remove
     clickDetector.MouseClick:Connect(function(clickingPlayer)
         if clickingPlayer == player then
             Aether.RemoveProducer(data, uid)
             PlayerManager.SavePlayerData(player, data)
+            sendSnapshot(player, data)
             producer:Destroy()
             print("Removed producer", uid)
         end
@@ -168,7 +163,7 @@ local function runAetherTest()
             decayRate = 0.08,
             purityBase = 0.55,
             totalRate = 0,
-            lastSettleTs = os.time(),
+            lastSettleTs = time(),
         },
         producers = {},
         timestamps = {},
@@ -188,7 +183,7 @@ local function runAetherTest()
     
     -- Test 3: Wait and settle (simulate 5 seconds)
     print("3. Simulating 5 seconds of growth...")
-    testPlayer.aether.lastSettleTs = os.time() - 5
+    testPlayer.aether.lastSettleTs = time() - 5
     Aether.Settle(testPlayer)
     print("   After 5s - Current:", testPlayer.aether.current)
     
@@ -234,6 +229,56 @@ local function createAetherCanister()
 end
 
 createAetherCanister()
+
+-- Create lever for selling aether
+local function createSellLever()
+    local workspace = game:GetService("Workspace")
+
+    local model = Instance.new("Model")
+    model.Name = "SellLever"
+    model.Parent = workspace
+
+    local base = Instance.new("Part")
+    base.Name = "Base"
+    base.Size = Vector3.new(2, 1, 2)
+    base.Anchored = true
+    base.Position = Vector3.new(6, 0.5, 0)
+    base.Color = Color3.new(0.4, 0.4, 0.4)
+    base.Parent = model
+
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Size = Vector3.new(0.5, 3, 0.5)
+    handle.Anchored = true
+    handle.Position = Vector3.new(6, 2, 0)
+    handle.Color = Color3.new(0.8, 0.2, 0.2)
+    handle.Parent = model
+
+    local prompt = Instance.new("ProximityPrompt")
+    prompt.ActionText = "Sell Aether"
+    prompt.ObjectText = "Lever"
+    prompt.HoldDuration = 1
+    prompt.Parent = handle
+
+    local initialCF = handle.CFrame
+    prompt.Triggered:Connect(function(player)
+        local downTween = TweenService:Create(handle, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {CFrame = initialCF * CFrame.Angles(0, 0, math.rad(-45))})
+        local upTween = TweenService:Create(handle, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {CFrame = initialCF})
+        downTween:Play()
+        downTween.Completed:Connect(function()
+            upTween:Play()
+        end)
+
+        local data = PlayerManager.GetPlayerData(player)
+        Aether.RequestSell(data)
+        PlayerManager.SavePlayerData(player, data)
+        sendSnapshot(player, data)
+    end)
+
+    print("Created sell lever at (6,0,0)")
+end
+
+createSellLever()
 
 -- Run test 2 seconds after server starts
 wait(2)

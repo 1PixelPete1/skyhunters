@@ -1,5 +1,11 @@
 package.path = "src/server/?.luau;src/server/?/init.luau;src/shared/?.luau;src/shared/?/init.luau;" .. package.path
 
+if not time then
+    function time()
+        return os.clock()
+    end
+end
+
 local Aether = require("Aether")
 local Config = require("Config")
 
@@ -16,7 +22,7 @@ local function newPlayer()
             decayRate = 0.08,
             purityBase = 0.55,
             totalRate = 0,
-            lastSettleTs = os.time(),
+            lastSettleTs = time(),
         },
         producers = {},
         timestamps = {},
@@ -26,7 +32,7 @@ end
 -- Test 1: Offline settle - growth to target
 local player1 = newPlayer()
 player1.aether.totalRate = 1
-player1.aether.lastSettleTs = os.time() - 25
+player1.aether.lastSettleTs = time() - 25
 Aether.Settle(player1)
 assert(math.abs(player1.aether.current - 20) < 0.01, "Should reach target after 25s")
 
@@ -35,7 +41,7 @@ local player2 = newPlayer()
 player2.aether.current = 50
 player2.aether.target = 20
 player2.aether.decayRate = 0.08
-player2.aether.lastSettleTs = os.time() - 5
+player2.aether.lastSettleTs = time() - 5
 Aether.Settle(player2)
 local expected = 20 + 30 * math.exp(-0.08 * 5)
 assert(math.abs(player2.aether.current - expected) < 0.01, "Overfill decay incorrect")

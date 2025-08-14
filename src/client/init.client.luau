@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
 ReplicatedStorage:WaitForChild("GetPlayerData")
 
 local screenGui = Instance.new("ScreenGui")
@@ -35,6 +36,10 @@ crumbsLabel.TextColor3 = Color3.new(1, 1, 1)
 crumbsLabel.Font = Enum.Font.SourceSans
 crumbsLabel.TextSize = 14
 crumbsLabel.Parent = frame
+
+aetherSnapshot.OnClientEvent:Connect(function(payload)
+    crumbsLabel.Text = "₡" .. (payload.crumbs or 0)
+end)
 
 local function createButton(text, position, callback)
     local button = Instance.new("TextButton")

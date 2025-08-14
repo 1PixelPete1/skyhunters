@@ -1,15 +1,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- Wait for RemoteEvents
 local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
-local aetherChanged = ReplicatedStorage:WaitForChild("Aether_Changed")
-local aetherRequestSell = ReplicatedStorage:WaitForChild("Aether_RequestSell")
 
 local AetherClient = {}
 
@@ -17,22 +14,12 @@ local AetherClient = {}
 local aetherState = {
 	current = 0,
 	target = 20,
-	totalRate = 0,
-	decayRate = 0.08,
-	purityBase = 0.55,
-	lastUpdateTime = tick(),
-	serverSynced = false
+        totalRate = 0,
+        decayRate = 0.08,
+        purityBase = 0.55,
+        lastUpdateTime = time(),
+        serverSynced = false
 }
-
-local function clamp(value, min, max)
-	if value < min then
-		return min
-	end
-	if value > max then
-		return max
-	end
-	return value
-end
 
 -- Client-side settle math (mirrors server logic)
 local function settleAether(dt)
@@ -50,14 +37,8 @@ local function settleAether(dt)
 		current = math.min(aetherState.target, current + aetherState.totalRate * dt)
 	end
 	
-	aetherState.current = current
-	aetherState.lastUpdateTime = tick()
-end
-
--- Calculate projected crumbs
-local function getProjectedCrumbs()
-	local purity = clamp(aetherState.purityBase, 0.10, 1.00)
-	return math.floor(aetherState.current * purity * 8)
+        aetherState.current = current
+        aetherState.lastUpdateTime = time()
 end
 
 -- UI Creation
@@ -163,52 +144,15 @@ local function createAetherGauge()
 	rateText.TextXAlignment = Enum.TextXAlignment.Left
 	rateText.Parent = frame
 	
-	-- Sell button
-	local sellButton = Instance.new("TextButton")
-	sellButton.Name = "SellButton"
-	sellButton.Size = UDim2.new(0, 60, 0, 20)
-	sellButton.Position = UDim2.new(1, -70, 0, 95)
-	sellButton.BackgroundColor3 = Color3.new(0.2, 0.6, 0.2)
-	sellButton.Text = "SELL"
-	sellButton.TextColor3 = Color3.new(1, 1, 1)
-	sellButton.Font = Enum.Font.SourceSansBold
-	sellButton.TextSize = 10
-	sellButton.Parent = frame
-	
-	-- Tooltip frame (initially hidden)
-	local tooltip = Instance.new("Frame")
-	tooltip.Name = "Tooltip"
-	tooltip.Size = UDim2.new(0, 100, 0, 25)
-	tooltip.Position = UDim2.new(0, -105, 0, 95)
-	tooltip.BackgroundColor3 = Color3.new(0, 0, 0)
-	tooltip.BackgroundTransparency = 0.2
-	tooltip.BorderSizePixel = 1
-	tooltip.BorderColor3 = Color3.new(0.5, 0.5, 0.5)
-	tooltip.Visible = false
-	tooltip.Parent = sellButton
-	
-	local tooltipText = Instance.new("TextLabel")
-	tooltipText.Name = "Text"
-	tooltipText.Size = UDim2.new(1, 0, 1, 0)
-	tooltipText.BackgroundTransparency = 1
-	tooltipText.Text = "₡0"
-	tooltipText.TextColor3 = Color3.new(1, 1, 1)
-	tooltipText.Font = Enum.Font.SourceSans
-	tooltipText.TextSize = 10
-	tooltipText.Parent = tooltip
-	
-	return {
-		frame = frame,
-		fillBar = fillBar,
-		overfillBar = overfillBar,
-		targetLine = targetLine,
-		currentText = currentText,
-		targetText = targetText,
-		rateText = rateText,
-		sellButton = sellButton,
-		tooltip = tooltip,
-		tooltipText = tooltipText
-	}
+        return {
+                frame = frame,
+                fillBar = fillBar,
+                overfillBar = overfillBar,
+                targetLine = targetLine,
+                currentText = currentText,
+                targetText = targetText,
+                rateText = rateText,
+        }
 end
 
 local ui = createAetherGauge()
@@ -239,64 +183,21 @@ local function updateUI()
 		ui.fillBar.BackgroundColor3 = Color3.new(0.3, 0.7, 1) -- Normal blue
 	end
 	
-	-- Update tooltip with projected crumbs
-	local projectedCrumbs = getProjectedCrumbs()
-	ui.tooltipText.Text = "₡" .. projectedCrumbs
 end
 
--- Tooltip hover events
-ui.sellButton.MouseEnter:Connect(function()
-	ui.tooltip.Visible = true
-end)
-
-ui.sellButton.MouseLeave:Connect(function()
-	ui.tooltip.Visible = false
-end)
-
--- Sell button functionality
-ui.sellButton.MouseButton1Click:Connect(function()
-	local success, gain = pcall(function()
-		return aetherRequestSell:InvokeServer()
-	end)
-	
-	if success and gain > 0 then
-		print("Sold aether for", gain, "crumbs")
-		aetherState.current = 0 -- Immediately update local state
-		updateUI()
-	else
-		print("Failed to sell aether")
-	end
-end)
-
 -- Handle server snapshots
-aetherSnapshot.OnClientEvent:Connect(function(serverData)
-	print("Received aether snapshot:", serverData.current, "/", serverData.target, "rate:", serverData.totalRate)
-	aetherState.current = serverData.current
-	aetherState.target = serverData.target
-	aetherState.totalRate = serverData.totalRate
-	aetherState.decayRate = serverData.decayRate
-	aetherState.purityBase = serverData.purityBase
-	aetherState.lastUpdateTime = tick()
-	aetherState.serverSynced = true
-	
-	updateUI()
-end)
+aetherSnapshot.OnClientEvent:Connect(function(payload)
+        local serverData = payload.aether or payload
+        print("Received aether snapshot:", serverData.current, "/", serverData.target, "rate:", serverData.totalRate)
+        aetherState.current = serverData.current
+        aetherState.target = serverData.target
+        aetherState.totalRate = serverData.totalRate
+        aetherState.decayRate = serverData.decayRate
+        aetherState.purityBase = serverData.purityBase
+        aetherState.lastUpdateTime = serverData.serverNow
+        aetherState.serverSynced = true
 
--- Handle server change events
-aetherChanged.OnClientEvent:Connect(function(changeData)
-	-- Apply delta changes from server
-	if changeData.currentDelta then
-		aetherState.current = aetherState.current + changeData.currentDelta
-	end
-	if changeData.targetDelta then
-		aetherState.target = aetherState.target + changeData.targetDelta
-	end
-	if changeData.totalRate ~= nil then
-		aetherState.totalRate = changeData.totalRate
-	end
-	
-	aetherState.lastUpdateTime = tick()
-	updateUI()
+        updateUI()
 end)
 
 -- Main update loop for client-side prediction
@@ -305,7 +206,7 @@ local function onHeartbeat()
 		return
 	end
 	
-	local now = tick()
+        local now = time()
 	local dt = now - aetherState.lastUpdateTime
 	
 	if dt > 0.01 then -- Update at most 100 times per second
@@ -317,11 +218,7 @@ end
 RunService.Heartbeat:Connect(onHeartbeat)
 
 AetherClient.GetCurrentAether = function()
-	return aetherState.current
-end
-
-AetherClient.GetProjectedCrumbs = function()
-	return getProjectedCrumbs()
+        return aetherState.current
 end
 
 return AetherClient
