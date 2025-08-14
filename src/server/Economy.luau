@@ -1,6 +1,6 @@
 local ok, Config = pcall(function()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    return require(ReplicatedStorage:WaitForChild("shared"):WaitForChild("Config"))
+    return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 end)
 if not ok then
     Config = require("Config")

@@ -1,0 +1,1508 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <Color3 name="Ambient">
+        <R>0</R>
+        <G>0</G>
+        <B>0</B>
+      </Color3>
+      <float name="Brightness">2</float>
+      <bool name="GlobalShadows">true</bool>
+      <bool name="Outlines">false</bool>
+      <token name="Technology">1</token>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="2">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[local Config = {}
+
+Config.ReasonWhitelist = {
+    sell_aether = true,
+    sell_item = true,
+    purchase = true,
+    refund = true,
+    grant = true,
+}
+
+Config.ItemConfig = {
+    { id = "shiny_pebble", displayName = "Shiny Pebble", sell_value = 10, stackable = true },
+    { id = "copper_nugget", displayName = "Copper Nugget", sell_value = 20, stackable = true },
+    { id = "silver_chunk", displayName = "Silver Chunk", sell_value = 50, stackable = true },
+    { id = "gold_ingot", displayName = "Gold Ingot", sell_value = 100, stackable = true },
+    { id = "polished_crystal", displayName = "Polished Crystal", sell_value = 150, stackable = true },
+}
+
+Config.ItemById = {}
+for _, item in ipairs(Config.ItemConfig) do
+    Config.ItemById[item.id] = item
+end
+
+Config.UpgradeConfig = {
+    { id = "target_plus10", affects = "target", value = 10, cost = 100 },
+    { id = "purity_plus005", affects = "purityBase", value = 0.05, cost = 200 },
+    { id = "decay_minus001", affects = "decayRate", value = -0.01, cost = 150 },
+}
+
+Config.UpgradeById = {}
+for _, up in ipairs(Config.UpgradeConfig) do
+    Config.UpgradeById[up.id] = up
+end
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">Hello</string>
+          <string name="Source">return function()
+	print("Hello, world!")
+end</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">RemoteEvents</string>
+          <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RemoteEvents = {}
+
+RemoteEvents.GetPlayerData = Instance.new("RemoteFunction")
+RemoteEvents.GetPlayerData.Name = "GetPlayerData"
+RemoteEvents.GetPlayerData.Parent = ReplicatedStorage
+
+RemoteEvents.SellAether = Instance.new("RemoteFunction")
+RemoteEvents.SellAether.Name = "SellAether"
+RemoteEvents.SellAether.Parent = ReplicatedStorage
+
+RemoteEvents.SellItem = Instance.new("RemoteFunction")
+RemoteEvents.SellItem.Name = "SellItem"
+RemoteEvents.SellItem.Parent = ReplicatedStorage
+
+RemoteEvents.PurchaseUpgrade = Instance.new("RemoteFunction")
+RemoteEvents.PurchaseUpgrade.Name = "PurchaseUpgrade"
+RemoteEvents.PurchaseUpgrade.Parent = ReplicatedStorage
+
+RemoteEvents.DebugAddCrumbs = Instance.new("RemoteFunction")
+RemoteEvents.DebugAddCrumbs.Name = "DebugAddCrumbs"
+RemoteEvents.DebugAddCrumbs.Parent = ReplicatedStorage
+
+return RemoteEvents
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="6">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="7">
+      <Properties>
+        <string name="Name">Server</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+print("Loading Economy...")
+local Economy = require(script:WaitForChild("Economy"))
+print("Loading Aether...")
+local Aether = require(script:WaitForChild("Aether"))
+print("Loading PlayerManager...")
+local PlayerManager = require(script:WaitForChild("PlayerManager"))
+print("Loading DebugCommands...")
+local DebugCommands = require(script:WaitForChild("DebugCommands"))
+print("All modules loaded!")
+
+local getPlayerData = Instance.new("RemoteFunction")
+getPlayerData.Name = "GetPlayerData"
+getPlayerData.Parent = ReplicatedStorage
+
+local sellAether = Instance.new("RemoteFunction")
+sellAether.Name = "SellAether"
+sellAether.Parent = ReplicatedStorage
+
+local sellItem = Instance.new("RemoteFunction")
+sellItem.Name = "SellItem"
+sellItem.Parent = ReplicatedStorage
+
+local purchaseUpgrade = Instance.new("RemoteFunction")
+purchaseUpgrade.Name = "PurchaseUpgrade"
+purchaseUpgrade.Parent = ReplicatedStorage
+
+local debugAddCrumbs = Instance.new("RemoteFunction")
+debugAddCrumbs.Name = "DebugAddCrumbs"
+debugAddCrumbs.Parent = ReplicatedStorage
+
+local spawnProducer = Instance.new("RemoteFunction")
+spawnProducer.Name = "SpawnProducer"
+spawnProducer.Parent = ReplicatedStorage
+
+-- Aether RemoteEvents and RemoteFunctions
+local aetherSnapshot = Instance.new("RemoteEvent")
+aetherSnapshot.Name = "Aether_Snapshot"
+aetherSnapshot.Parent = ReplicatedStorage
+
+local aetherChanged = Instance.new("RemoteEvent")
+aetherChanged.Name = "Aether_Changed"
+aetherChanged.Parent = ReplicatedStorage
+
+local aetherRequestSell = Instance.new("RemoteFunction")
+aetherRequestSell.Name = "Aether_RequestSell"
+aetherRequestSell.Parent = ReplicatedStorage
+
+local aetherReachedCapacity = Instance.new("RemoteEvent")
+aetherReachedCapacity.Name = "Aether_ReachedCapacity"
+aetherReachedCapacity.Parent = ReplicatedStorage
+
+getPlayerData.OnServerInvoke = function(player)
+    local data = PlayerManager.GetPlayerData(player)
+    
+    -- Send aether snapshot when player gets data
+    local aetherData = Aether.Snapshot(data)
+    print("Sending aether snapshot to", player.Name, "- Current:", aetherData.current, "Target:", aetherData.target)
+    aetherSnapshot:FireClient(player, aetherData)
+    
+    return data
+end
+
+sellAether.OnServerInvoke = function(player)
+    local data = PlayerManager.GetPlayerData(player)
+    local gain = Economy.SellAether(data)
+    PlayerManager.SavePlayerData(player, data)
+    
+    -- Fire aether changed event
+    local aetherData = Aether.Snapshot(data)
+    aetherChanged:FireClient(player, aetherData)
+    
+    return gain, data.crumbs
+end
+
+sellItem.OnServerInvoke = function(player, itemId, qty)
+    local data = PlayerManager.GetPlayerData(player)
+    local gain = Economy.SellItem(data, itemId, qty)
+    PlayerManager.SavePlayerData(player, data)
+    return gain, data.crumbs
+end
+
+purchaseUpgrade.OnServerInvoke = function(player, upgradeId)
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Economy.PurchaseUpgrade(data, upgradeId)
+    PlayerManager.SavePlayerData(player, data)
+    
+    -- Apply aether upgrade and fire changed event if successful
+    if success then
+        Aether.ApplyUpgrade(data, upgradeId)
+        local aetherData = Aether.Snapshot(data)
+        aetherChanged:FireClient(player, aetherData)
+    end
+    
+    return success, data.crumbs
+end
+
+debugAddCrumbs.OnServerInvoke = function(player, amount)
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Economy.ApplyCrumbsDelta(data, amount, "grant")
+    PlayerManager.SavePlayerData(player, data)
+    return success, data.crumbs
+end
+
+-- Aether RequestSell handler
+aetherRequestSell.OnServerInvoke = function(player)
+    local data = PlayerManager.GetPlayerData(player)
+    local gain = Aether.RequestSell(data)
+    PlayerManager.SavePlayerData(player, data)
+    
+    -- Fire aether changed event after sell
+    local aetherData = Aether.Snapshot(data)
+    aetherChanged:FireClient(player, aetherData)
+    
+    return gain, data.crumbs
+end
+
+spawnProducer.OnServerInvoke = function(player)
+    local workspace = game:GetService("Workspace")
+    local data = PlayerManager.GetPlayerData(player)
+    
+    -- Spawn a simple producer object
+    local producer = Instance.new("Part")
+    producer.Name = "Producer"
+    producer.Size = Vector3.new(2, 2, 2)
+    producer.Position = Vector3.new(math.random(-10, 10), 2, math.random(-10, 10))
+    producer.Color = Color3.new(0.2, 0.8, 0.3)
+    producer.Material = Enum.Material.Neon
+    producer.Parent = workspace
+    
+    -- Add ClickDetector
+    local clickDetector = Instance.new("ClickDetector")
+    clickDetector.Parent = producer
+    
+    -- Add producer to aether system
+    local uid = Aether.AddProducer(data, "Spawned", 0.5)
+    PlayerManager.SavePlayerData(player, data)
+    
+    -- Make it clickable to remove
+    clickDetector.MouseClick:Connect(function(clickingPlayer)
+        if clickingPlayer == player then
+            Aether.RemoveProducer(data, uid)
+            PlayerManager.SavePlayerData(player, data)
+            producer:Destroy()
+            print("Removed producer", uid)
+        end
+    end)
+    
+    print("Spawned producer", uid, "for", player.Name)
+    return true
+end
+
+-- Automatic Aether system test
+local function runAetherTest()
+    print("\n=== AETHER SYSTEM TEST ===")
+    
+    -- Create a test player data
+    local testPlayer = {
+        v = 1,
+        id = 12345,
+        crumbs = 0,
+        inventory = {},
+        upgrades = {},
+        aether = {
+            current = 0,
+            target = 20,
+            decayRate = 0.08,
+            purityBase = 0.55,
+            totalRate = 0,
+            lastSettleTs = os.time(),
+        },
+        producers = {},
+        timestamps = {},
+    }
+    
+    -- Test 1: Initialize aether system
+    print("1. Initializing aether system...")
+    Aether.Init(testPlayer)
+    print("   Current:", testPlayer.aether.current, "Target:", testPlayer.aether.target)
+    
+    -- Test 2: Add producers
+    print("2. Adding producers...")
+    local uid1 = Aether.AddProducer(testPlayer, "Basic", 1.0)
+    local uid2 = Aether.AddProducer(testPlayer, "Advanced", 2.0)
+    print("   Added producers:", uid1, uid2)
+    print("   Total rate:", testPlayer.aether.totalRate)
+    
+    -- Test 3: Wait and settle (simulate 5 seconds)
+    print("3. Simulating 5 seconds of growth...")
+    testPlayer.aether.lastSettleTs = os.time() - 5
+    Aether.Settle(testPlayer)
+    print("   After 5s - Current:", testPlayer.aether.current)
+    
+    -- Test 4: Burst aether
+    print("4. Adding burst aether...")
+    Aether.ApplyBurst(testPlayer, 30)
+    print("   After burst - Current:", testPlayer.aether.current)
+    
+    -- Test 5: Sell aether
+    print("5. Selling aether...")
+    local gain = Aether.RequestSell(testPlayer)
+    print("   Gain:", gain, "crumbs, Remaining aether:", testPlayer.aether.current)
+    
+    -- Test 6: List producers
+    print("6. Producer summary...")
+    local producers = Aether.ListProducers(testPlayer)
+    print("   Active producers:", #producers, "Total rate:", testPlayer.aether.totalRate)
+    
+    print("=== AETHER TEST COMPLETE ===\n")
+end
+
+-- Create physical aether canister at spawn
+local function createAetherCanister()
+    local workspace = game:GetService("Workspace")
+    
+    local canister = Instance.new("Part")
+    canister.Name = "AetherCanister"
+    canister.Size = Vector3.new(4, 6, 4)
+    canister.Position = Vector3.new(0, 3, 0)
+    canister.Anchored = true
+    canister.Shape = Enum.PartType.Cylinder
+    canister.Material = Enum.Material.Neon
+    canister.Color = Color3.new(0.3, 0.7, 1)
+    canister.Parent = workspace
+    
+    -- Add SurfaceGui for the gauge
+    local surfaceGui = Instance.new("SurfaceGui")
+    surfaceGui.Name = "AetherGauge"
+    surfaceGui.Face = Enum.NormalId.Front
+    surfaceGui.Parent = canister
+    
+    print("Created aether canister at spawn (0,0,0)")
+end
+
+createAetherCanister()
+
+-- Run test 2 seconds after server starts
+wait(2)
+runAetherTest()
+
+print("Economy server initialized!")
+print("Aether system tested automatically on startup.")
+]]></string>
+      </Properties>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
+          <string name="Name">Aether</string>
+          <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+local Aether = {}
+
+local function MakeUid()
+    return HttpService:GenerateGUID(false):sub(1, 8)
+end
+
+local function MakeDebugName(producerType, uid)
+    return producerType .. "-" .. uid:sub(1, 3)
+end
+
+local function CalcEffectiveRate(producer)
+    if not producer.active then
+        return 0
+    end
+    local baseWithAdd = math.max(0, producer.baseRate + (producer.addBonus or 0))
+    local multFactor = math.max(0, producer.multBonus or 1)
+    return baseWithAdd * multFactor
+end
+
+function Aether.Settle(player, now)
+    now = now or os.time()
+    local aether = player.aether
+    local dt = math.max(0, now - aether.lastSettleTs)
+    
+    if dt <= 0 then
+        return
+    end
+    
+    local current = aether.current
+    
+    if current >= aether.target then
+        local excess = current - aether.target
+        local decayed = excess * math.exp(-aether.decayRate * dt)
+        current = aether.target + decayed
+    else
+        current = math.min(aether.target, current + aether.totalRate * dt)
+    end
+    
+    aether.current = current
+    aether.lastSettleTs = now
+end
+
+function Aether.RebuildTotalRate(player)
+    local total = 0
+    for _, producer in pairs(player.producers or {}) do
+        total = total + CalcEffectiveRate(producer)
+    end
+    player.aether.totalRate = total
+    return total
+end
+
+function Aether.Init(player)
+    if not player.aether then
+        player.aether = {
+            current = 0,
+            target = 20,
+            decayRate = 0.08,
+            purityBase = 0.55,
+            totalRate = 0,
+            lastSettleTs = os.time(),
+        }
+    end
+    if not player.producers then
+        player.producers = {}
+    end
+    
+    Aether.RebuildTotalRate(player)
+    Aether.Settle(player)
+    
+    return Aether.Snapshot(player)
+end
+
+function Aether.AddProducer(player, producerType, baseRate, patchId)
+    Aether.Settle(player)
+    
+    baseRate = baseRate or (math.random() * 0.4 + 0.4)
+    local uid = MakeUid()
+    
+    local producer = {
+        uid = uid,
+        type = producerType,
+        debugName = MakeDebugName(producerType, uid),
+        patch = patchId,
+        baseRate = baseRate,
+        addBonus = 0,
+        multBonus = 1,
+        active = true,
+        tags = "",
+    }
+    
+    player.producers[uid] = producer
+    player.aether.totalRate = player.aether.totalRate + CalcEffectiveRate(producer)
+    
+    return uid, producer.debugName
+end
+
+function Aether.RemoveProducer(player, uid)
+    Aether.Settle(player)
+    
+    local producer = player.producers[uid]
+    if not producer then
+        return false
+    end
+    
+    player.aether.totalRate = player.aether.totalRate - CalcEffectiveRate(producer)
+    player.producers[uid] = nil
+    
+    return true
+end
+
+function Aether.SetProducerActive(player, uid, active)
+    Aether.Settle(player)
+    
+    local producer = player.producers[uid]
+    if not producer then
+        return false
+    end
+    
+    local oldRate = CalcEffectiveRate(producer)
+    producer.active = active
+    local newRate = CalcEffectiveRate(producer)
+    
+    player.aether.totalRate = player.aether.totalRate + (newRate - oldRate)
+    
+    return true
+end
+
+function Aether.SetProducerRate(player, uid, baseRate, addBonus, multBonus)
+    Aether.Settle(player)
+    
+    local producer = player.producers[uid]
+    if not producer then
+        return false
+    end
+    
+    local oldRate = CalcEffectiveRate(producer)
+    producer.baseRate = baseRate or producer.baseRate
+    producer.addBonus = addBonus or producer.addBonus
+    producer.multBonus = multBonus or producer.multBonus
+    local newRate = CalcEffectiveRate(producer)
+    
+    player.aether.totalRate = player.aether.totalRate + (newRate - oldRate)
+    
+    return true
+end
+
+function Aether.ApplyBurst(player, value)
+    Aether.Settle(player)
+    player.aether.current = player.aether.current + value
+end
+
+function Aether.RequestSell(player)
+    Aether.Settle(player)
+    local Economy = require(script.Parent:WaitForChild("Economy"))
+    return Economy.SellAether(player)
+end
+
+function Aether.ApplyUpgrade(player, upgradeId)
+    Aether.Settle(player)
+    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+    local upgrade = Config.UpgradeById[upgradeId]
+    
+    if not upgrade then
+        return false
+    end
+    
+    local aether = player.aether
+    if upgrade.affects == "target" then
+        aether.target = aether.target + upgrade.value
+    elseif upgrade.affects == "purityBase" then
+        aether.purityBase = aether.purityBase + upgrade.value
+    elseif upgrade.affects == "decayRate" then
+        aether.decayRate = aether.decayRate + upgrade.value
+    end
+    
+    return true
+end
+
+function Aether.Snapshot(player)
+    return {
+        current = player.aether.current,
+        target = player.aether.target,
+        totalRate = player.aether.totalRate,
+        decayRate = player.aether.decayRate,
+        purityBase = player.aether.purityBase,
+        serverNow = os.time(),
+    }
+end
+
+function Aether.ListProducers(player, filter)
+    local producers = {}
+    for uid, producer in pairs(player.producers or {}) do
+        if not filter or producer.type:find(filter) or producer.debugName:find(filter) then
+            table.insert(producers, {
+                uid = uid,
+                debugName = producer.debugName,
+                type = producer.type,
+                rate = CalcEffectiveRate(producer),
+                active = producer.active,
+            })
+        end
+    end
+    
+    table.sort(producers, function(a, b) return a.rate > b.rate end)
+    
+    return producers, player.aether.totalRate
+end
+
+return Aether
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">DebugCommands</string>
+          <string name="Source"><![CDATA[local Players = game:GetService("Players")
+local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
+local Economy = require(script.Parent:WaitForChild("Economy"))
+local Aether = require(script.Parent:WaitForChild("Aether"))
+
+local DebugCommands = {}
+
+function DebugCommands.GetPlayerMoney(playerName)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    print("Player", playerName, "has", data.crumbs, "crumbs")
+    return data.crumbs
+end
+
+function DebugCommands.SetPlayerMoney(playerName, amount)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    data.crumbs = amount
+    PlayerManager.SavePlayerData(player, data)
+    print("Set", playerName, "crumbs to", amount)
+    return true
+end
+
+function DebugCommands.AddPlayerMoney(playerName, amount)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Economy.ApplyCrumbsDelta(data, amount, "grant")
+    if success then
+        PlayerManager.SavePlayerData(player, data)
+        print("Added", amount, "crumbs to", playerName, "- New total:", data.crumbs)
+    else
+        print("Failed to add crumbs to", playerName)
+    end
+    return success
+end
+
+function DebugCommands.ListPlayers()
+    print("Active players:")
+    for _, player in pairs(Players:GetPlayers()) do
+        local data = PlayerManager.GetPlayerData(player)
+        print(" -", player.Name, "- Crumbs:", data.crumbs, "- Aether:", data.aether.current)
+    end
+end
+
+-- Producer management
+function DebugCommands.AddProducer(playerName, producerType, baseRate, patchId)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local uid, debugName = Aether.AddProducer(data, producerType, baseRate, patchId)
+    PlayerManager.SavePlayerData(player, data)
+    print("Added producer", debugName, "(UID:", uid .. ") to", playerName)
+    return uid, debugName
+end
+
+function DebugCommands.RemoveProducer(playerName, uid)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Aether.RemoveProducer(data, uid)
+    if success then
+        PlayerManager.SavePlayerData(player, data)
+        print("Removed producer", uid, "from", playerName)
+    else
+        print("Producer not found:", uid)
+    end
+    return success
+end
+
+function DebugCommands.SetProducerActive(playerName, uid, active)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Aether.SetProducerActive(data, uid, active)
+    if success then
+        PlayerManager.SavePlayerData(player, data)
+        print("Set producer", uid, "active to", active, "for", playerName)
+    else
+        print("Producer not found:", uid)
+    end
+    return success
+end
+
+function DebugCommands.SetProducerRate(playerName, uid, baseRate, addBonus, multBonus)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local success = Aether.SetProducerRate(data, uid, baseRate, addBonus, multBonus)
+    if success then
+        PlayerManager.SavePlayerData(player, data)
+        print("Updated producer", uid, "rates for", playerName)
+    else
+        print("Producer not found:", uid)
+    end
+    return success
+end
+
+function DebugCommands.ListProducers(playerName, filter)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local producers, totalRate = Aether.ListProducers(data, filter)
+    print("Producers for", playerName, "(Total rate:", totalRate .. "):")
+    for _, producer in pairs(producers) do
+        local status = producer.active and "active" or "inactive"
+        print(" -", producer.debugName, "(" .. producer.uid .. ")", "Type:", producer.type, "Rate:", producer.rate, "Status:", status)
+    end
+    return producers
+end
+
+function DebugCommands.GetProducer(playerName, uid)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    local producer = data.producers and data.producers[uid]
+    if not producer then
+        print("Producer not found:", uid)
+        return
+    end
+    print("Producer details for", uid, "(" .. producer.debugName .. "):")
+    print("  Type:", producer.type)
+    print("  Base rate:", producer.baseRate)
+    print("  Add bonus:", producer.addBonus or 0)
+    print("  Mult bonus:", producer.multBonus or 1)
+    print("  Active:", producer.active)
+    print("  Patch:", producer.patch or "none")
+    print("  Tags:", producer.tags or "none")
+    return producer
+end
+
+-- Aether parameters
+function DebugCommands.SetTarget(playerName, value)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    Aether.Settle(data)
+    data.aether.target = value
+    PlayerManager.SavePlayerData(player, data)
+    print("Set", playerName, "aether target to", value)
+    return true
+end
+
+function DebugCommands.SetDecay(playerName, value)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    Aether.Settle(data)
+    data.aether.decayRate = value
+    PlayerManager.SavePlayerData(player, data)
+    print("Set", playerName, "aether decay rate to", value)
+    return true
+end
+
+function DebugCommands.SetPurity(playerName, value)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    Aether.Settle(data)
+    data.aether.purityBase = value
+    PlayerManager.SavePlayerData(player, data)
+    print("Set", playerName, "aether purity base to", value)
+    return true
+end
+
+function DebugCommands.Burst(playerName, value)
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        print("Player not found:", playerName)
+        return false
+    end
+    local data = PlayerManager.GetPlayerData(player)
+    Aether.ApplyBurst(data, value)
+    PlayerManager.SavePlayerData(player, data)
+    print("Added", value, "aether burst to", playerName, "- New total:", data.aether.current)
+    return true
+end
+
+return DebugCommands
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">Economy</string>
+          <string name="Source"><![CDATA[local ok, Config = pcall(function()
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+end)
+if not ok then
+    Config = require("Config")
+end
+
+local MAX_DELTA = 1e9
+local RATE_WINDOW = 5
+local RATE_MAX = 10
+
+local rateLimits = {}
+local lastAetherSell = {}
+
+local function clamp(value, min, max)
+    if value < min then
+        return min
+    end
+    if value > max then
+        return max
+    end
+    return value
+end
+
+local Economy = {}
+
+function Economy.ApplyCrumbsDelta(player, delta, reason)
+    if not Config.ReasonWhitelist[reason] then
+        return false
+    end
+    if math.abs(delta) > MAX_DELTA then
+        return false
+    end
+    local now = os.clock()
+    local bucket = rateLimits[player] or {}
+    local newBucket = {}
+    for _, t in ipairs(bucket) do
+        if now - t < RATE_WINDOW then
+            table.insert(newBucket, t)
+        end
+    end
+    if #newBucket >= RATE_MAX then
+        rateLimits[player] = newBucket
+        return false
+    end
+    table.insert(newBucket, now)
+    rateLimits[player] = newBucket
+
+    player.crumbs = (player.crumbs or 0) + delta
+    print("ApplyCrumbsDelta", player.id or "unknown", delta, reason)
+    return true
+end
+
+function Economy.SellAether(player)
+    local aether = player.aether or {}
+    local current = aether.current or 0
+    if current <= 0 then
+        return 0
+    end
+    local now = os.clock()
+    local last = lastAetherSell[player]
+    if last and now - last < 0.5 then
+        return 0
+    end
+    local purityBase = aether.purityBase or 0
+    local purity = clamp(purityBase, 0.10, 1.00)
+    local gain = math.floor(current * purity * 8)
+    if gain <= 0 then
+        return 0
+    end
+    local success = Economy.ApplyCrumbsDelta(player, gain, "sell_aether")
+    if success then
+        aether.current = 0
+        lastAetherSell[player] = now
+        return gain
+    end
+    return 0
+end
+
+function Economy.SellItem(player, itemId, qty)
+    if qty <= 0 then
+        return 0
+    end
+    local item = Config.ItemById[itemId]
+    if not item then
+        return 0
+    end
+    local inv = player.inventory or {}
+    local have = inv[itemId] or 0
+    if have < qty then
+        return 0
+    end
+    local gain = item.sell_value * qty
+    inv[itemId] = have - qty
+    local success = Economy.ApplyCrumbsDelta(player, gain, "sell_item")
+    if not success then
+        inv[itemId] = have
+        return 0
+    end
+    return gain
+end
+
+function Economy.PurchaseUpgrade(player, upgradeId)
+    local upgrade = Config.UpgradeById[upgradeId]
+    if not upgrade then
+        return false
+    end
+    local prereq = upgrade.prereq
+    if prereq and not player.upgrades[prereq] then
+        return false
+    end
+    if player.upgrades[upgradeId] then
+        return false
+    end
+    local cost = upgrade.cost
+    if player.crumbs < cost then
+        return false
+    end
+    local ok = Economy.ApplyCrumbsDelta(player, -cost, "purchase")
+    if not ok then
+        return false
+    end
+    local aether = player.aether
+    if upgrade.affects == "target" then
+        aether.target = (aether.target or 0) + upgrade.value
+    elseif upgrade.affects == "purityBase" then
+        aether.purityBase = (aether.purityBase or 0) + upgrade.value
+    elseif upgrade.affects == "decayRate" then
+        aether.decayRate = (aether.decayRate or 0) + upgrade.value
+    end
+    player.upgrades[upgradeId] = true
+    return true
+end
+
+return Economy
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">PlayerManager</string>
+          <string name="Source"><![CDATA[local Players = game:GetService("Players")
+
+local PlayerManager = {}
+local playerData = {}
+
+local function createNewPlayerData(player)
+    return {
+        v = 1,
+        id = player.UserId,
+        crumbs = 0,
+        inventory = {},
+        upgrades = {},
+        aether = {
+            current = 0,
+            target = 20,
+            decayRate = 0.08,
+            purityBase = 0.55,
+            totalRate = 0,
+            lastSettleTs = os.time(),
+        },
+        producers = {},
+        timestamps = {},
+    }
+end
+
+function PlayerManager.GetPlayerData(player)
+    if not playerData[player] then
+        playerData[player] = createNewPlayerData(player)
+        local Aether = require(script.Parent:WaitForChild("Aether"))
+        Aether.Init(playerData[player])
+    end
+    return playerData[player]
+end
+
+function PlayerManager.SavePlayerData(player, data)
+    playerData[player] = data
+    print("Saved data for player", player.Name, "- Crumbs:", data.crumbs)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    playerData[player] = nil
+end)
+
+return PlayerManager
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="SoundService" referent="12">
+    <Properties>
+      <string name="Name">SoundService</string>
+      <bool name="RespectFilteringEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="StarterPlayer" referent="13">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="14">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="15">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source">local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+ReplicatedStorage:WaitForChild("GetPlayerData")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "EconomyDebug"
+screenGui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 300, 0, 400)
+frame.Position = UDim2.new(0, 10, 0, 10)
+frame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+frame.BorderSizePixel = 2
+frame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+title.Text = "Economy Debug"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 16
+title.Parent = frame
+
+local crumbsLabel = Instance.new("TextLabel")
+crumbsLabel.Size = UDim2.new(1, 0, 0, 30)
+crumbsLabel.Position = UDim2.new(0, 0, 0, 40)
+crumbsLabel.BackgroundTransparency = 1
+crumbsLabel.Text = "Crumbs: 0"
+crumbsLabel.TextColor3 = Color3.new(1, 1, 1)
+crumbsLabel.Font = Enum.Font.SourceSans
+crumbsLabel.TextSize = 14
+crumbsLabel.Parent = frame
+
+local function createButton(text, position, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -20, 0, 30)
+    button.Position = position
+    button.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+    button.Text = text
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Font = Enum.Font.SourceSans
+    button.TextSize = 12
+    button.Parent = frame
+    button.MouseButton1Click:Connect(callback)
+    return button
+end
+
+local function updateDisplay()
+    local success, data = pcall(function()
+        return ReplicatedStorage.GetPlayerData:InvokeServer()
+    end)
+    if success then
+        crumbsLabel.Text = "₡" .. (data.crumbs or 0)
+    else
+        crumbsLabel.Text = "Error getting data"
+    end
+end
+
+createButton("Refresh Data", UDim2.new(0, 10, 0, 80), updateDisplay)
+
+createButton("Add 100 Crumbs", UDim2.new(0, 10, 0, 120), function()
+    local success, result, newCrumbs = pcall(function()
+        return ReplicatedStorage.DebugAddCrumbs:InvokeServer(100)
+    end)
+    if success and result then
+        crumbsLabel.Text = "₡" .. newCrumbs
+        print("Added 100 crumbs successfully")
+    else
+        print("Failed to add crumbs")
+    end
+end)
+
+createButton("Set Aether to 50", UDim2.new(0, 10, 0, 160), function()
+    local success, data = pcall(function()
+        return ReplicatedStorage.GetPlayerData:InvokeServer()
+    end)
+    if success then
+        data.aether.current = 50
+        print("Set aether to 50 (client-side only for testing)")
+    end
+end)
+
+createButton("Sell All Aether", UDim2.new(0, 10, 0, 200), function()
+    local success, gain, newCrumbs = pcall(function()
+        return ReplicatedStorage.SellAether:InvokeServer()
+    end)
+    if success then
+        crumbsLabel.Text = "₡" .. newCrumbs
+        print("Sold aether for", gain, "crumbs")
+    else
+        print("Failed to sell aether")
+    end
+end)
+
+createButton("Buy Purity Upgrade", UDim2.new(0, 10, 0, 240), function()
+    local success, result, newCrumbs = pcall(function()
+        return ReplicatedStorage.PurchaseUpgrade:InvokeServer("purity_plus005")
+    end)
+    if success and result then
+        crumbsLabel.Text = "₡" .. newCrumbs
+        print("Purchased purity upgrade")
+    else
+        print("Failed to purchase upgrade")
+    end
+end)
+
+createButton("Spawn Producer", UDim2.new(0, 10, 0, 280), function()
+    local success, result = pcall(function()
+        return ReplicatedStorage.SpawnProducer:InvokeServer()
+    end)
+    if success then
+        print("Spawned producer object")
+    else
+        print("Failed to spawn producer")
+    end
+end)
+
+-- Load AetherClient
+print("Loading AetherClient...")
+local success, AetherClient = pcall(function()
+    return require(script:WaitForChild("AetherClient"))
+end)
+if success then
+    print("AetherClient loaded successfully!")
+else
+    print("Failed to load AetherClient:", AetherClient)
+end
+
+updateDisplay()
+print("Economy debug UI loaded!")</string>
+        </Properties>
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">AetherClient</string>
+            <string name="Source"><![CDATA[local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Wait for RemoteEvents
+local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
+local aetherChanged = ReplicatedStorage:WaitForChild("Aether_Changed")
+local aetherRequestSell = ReplicatedStorage:WaitForChild("Aether_RequestSell")
+
+local AetherClient = {}
+
+-- Local state management
+local aetherState = {
+	current = 0,
+	target = 20,
+	totalRate = 0,
+	decayRate = 0.08,
+	purityBase = 0.55,
+	lastUpdateTime = tick(),
+	serverSynced = false
+}
+
+local function clamp(value, min, max)
+	if value < min then
+		return min
+	end
+	if value > max then
+		return max
+	end
+	return value
+end
+
+-- Client-side settle math (mirrors server logic)
+local function settleAether(dt)
+	if dt <= 0 then
+		return
+	end
+	
+	local current = aetherState.current
+	
+	if current >= aetherState.target then
+		local excess = current - aetherState.target
+		local decayed = excess * math.exp(-aetherState.decayRate * dt)
+		current = aetherState.target + decayed
+	else
+		current = math.min(aetherState.target, current + aetherState.totalRate * dt)
+	end
+	
+	aetherState.current = current
+	aetherState.lastUpdateTime = tick()
+end
+
+-- Calculate projected crumbs
+local function getProjectedCrumbs()
+	local purity = clamp(aetherState.purityBase, 0.10, 1.00)
+	return math.floor(aetherState.current * purity * 8)
+end
+
+-- UI Creation
+local function createAetherGauge()
+	-- Wait for the canister to be created by server
+	local workspace = game:GetService("Workspace")
+	local canister = workspace:WaitForChild("AetherCanister")
+	local surfaceGui = canister:WaitForChild("AetherGauge")
+	
+	-- Main frame
+	local frame = Instance.new("Frame")
+	frame.Name = "GaugeFrame"
+	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.Position = UDim2.new(0, 0, 0, 0)
+	frame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+	frame.BorderSizePixel = 2
+	frame.BorderColor3 = Color3.new(0.3, 0.3, 0.3)
+	frame.Parent = surfaceGui
+	
+	-- Title
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, 0, 0, 20)
+	title.BackgroundTransparency = 1
+	title.Text = "AETHER GAUGE"
+	title.TextColor3 = Color3.new(0.8, 0.9, 1)
+	title.Font = Enum.Font.SourceSansBold
+	title.TextSize = 12
+	title.Parent = frame
+	
+	-- Gauge background
+	local gaugeBack = Instance.new("Frame")
+	gaugeBack.Name = "GaugeBackground"
+	gaugeBack.Size = UDim2.new(1, -20, 0, 20)
+	gaugeBack.Position = UDim2.new(0, 10, 0, 25)
+	gaugeBack.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+	gaugeBack.BorderSizePixel = 1
+	gaugeBack.BorderColor3 = Color3.new(0.4, 0.4, 0.4)
+	gaugeBack.Parent = frame
+	
+	-- Current aether fill bar
+	local fillBar = Instance.new("Frame")
+	fillBar.Name = "FillBar"
+	fillBar.Size = UDim2.new(0, 0, 1, -2)
+	fillBar.Position = UDim2.new(0, 1, 0, 1)
+	fillBar.BackgroundColor3 = Color3.new(0.3, 0.7, 1)
+	fillBar.BorderSizePixel = 0
+	fillBar.Parent = gaugeBack
+	
+	-- Overfill indicator
+	local overfillBar = Instance.new("Frame")
+	overfillBar.Name = "OverfillBar"
+	overfillBar.Size = UDim2.new(0, 0, 1, -2)
+	overfillBar.Position = UDim2.new(1, 0, 0, 1)
+	overfillBar.BackgroundColor3 = Color3.new(1, 0.5, 0)
+	overfillBar.BorderSizePixel = 0
+	overfillBar.Parent = gaugeBack
+	
+	-- Target line indicator
+	local targetLine = Instance.new("Frame")
+	targetLine.Name = "TargetLine"
+	targetLine.Size = UDim2.new(0, 2, 1, 0)
+	targetLine.Position = UDim2.new(1, 0, 0, 0)
+	targetLine.BackgroundColor3 = Color3.new(1, 1, 0)
+	targetLine.BorderSizePixel = 0
+	targetLine.Parent = gaugeBack
+	
+	-- Current/Target text
+	local currentText = Instance.new("TextLabel")
+	currentText.Name = "CurrentText"
+	currentText.Size = UDim2.new(1, 0, 0, 15)
+	currentText.Position = UDim2.new(0, 10, 0, 50)
+	currentText.BackgroundTransparency = 1
+	currentText.Text = "Current: 0.0"
+	currentText.TextColor3 = Color3.new(1, 1, 1)
+	currentText.Font = Enum.Font.SourceSans
+	currentText.TextSize = 11
+	currentText.TextXAlignment = Enum.TextXAlignment.Left
+	currentText.Parent = frame
+	
+	local targetText = Instance.new("TextLabel")
+	targetText.Name = "TargetText"
+	targetText.Size = UDim2.new(1, 0, 0, 15)
+	targetText.Position = UDim2.new(0, 10, 0, 65)
+	targetText.BackgroundTransparency = 1
+	targetText.Text = "Target: 20.0"
+	targetText.TextColor3 = Color3.new(1, 1, 1)
+	targetText.Font = Enum.Font.SourceSans
+	targetText.TextSize = 11
+	targetText.TextXAlignment = Enum.TextXAlignment.Left
+	targetText.Parent = frame
+	
+	-- Rate display
+	local rateText = Instance.new("TextLabel")
+	rateText.Name = "RateText"
+	rateText.Size = UDim2.new(1, 0, 0, 15)
+	rateText.Position = UDim2.new(0, 10, 0, 80)
+	rateText.BackgroundTransparency = 1
+	rateText.Text = "Rate: 0.0/s"
+	rateText.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+	rateText.Font = Enum.Font.SourceSans
+	rateText.TextSize = 10
+	rateText.TextXAlignment = Enum.TextXAlignment.Left
+	rateText.Parent = frame
+	
+	-- Sell button
+	local sellButton = Instance.new("TextButton")
+	sellButton.Name = "SellButton"
+	sellButton.Size = UDim2.new(0, 60, 0, 20)
+	sellButton.Position = UDim2.new(1, -70, 0, 95)
+	sellButton.BackgroundColor3 = Color3.new(0.2, 0.6, 0.2)
+	sellButton.Text = "SELL"
+	sellButton.TextColor3 = Color3.new(1, 1, 1)
+	sellButton.Font = Enum.Font.SourceSansBold
+	sellButton.TextSize = 10
+	sellButton.Parent = frame
+	
+	-- Tooltip frame (initially hidden)
+	local tooltip = Instance.new("Frame")
+	tooltip.Name = "Tooltip"
+	tooltip.Size = UDim2.new(0, 100, 0, 25)
+	tooltip.Position = UDim2.new(0, -105, 0, 95)
+	tooltip.BackgroundColor3 = Color3.new(0, 0, 0)
+	tooltip.BackgroundTransparency = 0.2
+	tooltip.BorderSizePixel = 1
+	tooltip.BorderColor3 = Color3.new(0.5, 0.5, 0.5)
+	tooltip.Visible = false
+	tooltip.Parent = sellButton
+	
+	local tooltipText = Instance.new("TextLabel")
+	tooltipText.Name = "Text"
+	tooltipText.Size = UDim2.new(1, 0, 1, 0)
+	tooltipText.BackgroundTransparency = 1
+	tooltipText.Text = "₡0"
+	tooltipText.TextColor3 = Color3.new(1, 1, 1)
+	tooltipText.Font = Enum.Font.SourceSans
+	tooltipText.TextSize = 10
+	tooltipText.Parent = tooltip
+	
+	return {
+		frame = frame,
+		fillBar = fillBar,
+		overfillBar = overfillBar,
+		targetLine = targetLine,
+		currentText = currentText,
+		targetText = targetText,
+		rateText = rateText,
+		sellButton = sellButton,
+		tooltip = tooltip,
+		tooltipText = tooltipText
+	}
+end
+
+local ui = createAetherGauge()
+
+-- Update UI display
+local function updateUI()
+	local current = aetherState.current
+	local target = aetherState.target
+	local rate = aetherState.totalRate
+	
+	-- Update text displays
+	ui.currentText.Text = string.format("Current: %.1f", current)
+	ui.targetText.Text = string.format("Target: %.1f", target)
+	ui.rateText.Text = string.format("Rate: %.1f/s", rate)
+	
+	-- Update fill bars
+	local fillRatio = math.min(current / target, 1)
+	ui.fillBar.Size = UDim2.new(fillRatio, 0, 1, -2)
+	
+	-- Handle overfill
+	if current > target then
+		local overfillRatio = math.min((current - target) / target, 1)
+		ui.overfillBar.Size = UDim2.new(overfillRatio, 0, 1, -2)
+		ui.overfillBar.Visible = true
+		ui.fillBar.BackgroundColor3 = Color3.new(0.5, 0.8, 1) -- Lighter blue when overfilled
+	else
+		ui.overfillBar.Visible = false
+		ui.fillBar.BackgroundColor3 = Color3.new(0.3, 0.7, 1) -- Normal blue
+	end
+	
+	-- Update tooltip with projected crumbs
+	local projectedCrumbs = getProjectedCrumbs()
+	ui.tooltipText.Text = "₡" .. projectedCrumbs
+end
+
+-- Tooltip hover events
+ui.sellButton.MouseEnter:Connect(function()
+	ui.tooltip.Visible = true
+end)
+
+ui.sellButton.MouseLeave:Connect(function()
+	ui.tooltip.Visible = false
+end)
+
+-- Sell button functionality
+ui.sellButton.MouseButton1Click:Connect(function()
+	local success, gain = pcall(function()
+		return aetherRequestSell:InvokeServer()
+	end)
+	
+	if success and gain > 0 then
+		print("Sold aether for", gain, "crumbs")
+		aetherState.current = 0 -- Immediately update local state
+		updateUI()
+	else
+		print("Failed to sell aether")
+	end
+end)
+
+-- Handle server snapshots
+aetherSnapshot.OnClientEvent:Connect(function(serverData)
+	print("Received aether snapshot:", serverData.current, "/", serverData.target, "rate:", serverData.totalRate)
+	aetherState.current = serverData.current
+	aetherState.target = serverData.target
+	aetherState.totalRate = serverData.totalRate
+	aetherState.decayRate = serverData.decayRate
+	aetherState.purityBase = serverData.purityBase
+	aetherState.lastUpdateTime = tick()
+	aetherState.serverSynced = true
+	
+	updateUI()
+end)
+
+-- Handle server change events
+aetherChanged.OnClientEvent:Connect(function(changeData)
+	-- Apply delta changes from server
+	if changeData.currentDelta then
+		aetherState.current = aetherState.current + changeData.currentDelta
+	end
+	if changeData.targetDelta then
+		aetherState.target = aetherState.target + changeData.targetDelta
+	end
+	if changeData.totalRate ~= nil then
+		aetherState.totalRate = changeData.totalRate
+	end
+	
+	aetherState.lastUpdateTime = tick()
+	updateUI()
+end)
+
+-- Main update loop for client-side prediction
+local function onHeartbeat()
+	if not aetherState.serverSynced then
+		return
+	end
+	
+	local now = tick()
+	local dt = now - aetherState.lastUpdateTime
+	
+	if dt > 0.01 then -- Update at most 100 times per second
+		settleAether(dt)
+		updateUI()
+	end
+end
+
+RunService.Heartbeat:Connect(onHeartbeat)
+
+AetherClient.GetCurrentAether = function()
+	return aetherState.current
+end
+
+AetherClient.GetProjectedCrumbs = function()
+	return getProjectedCrumbs()
+end
+
+return AetherClient
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="17">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="FilteringEnabled">true</bool>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+    <Item class="Part" referent="18">
+      <Properties>
+        <string name="Name">Baseplate</string>
+        <bool name="Anchored">true</bool>
+        <Color3uint8 name="Color3uint8">6512483</Color3uint8>
+        <bool name="Locked">true</bool>
+        <Vector3 name="Position">
+          <X>0</X>
+          <Y>-10</Y>
+          <Z>0</Z>
+        </Vector3>
+        <Vector3 name="size">
+          <X>512</X>
+          <Y>20</Y>
+          <Z>512</Z>
+        </Vector3>
+      </Properties>
+    </Item>
+  </Item>
+</roblox>
