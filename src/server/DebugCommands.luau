@@ -6,6 +6,13 @@ local Aether = require(script.Parent:WaitForChild("Aether"))
 local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
 
 local DebugCommands = {}
+local aetherSnapshot
+
+-- Allows init.server to provide the remote once it's created, avoiding
+-- WaitForChild calls during module load and preventing circular waits.
+function DebugCommands.SetAetherSnapshot(remote)
+    aetherSnapshot = remote
+end
 
 function DebugCommands.GetPlayerMoney(playerName)
     local player = Players:FindFirstChild(playerName)

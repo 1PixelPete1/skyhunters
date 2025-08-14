@@ -1,16 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-print("Loading Economy...")
-local Economy = require(script:WaitForChild("Economy"))
-print("Loading Aether...")
-local Aether = require(script:WaitForChild("Aether"))
-print("Loading PlayerManager...")
-local PlayerManager = require(script:WaitForChild("PlayerManager"))
-print("Loading DebugCommands...")
-local DebugCommands = require(script:WaitForChild("DebugCommands"))
-print("All modules loaded!")
-
+-- RemoteEvents and RemoteFunctions are created before requiring modules to
+-- avoid circular waits when modules like DebugCommands expect them at load time.
 local getPlayerData = Instance.new("RemoteFunction")
 getPlayerData.Name = "GetPlayerData"
 getPlayerData.Parent = ReplicatedStorage
@@ -56,6 +48,7 @@ local function sendSnapshot(player, data)
     aetherSnapshot:FireClient(player, payload)
 end
 
+
 getPlayerData.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
     -- Send aether snapshot when player gets data
@@ -69,6 +62,7 @@ sellAether.OnServerInvoke = function(player)
     local gain = Economy.SellAether(data)
     PlayerManager.SavePlayerData(player, data)
     sendSnapshot(player, data)
+
     return gain, data.crumbs
 end
 
@@ -83,7 +77,6 @@ purchaseUpgrade.OnServerInvoke = function(player, upgradeId)
     local data = PlayerManager.GetPlayerData(player)
     local success = Economy.PurchaseUpgrade(data, upgradeId)
     PlayerManager.SavePlayerData(player, data)
-    -- Apply aether upgrade and send snapshot if successful
     if success then
         Aether.ApplyUpgrade(data, upgradeId)
         sendSnapshot(player, data)
@@ -104,6 +97,7 @@ aetherRequestSell.OnServerInvoke = function(player)
     local gain = Aether.RequestSell(data)
     PlayerManager.SavePlayerData(player, data)
     sendSnapshot(player, data)
+
     return gain, data.crumbs
 end
 
@@ -128,6 +122,7 @@ spawnProducer.OnServerInvoke = function(player)
     local uid = Aether.AddProducer(data, "Spawned", 0.5)
     PlayerManager.SavePlayerData(player, data)
     sendSnapshot(player, data)
+
     
     -- Make it clickable to remove
     clickDetector.MouseClick:Connect(function(clickingPlayer)
@@ -135,6 +130,7 @@ spawnProducer.OnServerInvoke = function(player)
             Aether.RemoveProducer(data, uid)
             PlayerManager.SavePlayerData(player, data)
             sendSnapshot(player, data)
+
             producer:Destroy()
             print("Removed producer", uid)
         end
