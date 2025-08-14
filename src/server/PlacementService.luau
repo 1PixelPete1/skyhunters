@@ -48,7 +48,7 @@ function PlacementService.Place(player, typeId, plotId, worldCFrame)
     local record = {
         typeId = typeId,
         plotId = plotId,
-        local = toLocal(worldCFrame),
+        ["local"] = toLocal(worldCFrame),
         active = true,
     }
     data.placed[uid] = record
