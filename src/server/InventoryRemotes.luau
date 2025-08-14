@@ -1,29 +1,41 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local InventoryBridge = require(script.Parent:WaitForChild("InventoryBridge"))
+local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
+local BurstService = require(script.Parent:WaitForChild("BurstService"))
+local PlacementService = require(script.Parent:WaitForChild("PlacementService"))
 
-local fetchPage = Instance.new("RemoteFunction")
-fetchPage.Name = "Inventory_FetchPage"
-fetchPage.Parent = ReplicatedStorage
-fetchPage.OnServerInvoke = function(player, category, search, cursor)
-    return InventoryBridge.GetPage(player, category, search, cursor)
+local rfFetch = Instance.new("RemoteFunction")
+rfFetch.Name = "RF_InventoryFetch"
+rfFetch.Parent = ReplicatedStorage
+rfFetch.OnServerInvoke = function(player, category, search, cursor)
+    local result = InventoryService.GetPage(player, category, search, cursor)
+    return result.items, result.nextCursor, result.total
 end
 
-local equip = Instance.new("RemoteFunction")
-equip.Name = "Inventory_Equip"
-equip.Parent = ReplicatedStorage
-equip.OnServerInvoke = function(player, uid)
-    return { ok = InventoryBridge.Equip(player, uid) }
+local rfBurst = Instance.new("RemoteFunction")
+rfBurst.Name = "RF_UseBurst"
+rfBurst.Parent = ReplicatedStorage
+rfBurst.OnServerInvoke = function(player, typeId)
+    return BurstService.Use(player, typeId)
 end
 
-local use = Instance.new("RemoteFunction")
-use.Name = "Inventory_Use"
-use.Parent = ReplicatedStorage
-use.OnServerInvoke = function(player, uid)
-    return { ok = InventoryBridge.Use(player, uid) }
+local rfPlace = Instance.new("RemoteFunction")
+rfPlace.Name = "RF_PlaceItem"
+rfPlace.Parent = ReplicatedStorage
+rfPlace.OnServerInvoke = function(player, typeId, plotId, worldCFrame)
+    return PlacementService.Place(player, typeId, plotId, worldCFrame)
+end
+
+local rfRemove = Instance.new("RemoteFunction")
+rfRemove.Name = "RF_RemovePlaced"
+rfRemove.Parent = ReplicatedStorage
+rfRemove.OnServerInvoke = function(player, uid)
+    return PlacementService.Remove(player, uid)
 end
 
 return {
-    FetchPage = fetchPage,
-    Equip = equip,
-    Use = use,
+    InventoryFetch = rfFetch,
+    UseBurst = rfBurst,
+    PlaceItem = rfPlace,
+    RemovePlaced = rfRemove,
 }
+

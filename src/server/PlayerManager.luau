@@ -22,6 +22,23 @@ end
 local PlayerManager = {}
 local playerData = {}
 
+local function loadItemsConfig()
+    if script and script.Parent and script.Parent.Parent then
+        local shared = script.Parent.Parent:FindFirstChild("shared")
+        if shared then
+            local ok, cfg = pcall(function()
+                return require(shared:WaitForChild("ItemsConfig"))
+            end)
+            if ok then
+                return cfg
+            end
+        end
+    end
+    return require("ItemsConfig")
+end
+
+local ItemsConfig = loadItemsConfig()
+
 local function createNewPlayerData(player)
     return {
         v = 1,
@@ -38,6 +55,7 @@ local function createNewPlayerData(player)
             lastSettleTs = time(),
         },
         producers = {},
+        placed = {},
         timestamps = {},
     }
 end
@@ -60,6 +78,7 @@ local function migrate(data)
         a.lastSettleTs = now
     end
     data.producers = data.producers or {}
+    data.placed = data.placed or {}
     data.timestamps = data.timestamps or {}
     return data
 end
@@ -83,6 +102,14 @@ function PlayerManager.GetPlayerData(player)
             Aether = require("Aether")
         end
         Aether.Init(data)
+        local total = 0
+        for _, record in pairs(data.placed) do
+            local cfg = ItemsConfig.Types[record.typeId]
+            if cfg and (record.active ~= false) then
+                total = total + (cfg.rate or 0)
+            end
+        end
+        data.aether.totalRate = total
         SaveScheduler.start(player.UserId, function()
             DataStoreAdapter.Save(player, data)
         end)
