@@ -45,6 +45,8 @@ local Aether = require(script:WaitForChild("Aether"))
 local PlayerManager = require(script:WaitForChild("PlayerManager"))
 local DebugCommands = require(script:WaitForChild("DebugCommands"))
 local InventoryBridge = require(script:WaitForChild("InventoryBridge"))
+local InventoryRemotes = require(script:WaitForChild("InventoryRemotes"))
+
 local SaveScheduler = require(script:WaitForChild("SaveScheduler"))
 
 DebugCommands.SetAetherSnapshot(aetherSnapshot)
@@ -61,7 +63,8 @@ local function sendSnapshot(player, data)
         v = 1,
     }
     aetherSnapshot:FireClient(player, payload)
-    InventoryBridge.OnSnapshotComposed(data, payload)
+    InventoryBridge.OnSnapshotComposed(player, payload)
+
     if payload.aether and payload.aether.atCap then
         aetherReachedCapacity:FireClient(player)
     end

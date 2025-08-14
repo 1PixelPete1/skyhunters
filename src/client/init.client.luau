@@ -140,3 +140,11 @@ end
 
 updateDisplay()
 print("Economy debug UI loaded!")
+
+local okInv, InventoryUI = pcall(function()
+    return require(script:WaitForChild("InventoryUI"))
+end)
+if okInv then
+    InventoryUI.Init()
+end
+
