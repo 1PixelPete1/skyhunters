@@ -1,0 +1,134 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local StartHolding = ReplicatedStorage:WaitForChild("StartHoldingItem")
+local RequestPlace = ReplicatedStorage:WaitForChild("RequestPlaceItem")
+local ConfirmPlacement = ReplicatedStorage:WaitForChild("ConfirmPlacement")
+local PlacementRejected = ReplicatedStorage:WaitForChild("PlacementRejected")
+
+local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+local HeldItemController = {}
+
+local currentHeld
+local heldModel
+local ghostModel
+local handsUpAnim
+
+local plotBounds = {
+    min = Vector3.new(-50, 0, -50),
+    max = Vector3.new(50, 0, 50),
+}
+
+local function insideBounds(pos)
+    return pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
+end
+
+local function stopHolding()
+    if heldModel then
+        heldModel:Destroy()
+        heldModel = nil
+    end
+    if handsUpAnim then
+        handsUpAnim:Stop()
+        handsUpAnim = nil
+    end
+    currentHeld = nil
+end
+
+function HeldItemController.startHold(item)
+    if currentHeld then
+        return
+    end
+    currentHeld = item
+    StartHolding:FireServer(item.uid)
+
+    local cfg = ItemsConfig.Types[item.typeId]
+    if not cfg then
+        return
+    end
+
+    local model = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    local character = player.Character or player.CharacterAdded:Wait()
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    local attach = hrp:FindFirstChild("HeldItemAttachment")
+    if not attach then
+        attach = Instance.new("Attachment")
+        attach.Name = "HeldItemAttachment"
+        attach.Position = Vector3.new(0, 5, 0)
+        attach.Parent = hrp
+    end
+    model.Parent = attach
+    heldModel = model
+
+    local humanoid = character:WaitForChild("Humanoid")
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://0"
+    handsUpAnim = humanoid:LoadAnimation(anim)
+    handsUpAnim:Play()
+end
+
+local function spawnGhost(position, cfg)
+    if ghostModel then
+        ghostModel:Destroy()
+    end
+    ghostModel = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Models"):WaitForChild(cfg.model):Clone()
+    for _, part in ipairs(ghostModel:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Transparency = 0.5
+            part.CanCollide = false
+        end
+    end
+    ghostModel.CFrame = CFrame.new(position)
+    ghostModel.Parent = workspace
+end
+
+function HeldItemController.tryPlace(position)
+    if not currentHeld then
+        return
+    end
+    if not insideBounds(position) then
+        return
+    end
+    local cfg = ItemsConfig.Types[currentHeld.typeId]
+    if not cfg then
+        return
+    end
+    spawnGhost(position, cfg)
+    RequestPlace:FireServer(currentHeld.uid, position)
+end
+
+ConfirmPlacement.OnClientEvent:Connect(function()
+    if ghostModel then
+        ghostModel:Destroy()
+        ghostModel = nil
+    end
+    stopHolding()
+end)
+
+PlacementRejected.OnClientEvent:Connect(function()
+    if ghostModel then
+        ghostModel:Destroy()
+        ghostModel = nil
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then
+        return
+    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and currentHeld then
+        HeldItemController.tryPlace(mouse.Hit.Position)
+    end
+end)
+
+function HeldItemController.isHolding()
+    return currentHeld ~= nil
+end
+
+return HeldItemController
+

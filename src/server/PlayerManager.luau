@@ -53,6 +53,7 @@ local function createNewPlayerData(player)
         producers = {},
         placed = {},
         timestamps = {},
+        heldItem = nil,
     }
 end
 
@@ -76,6 +77,7 @@ local function migrate(data)
     data.producers = data.producers or {}
     data.placed = data.placed or {}
     data.timestamps = data.timestamps or {}
+    data.heldItem = data.heldItem
     return data
 end
 
