@@ -40,6 +40,13 @@ local aetherReachedCapacity = Instance.new("RemoteEvent")
 aetherReachedCapacity.Name = "Aether_ReachedCapacity"
 aetherReachedCapacity.Parent = ReplicatedStorage
 
+local Economy = require(script:WaitForChild("Economy"))
+local Aether = require(script:WaitForChild("Aether"))
+local PlayerManager = require(script:WaitForChild("PlayerManager"))
+local DebugCommands = require(script:WaitForChild("DebugCommands"))
+
+DebugCommands.SetAetherSnapshot(aetherSnapshot)
+
 local function sendSnapshot(player, data)
     local payload = {
         aether = Aether.Snapshot(data),
