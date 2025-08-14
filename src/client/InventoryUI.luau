@@ -99,7 +99,7 @@ function InventoryUI.Init()
     toggleButton.Size = UDim2.new(0, 40, 0, 40)
     toggleButton.Position = UDim2.new(1, -45, 0.5, -20)
     toggleButton.AnchorPoint = Vector2.new(1, 0.5)
-    toggleButton.BackgroundTransparency = 1
+    toggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     toggleButton.Image = "rbxassetid://0"
     toggleButton.ZIndex = 2
     toggleButton.Parent = screenGui
