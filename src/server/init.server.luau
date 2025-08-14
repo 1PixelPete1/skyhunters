@@ -39,10 +39,6 @@ local aetherSnapshot = Instance.new("RemoteEvent")
 aetherSnapshot.Name = "Aether_Snapshot"
 aetherSnapshot.Parent = ReplicatedStorage
 
-local aetherChanged = Instance.new("RemoteEvent")
-aetherChanged.Name = "Aether_Changed"
-aetherChanged.Parent = ReplicatedStorage
-
 local aetherRequestSell = Instance.new("RemoteFunction")
 aetherRequestSell.Name = "Aether_RequestSell"
 aetherRequestSell.Parent = ReplicatedStorage
@@ -66,11 +62,10 @@ sellAether.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
     local gain = Economy.SellAether(data)
     PlayerManager.SavePlayerData(player, data)
-    
-    -- Fire aether changed event
+
     local aetherData = Aether.Snapshot(data)
-    aetherChanged:FireClient(player, aetherData)
-    
+    aetherSnapshot:FireClient(player, aetherData)
+
     return gain, data.crumbs
 end
 
@@ -86,11 +81,11 @@ purchaseUpgrade.OnServerInvoke = function(player, upgradeId)
     local success = Economy.PurchaseUpgrade(data, upgradeId)
     PlayerManager.SavePlayerData(player, data)
     
-    -- Apply aether upgrade and fire changed event if successful
+    -- Apply aether upgrade and send snapshot if successful
     if success then
         Aether.ApplyUpgrade(data, upgradeId)
         local aetherData = Aether.Snapshot(data)
-        aetherChanged:FireClient(player, aetherData)
+        aetherSnapshot:FireClient(player, aetherData)
     end
     
     return success, data.crumbs
@@ -108,11 +103,10 @@ aetherRequestSell.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
     local gain = Aether.RequestSell(data)
     PlayerManager.SavePlayerData(player, data)
-    
-    -- Fire aether changed event after sell
+
     local aetherData = Aether.Snapshot(data)
-    aetherChanged:FireClient(player, aetherData)
-    
+    aetherSnapshot:FireClient(player, aetherData)
+
     return gain, data.crumbs
 end
 
@@ -136,12 +130,14 @@ spawnProducer.OnServerInvoke = function(player)
     -- Add producer to aether system
     local uid = Aether.AddProducer(data, "Spawned", 0.5)
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     
     -- Make it clickable to remove
     clickDetector.MouseClick:Connect(function(clickingPlayer)
         if clickingPlayer == player then
             Aether.RemoveProducer(data, uid)
             PlayerManager.SavePlayerData(player, data)
+            aetherSnapshot:FireClient(player, Aether.Snapshot(data))
             producer:Destroy()
             print("Removed producer", uid)
         end
@@ -168,7 +164,7 @@ local function runAetherTest()
             decayRate = 0.08,
             purityBase = 0.55,
             totalRate = 0,
-            lastSettleTs = os.time(),
+            lastSettleTs = time(),
         },
         producers = {},
         timestamps = {},
@@ -188,7 +184,7 @@ local function runAetherTest()
     
     -- Test 3: Wait and settle (simulate 5 seconds)
     print("3. Simulating 5 seconds of growth...")
-    testPlayer.aether.lastSettleTs = os.time() - 5
+    testPlayer.aether.lastSettleTs = time() - 5
     Aether.Settle(testPlayer)
     print("   After 5s - Current:", testPlayer.aether.current)
     

@@ -8,7 +8,6 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Wait for RemoteEvents
 local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
-local aetherChanged = ReplicatedStorage:WaitForChild("Aether_Changed")
 local aetherRequestSell = ReplicatedStorage:WaitForChild("Aether_RequestSell")
 
 local AetherClient = {}
@@ -17,11 +16,11 @@ local AetherClient = {}
 local aetherState = {
 	current = 0,
 	target = 20,
-	totalRate = 0,
-	decayRate = 0.08,
-	purityBase = 0.55,
-	lastUpdateTime = tick(),
-	serverSynced = false
+        totalRate = 0,
+        decayRate = 0.08,
+        purityBase = 0.55,
+        lastUpdateTime = time(),
+        serverSynced = false
 }
 
 local function clamp(value, min, max)
@@ -50,8 +49,8 @@ local function settleAether(dt)
 		current = math.min(aetherState.target, current + aetherState.totalRate * dt)
 	end
 	
-	aetherState.current = current
-	aetherState.lastUpdateTime = tick()
+        aetherState.current = current
+        aetherState.lastUpdateTime = time()
 end
 
 -- Calculate projected crumbs
@@ -276,26 +275,9 @@ aetherSnapshot.OnClientEvent:Connect(function(serverData)
 	aetherState.totalRate = serverData.totalRate
 	aetherState.decayRate = serverData.decayRate
 	aetherState.purityBase = serverData.purityBase
-	aetherState.lastUpdateTime = tick()
-	aetherState.serverSynced = true
+        aetherState.lastUpdateTime = serverData.serverNow
+        aetherState.serverSynced = true
 	
-	updateUI()
-end)
-
--- Handle server change events
-aetherChanged.OnClientEvent:Connect(function(changeData)
-	-- Apply delta changes from server
-	if changeData.currentDelta then
-		aetherState.current = aetherState.current + changeData.currentDelta
-	end
-	if changeData.targetDelta then
-		aetherState.target = aetherState.target + changeData.targetDelta
-	end
-	if changeData.totalRate ~= nil then
-		aetherState.totalRate = changeData.totalRate
-	end
-	
-	aetherState.lastUpdateTime = tick()
 	updateUI()
 end)
 
@@ -305,7 +287,7 @@ local function onHeartbeat()
 		return
 	end
 	
-	local now = tick()
+        local now = time()
 	local dt = now - aetherState.lastUpdateTime
 	
 	if dt > 0.01 then -- Update at most 100 times per second

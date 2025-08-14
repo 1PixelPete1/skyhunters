@@ -1,7 +1,9 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
 local Aether = require(script.Parent:WaitForChild("Aether"))
+local aetherSnapshot = ReplicatedStorage:WaitForChild("Aether_Snapshot")
 
 local DebugCommands = {}
 
@@ -64,6 +66,7 @@ function DebugCommands.AddProducer(playerName, producerType, baseRate, patchId)
     local data = PlayerManager.GetPlayerData(player)
     local uid, debugName = Aether.AddProducer(data, producerType, baseRate, patchId)
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     print("Added producer", debugName, "(UID:", uid .. ") to", playerName)
     return uid, debugName
 end
@@ -78,6 +81,7 @@ function DebugCommands.RemoveProducer(playerName, uid)
     local success = Aether.RemoveProducer(data, uid)
     if success then
         PlayerManager.SavePlayerData(player, data)
+        aetherSnapshot:FireClient(player, Aether.Snapshot(data))
         print("Removed producer", uid, "from", playerName)
     else
         print("Producer not found:", uid)
@@ -95,6 +99,7 @@ function DebugCommands.SetProducerActive(playerName, uid, active)
     local success = Aether.SetProducerActive(data, uid, active)
     if success then
         PlayerManager.SavePlayerData(player, data)
+        aetherSnapshot:FireClient(player, Aether.Snapshot(data))
         print("Set producer", uid, "active to", active, "for", playerName)
     else
         print("Producer not found:", uid)
@@ -112,6 +117,7 @@ function DebugCommands.SetProducerRate(playerName, uid, baseRate, addBonus, mult
     local success = Aether.SetProducerRate(data, uid, baseRate, addBonus, multBonus)
     if success then
         PlayerManager.SavePlayerData(player, data)
+        aetherSnapshot:FireClient(player, Aether.Snapshot(data))
         print("Updated producer", uid, "rates for", playerName)
     else
         print("Producer not found:", uid)
@@ -169,6 +175,7 @@ function DebugCommands.SetTarget(playerName, value)
     Aether.Settle(data)
     data.aether.target = value
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     print("Set", playerName, "aether target to", value)
     return true
 end
@@ -183,6 +190,7 @@ function DebugCommands.SetDecay(playerName, value)
     Aether.Settle(data)
     data.aether.decayRate = value
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     print("Set", playerName, "aether decay rate to", value)
     return true
 end
@@ -197,6 +205,7 @@ function DebugCommands.SetPurity(playerName, value)
     Aether.Settle(data)
     data.aether.purityBase = value
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     print("Set", playerName, "aether purity base to", value)
     return true
 end
@@ -210,6 +219,7 @@ function DebugCommands.Burst(playerName, value)
     local data = PlayerManager.GetPlayerData(player)
     Aether.ApplyBurst(data, value)
     PlayerManager.SavePlayerData(player, data)
+    aetherSnapshot:FireClient(player, Aether.Snapshot(data))
     print("Added", value, "aether burst to", playerName, "- New total:", data.aether.current)
     return true
 end

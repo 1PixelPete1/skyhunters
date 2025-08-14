@@ -1,5 +1,11 @@
 package.path = "src/server/?.luau;src/server/?/init.luau;src/shared/?.luau;src/shared/?/init.luau;" .. package.path
 
+if not time then
+    function time()
+        return os.clock()
+    end
+end
+
 local Economy = require("Economy")
 local Config = require("Config")
 

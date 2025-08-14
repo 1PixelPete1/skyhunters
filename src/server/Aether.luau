@@ -1,5 +1,14 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
+local ok, ReplicatedStorage = pcall(function()
+    return game:GetService("ReplicatedStorage")
+end)
+local okHttp, HttpServiceInst = pcall(function()
+    return game:GetService("HttpService")
+end)
+local HttpService = okHttp and HttpServiceInst or {
+    GenerateGUID = function()
+        return tostring(math.random(1, 1e8))
+    end
+}
 
 local Aether = {}
 
@@ -21,11 +30,11 @@ local function CalcEffectiveRate(producer)
 end
 
 function Aether.Settle(player, now)
-    now = now or tick()
+    now = now or time()
     local aether = player.aether
-    local dt = math.max(0, now - aether.lastSettleTs)
-    
-    if dt <= 0 then
+    local dt = now - aether.lastSettleTs
+
+    if dt <= 1e-4 then
         return
     end
     
@@ -62,7 +71,7 @@ function Aether.Init(player)
             decayRate = 0.08,
             purityBase = 0.55,
             totalRate = 0,
-            lastSettleTs = tick(),
+            lastSettleTs = time(),
         }
     end
     if not player.producers then
@@ -156,13 +165,27 @@ end
 
 function Aether.RequestSell(player)
     Aether.Settle(player)
-    local Economy = require(script.Parent:WaitForChild("Economy"))
-    return Economy.SellAether(player)
+    local Economy
+    if script and script.Parent then
+        Economy = require(script.Parent:WaitForChild("Economy"))
+    else
+        Economy = require("Economy")
+    end
+    local gain = Economy.SellAether(player)
+    local aether = player.aether
+    aether.current = 0
+    aether.lastSettleTs = time()
+    return gain
 end
 
 function Aether.ApplyUpgrade(player, upgradeId)
     Aether.Settle(player)
-    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+    local Config
+    if ReplicatedStorage then
+        Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+    else
+        Config = require("Config")
+    end
     local upgrade = Config.UpgradeById[upgradeId]
     
     if not upgrade then
@@ -188,7 +211,7 @@ function Aether.Snapshot(player)
         totalRate = player.aether.totalRate,
         decayRate = player.aether.decayRate,
         purityBase = player.aether.purityBase,
-        serverNow = tick(),
+        serverNow = time(),
     }
 end
 
