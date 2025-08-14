@@ -21,6 +21,8 @@ local PAGE_SIZE = InventoryConfig.UI.PageSize or 40
 
 local SAMPLE_ITEMS = {}
 
+local PLAYER_ITEMS = {}
+
 for _, category in ipairs(InventoryConfig.Categories) do
     SAMPLE_ITEMS[category.id] = {}
     for i = 1, PAGE_SIZE * 2 do
@@ -39,6 +41,15 @@ end
 
 local InventoryBridge = {}
 
+local function getPlayerInventory(player)
+    local inv = PLAYER_ITEMS[player]
+    if not inv then
+        inv = {}
+        PLAYER_ITEMS[player] = inv
+    end
+    return inv
+end
+
 function InventoryBridge.GetDerivedAetherModifiers(player)
     return {
         target_add = 0,
@@ -56,8 +67,9 @@ end
 
 -- Inventory façade -----------------------------------------------------
 
-local function findItem(uidOrId)
-    for _, items in pairs(SAMPLE_ITEMS) do
+local function findPlayerItem(player, uidOrId)
+    local inventory = getPlayerInventory(player)
+    for _, items in pairs(inventory) do
         for _, item in ipairs(items) do
             if item.uid == uidOrId or item.id == uidOrId then
                 return item
@@ -67,7 +79,8 @@ local function findItem(uidOrId)
 end
 
 function InventoryBridge.GetPage(player, category, search, cursor)
-    local items = SAMPLE_ITEMS[category] or {}
+    local inventory = getPlayerInventory(player)
+    local items = inventory[category] or {}
     local filtered = {}
     local query = search and string.lower(search) or nil
     for _, item in ipairs(items) do
@@ -91,7 +104,22 @@ function InventoryBridge.GetPage(player, category, search, cursor)
 end
 
 function InventoryBridge.Equip(player, uidOrId)
-    return findItem(uidOrId) ~= nil
+    return findPlayerItem(player, uidOrId) ~= nil
+end
+
+function InventoryBridge._giveSampleItem(player, category, index)
+    local catItems = SAMPLE_ITEMS[category]
+    if not catItems then
+        return nil
+    end
+    local item = catItems[index]
+    if not item then
+        return nil
+    end
+    local inventory = getPlayerInventory(player)
+    inventory[category] = inventory[category] or {}
+    table.insert(inventory[category], item)
+    return item
 end
 
 function InventoryBridge.Use(player, uidOrId)

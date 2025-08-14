@@ -6,16 +6,17 @@ end
 
 local InventoryBridge = require("InventoryBridge")
 
-local items, cursor, total = InventoryBridge.GetPage({}, "producers")
-assert(type(items) == "table" and #items > 0, "GetPage returns items")
+local player = {}
 
-local filtered = InventoryBridge.GetPage({}, "producers", "Item 1")
-for _, item in ipairs(filtered) do
-    assert(string.find(item.name, "Item 1"), "search filters names")
-end
+local items, cursor, total = InventoryBridge.GetPage(player, "producers")
+assert(#items == 0 and total == 0, "Empty inventory returns no items")
+
+local newItem = InventoryBridge._giveSampleItem(player, "producers", 1)
+items, cursor, total = InventoryBridge.GetPage(player, "producers")
+assert(#items == 1 and total == 1, "New items appear when added")
 
 local first = items[1]
-assert(InventoryBridge.Equip({}, first.uid) == true, "Equip existing item")
-assert(InventoryBridge.Equip({}, "nope") == false, "Equip returns false for missing")
+assert(InventoryBridge.Equip(player, first.uid) == true, "Equip existing item")
+assert(InventoryBridge.Equip(player, "nope") == false, "Equip returns false for missing")
 
 print("inventory spec passed")
