@@ -12,6 +12,13 @@ local HttpService = okHttp and HttpServiceInst or {
 
 local Aether = {}
 
+local InventoryBridge
+if script and script.Parent then
+    InventoryBridge = require(script.Parent:WaitForChild("InventoryBridge"))
+else
+    InventoryBridge = require("InventoryBridge")
+end
+
 local function MakeUid()
     return HttpService:GenerateGUID(false):sub(1, 8)
 end
@@ -39,19 +46,26 @@ function Aether.Settle(player, now)
     end
     
     local current = aether.current
-    
-    if current >= aether.target then
-        local excess = current - aether.target
+    local eff = Aether.GetEffectiveStats(player)
+    local target = eff.target
+    local rate = eff.totalRate
+
+    if current >= target then
+        local excess = current - target
         local decayed = excess * math.exp(-aether.decayRate * dt)
-        current = aether.target + decayed
+        current = target + decayed
     else
-        current = math.min(aether.target, current + aether.totalRate * dt)
+        current = math.min(target, current + rate * dt)
     end
-    
+
+    if aether.current < target and current == target then
+        aether.hitCapacity = true
+    end
+
     aether.current = current
     aether.lastSettleTs = now
-    
-    print("Settled aether for player", player.id, "- Current:", current, "Rate:", aether.totalRate, "dt:", dt)
+
+    print("Settled aether for player", player.id, "- Current:", current, "Rate:", rate, "dt:", dt)
 end
 
 function Aether.RebuildTotalRate(player)
@@ -61,6 +75,25 @@ function Aether.RebuildTotalRate(player)
     end
     player.aether.totalRate = total
     return total
+end
+
+function Aether.GetBaseStats(player)
+    local a = player.aether
+    return {
+        target = a.target,
+        purityBase = a.purityBase,
+        totalRate = a.totalRate,
+    }
+end
+
+function Aether.GetEffectiveStats(player)
+    local base = Aether.GetBaseStats(player)
+    local mods = InventoryBridge.GetDerivedAetherModifiers(player)
+    return {
+        target = base.target + (mods.target_add or 0),
+        purity = base.purityBase + (mods.purity_add or 0),
+        totalRate = base.totalRate * (mods.rate_mult or 1),
+    }
 end
 
 function Aether.Init(player)
@@ -163,6 +196,15 @@ function Aether.ApplyBurst(player, value)
     player.aether.current = player.aether.current + value
 end
 
+function Aether.TryApplyInventoryBurst(player)
+    local ok, burstValue = InventoryBridge.TryConsumeBurst(player, {})
+    if ok and burstValue > 0 then
+        Aether.ApplyBurst(player, burstValue)
+        return true, burstValue
+    end
+    return false, 0
+end
+
 function Aether.RequestSell(player)
     Aether.Settle(player)
     local Economy
@@ -172,9 +214,6 @@ function Aether.RequestSell(player)
         Economy = require("Economy")
     end
     local gain = Economy.SellAether(player)
-    local aether = player.aether
-    aether.current = 0
-    aether.lastSettleTs = time()
     return gain
 end
 
@@ -205,14 +244,21 @@ function Aether.ApplyUpgrade(player, upgradeId)
 end
 
 function Aether.Snapshot(player)
-    return {
+    local eff = Aether.GetEffectiveStats(player)
+    local snap = {
         current = player.aether.current,
-        target = player.aether.target,
-        totalRate = player.aether.totalRate,
+        target = eff.target,
+        totalRate = eff.totalRate,
         decayRate = player.aether.decayRate,
-        purityBase = player.aether.purityBase,
+        purityBase = eff.purity,
         serverNow = time(),
+        v = 1,
     }
+    if player.aether.hitCapacity then
+        snap.atCap = true
+        player.aether.hitCapacity = nil
+    end
+    return snap
 end
 
 function Aether.ListProducers(player, filter)
