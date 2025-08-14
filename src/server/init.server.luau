@@ -1,15 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-print("Loading Economy...")
-local Economy = require(script:WaitForChild("Economy"))
-print("Loading Aether...")
-local Aether = require(script:WaitForChild("Aether"))
-print("Loading PlayerManager...")
-local PlayerManager = require(script:WaitForChild("PlayerManager"))
-print("Loading DebugCommands...")
-local DebugCommands = require(script:WaitForChild("DebugCommands"))
-print("All modules loaded!")
-
+-- RemoteEvents and RemoteFunctions are created before requiring modules to
+-- avoid circular waits when modules like DebugCommands expect them at load time.
 local getPlayerData = Instance.new("RemoteFunction")
 getPlayerData.Name = "GetPlayerData"
 getPlayerData.Parent = ReplicatedStorage
@@ -46,6 +38,19 @@ aetherRequestSell.Parent = ReplicatedStorage
 local aetherReachedCapacity = Instance.new("RemoteEvent")
 aetherReachedCapacity.Name = "Aether_ReachedCapacity"
 aetherReachedCapacity.Parent = ReplicatedStorage
+
+print("Loading Economy...")
+local Economy = require(script:WaitForChild("Economy"))
+print("Loading Aether...")
+local Aether = require(script:WaitForChild("Aether"))
+print("Loading PlayerManager...")
+local PlayerManager = require(script:WaitForChild("PlayerManager"))
+print("Loading DebugCommands...")
+local DebugCommands = require(script:WaitForChild("DebugCommands"))
+if DebugCommands.SetAetherSnapshot then
+    DebugCommands.SetAetherSnapshot(aetherSnapshot)
+end
+print("All modules loaded!")
 
 getPlayerData.OnServerInvoke = function(player)
     local data = PlayerManager.GetPlayerData(player)
