@@ -2,22 +2,18 @@ local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local Aether = require(script.Parent:WaitForChild("Aether"))
 
-local function loadItemsConfig()
-    if script and script.Parent and script.Parent.Parent then
-        local shared = script.Parent.Parent:FindFirstChild("shared")
-        if shared then
-            local ok, cfg = pcall(function()
-                return require(shared:WaitForChild("ItemsConfig"))
-            end)
-            if ok then
-                return cfg
-            end
-        end
+local function loadShared(name)
+    local ok, ReplicatedStorage = pcall(function()
+        return game:GetService("ReplicatedStorage")
+    end)
+    if ok and ReplicatedStorage then
+        local Shared = ReplicatedStorage:WaitForChild("Shared")
+        return require(Shared:WaitForChild(name))
     end
-    return require("ItemsConfig")
+    return require(name)
 end
 
-local ItemsConfig = loadItemsConfig()
+local ItemsConfig = loadShared("ItemsConfig")
 
 local BurstService = {}
 
