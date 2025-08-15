@@ -46,10 +46,10 @@ end
 local evStartHolding = Instance.new("RemoteEvent")
 evStartHolding.Name = "StartHoldingItem"
 evStartHolding.Parent = ReplicatedStorage
-evStartHolding.OnServerEvent = function(player, uid)
+evStartHolding.OnServerEvent:Connect(function(player, uid)
     local data = PlayerManager.GetPlayerData(player)
     data.heldItem = uid
-end
+end)
 
 local evRequestPlace = Instance.new("RemoteEvent")
 evRequestPlace.Name = "RequestPlaceItem"
@@ -93,8 +93,7 @@ local function getModel(modelName)
     end
     return model:Clone()
 end
-
-evRequestPlace.OnServerEvent = function(player, uid, position)
+evRequestPlace.OnServerEvent:Connect(function(player, uid, position)
     local data = PlayerManager.GetPlayerData(player)
     if data.heldItem ~= uid then
         evReject:FireClient(player)
@@ -114,7 +113,7 @@ evRequestPlace.OnServerEvent = function(player, uid, position)
     model.Parent = workspace
     data.heldItem = nil
     evConfirm:FireClient(player, model)
-end
+end)
 
 return {
     FetchPage = rfFetch,

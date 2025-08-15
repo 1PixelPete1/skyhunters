@@ -22,7 +22,7 @@ return {
             displayName = "Cube Producer",
             rate = 0.5,
             allowedSurface = "plot",
-            model = "CubeProducer",
+            model = "TestSeed",
             footprint = Vector3Util.new(2, 2, 2),
             icon = "rbxassetid://0",
         },

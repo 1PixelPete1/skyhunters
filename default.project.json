@@ -6,9 +6,17 @@
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
+      },
+      "Animations": {
+        "$path": "src/client/Animations"
+      },
+      "Assets": {
+        "$className": "Folder",
+        "Models": {
+          "$path": "src/shared/Models"
+        }
       }
     },
-
     "ServerScriptService": {
       "Server": {
         "$path": "src/server"

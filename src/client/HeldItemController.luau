@@ -97,10 +97,15 @@ function HeldItemController.startHold(item)
     heldModel = model
 
     local humanoid = character:WaitForChild("Humanoid")
-    local anim = Instance.new("Animation")
-    anim.AnimationId = "rbxassetid://0"
-    handsUpAnim = humanoid:LoadAnimation(anim)
-    handsUpAnim:Play()
+    -- Reference the animation instance from ReplicatedStorage.Animations
+    local animationsFolder = ReplicatedStorage:FindFirstChild("Animations")
+    local handsUpAnimObj = animationsFolder and animationsFolder:FindFirstChild("HandsUp")
+    if handsUpAnimObj and handsUpAnimObj:IsA("Animation") then
+        handsUpAnim = humanoid:LoadAnimation(handsUpAnimObj)
+        handsUpAnim:Play()
+    else
+        warn("[HeldItemController] HandsUp animation not found in ReplicatedStorage.Animations")
+    end
 end
 
 local function spawnGhost(position, cfg)
