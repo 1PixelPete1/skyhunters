@@ -36,7 +36,7 @@ end
 
 function PlacementService.Place(player, typeId, plotId, worldCFrame)
     local cfg = ItemsConfig.Types[typeId]
-    if not cfg or cfg.category ~= "producer" then
+    if not cfg or cfg.category ~= "producers" then
         return { ok = false, err = "invalid_type" }
     end
     if not InventoryService.Consume(player, typeId, 1) then

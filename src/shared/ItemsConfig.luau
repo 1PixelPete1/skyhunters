@@ -18,7 +18,7 @@ return {
         },
 
         prod_cube_basic = {
-            category = "producer",
+            category = "producers",
             displayName = "Cube Producer",
             rate = 0.5,
             allowedSurface = "plot",

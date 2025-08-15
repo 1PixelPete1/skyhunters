@@ -116,6 +116,7 @@ local function spawnGhost(position, cfg)
     if ghostModel:IsA("BasePart") then
         ghostModel.Transparency = 0.5
         ghostModel.CanCollide = false
+        ghostModel.CFrame = CFrame.new(position)
     else
         for _, part in ipairs(ghostModel:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -123,8 +124,12 @@ local function spawnGhost(position, cfg)
                 part.CanCollide = false
             end
         end
+        if ghostModel.PrimaryPart then
+            ghostModel:SetPrimaryPartCFrame(CFrame.new(position))
+        else
+            ghostModel:PivotTo(CFrame.new(position))
+        end
     end
-    ghostModel.CFrame = CFrame.new(position)
     ghostModel.Parent = workspace
 end
 
