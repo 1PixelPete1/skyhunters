@@ -14,12 +14,17 @@ local mouse = player:GetMouse()
 
 local HeldItemController = {}
 
-local currentHeld
-local heldModel
-local ghostModel
-local handsUpAnim
+local placingItemId: string? = nil
+local placingCount = 0
+local heldModel: Instance? = nil
+local ghostModel: Instance? = nil
+local currentTemplate: Instance? = nil
+local lastMouseHit: CFrame? = nil
 
-local function getModel(modelName)
+local GRID = 1
+local currentYaw = 0
+
+local function getModel(modelName: string): Instance
     local assets = ReplicatedStorage:FindFirstChild("Assets")
     if not assets then
         warn("[HeldItemController] Assets folder missing")
@@ -55,125 +60,204 @@ local plotBounds = {
     max = Vector3.new(50, 0, 50),
 }
 
-local function insideBounds(pos)
+local function insideBounds(pos: Vector3): boolean
     return pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
 end
 
-local function stopHolding()
+-- positioning helper
+local function pivotTo(cf: CFrame, modelOrPart: Instance)
+    if modelOrPart:IsA("BasePart") then
+        (modelOrPart :: BasePart).CFrame = cf
+        return
+    end
+    if modelOrPart:IsA("Model") then
+        local m = modelOrPart :: Model
+        if m.PrimaryPart then
+            m:SetPrimaryPartCFrame(cf)
+        else
+            local candidate = m:FindFirstChild("Primary") or m:FindFirstChild("Base") or m:FindFirstChildWhichIsA("BasePart")
+            if candidate and candidate:IsA("BasePart") then
+                m.PrimaryPart = candidate
+                m:SetPrimaryPartCFrame(cf)
+            else
+                m:PivotTo(cf)
+            end
+        end
+    end
+end
+
+local function spawnGhost(asset: Instance): Instance
+    if ghostModel then
+        ghostModel:Destroy()
+    end
+    local g = asset:Clone()
+    g.Name = ("Ghost_%s"):format(asset.Name)
+    g.Parent = workspace
+    local function ghostify(i: Instance)
+        if i:IsA("BasePart") then
+            i.Transparency = 0.5
+            i.CanCollide = false
+            i.CanQuery = false
+            i.CanTouch = false
+        end
+    end
+    if g:IsA("Model") then
+        g:ScaleTo(1)
+        for _, d in ipairs(g:GetDescendants()) do
+            ghostify(d)
+        end
+    elseif g:IsA("BasePart") then
+        ghostify(g)
+    end
+    ghostModel = g
+    return g
+end
+
+local function snap(v: number, step: number): number
+    return math.floor((v + step / 2) / step) * step
+end
+
+local function updateGhostAt(mouseHit: CFrame)
+    if not ghostModel then
+        return
+    end
+    local pos = mouseHit.Position
+    local snapped = Vector3.new(snap(pos.X, GRID), snap(pos.Y, GRID), snap(pos.Z, GRID))
+    local cf = CFrame.new(snapped) * CFrame.Angles(0, currentYaw, 0)
+    pivotTo(cf, ghostModel)
+end
+
+local equipAttachmentOffset = CFrame.new(0, 3.5, 0)
+
+local function attachOverHead(character: Model, asset: Instance)
+    if heldModel then
+        heldModel:Destroy()
+    end
+    local carry = asset:Clone()
+    carry.Name = ("Carry_%s"):format(asset.Name)
+    carry.Parent = character
+    for _, d in ipairs(carry:GetDescendants()) do
+        if d:IsA("BasePart") then
+            d.Massless = true
+            d.CanCollide = false
+            d.Anchored = false
+        end
+    end
+    local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+    local base = (carry:IsA("Model") and ((carry :: Model).PrimaryPart or (carry :: Model):FindFirstChildWhichIsA("BasePart"))) or carry
+    if head and base and base:IsA("BasePart") then
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = base
+        weld.Part1 = head :: BasePart
+        weld.Parent = base
+        carry:PivotTo((head :: BasePart).CFrame * equipAttachmentOffset)
+    end
+    heldModel = carry
+end
+
+local function cancelPlacement()
+    placingItemId = nil
+    placingCount = 0
+    currentTemplate = nil
     if heldModel then
         heldModel:Destroy()
         heldModel = nil
     end
-    if handsUpAnim then
-        handsUpAnim:Stop()
-        handsUpAnim = nil
+    if ghostModel then
+        ghostModel:Destroy()
+        ghostModel = nil
     end
-    currentHeld = nil
 end
 
 function HeldItemController.startHold(item)
-    if currentHeld then
+    if placingItemId then
         return
     end
-    currentHeld = item
+    placingItemId = item.uid
+    placingCount = item.count or 1
     StartHolding:FireServer(item.uid)
-
     local cfg = ItemsConfig.Types[item.typeId]
     if not cfg then
+        cancelPlacement()
         return
     end
-
-    local model = getModel(cfg.model)
+    currentTemplate = getModel(cfg.model)
     local character = player.Character or player.CharacterAdded:Wait()
-    local hrp = character:WaitForChild("HumanoidRootPart")
-    local attach = hrp:FindFirstChild("HeldItemAttachment")
-    if not attach then
-        attach = Instance.new("Attachment")
-        attach.Name = "HeldItemAttachment"
-        attach.Position = Vector3.new(0, 5, 0)
-        attach.Parent = hrp
-    end
-    model.Parent = attach
-    heldModel = model
-
-    local humanoid = character:WaitForChild("Humanoid")
-    -- Reference the animation instance from ReplicatedStorage.Animations
-    local animationsFolder = ReplicatedStorage:FindFirstChild("Animations")
-    local handsUpAnimObj = animationsFolder and animationsFolder:FindFirstChild("HandsUp")
-    if handsUpAnimObj and handsUpAnimObj:IsA("Animation") then
-        handsUpAnim = humanoid:LoadAnimation(handsUpAnimObj)
-        handsUpAnim:Play()
-    else
-        warn("[HeldItemController] HandsUp animation not found in ReplicatedStorage.Animations")
-    end
+    attachOverHead(character, currentTemplate)
+    spawnGhost(currentTemplate)
+    updateGhostAt(mouse.Hit)
 end
 
-local function spawnGhost(position, cfg)
-    if ghostModel then
-        ghostModel:Destroy()
+local function tryPlace()
+    if not placingItemId or not ghostModel then
+        return
     end
-    ghostModel = getModel(cfg.model)
-    if ghostModel:IsA("BasePart") then
-        ghostModel.Transparency = 0.5
-        ghostModel.CanCollide = false
-        ghostModel.CFrame = CFrame.new(position)
+    local cf
+    if ghostModel:IsA("Model") then
+        cf = ghostModel:GetPivot()
     else
-        for _, part in ipairs(ghostModel:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.Transparency = 0.5
-                part.CanCollide = false
-            end
-        end
-        if ghostModel.PrimaryPart then
-            ghostModel:SetPrimaryPartCFrame(CFrame.new(position))
-        else
-            ghostModel:PivotTo(CFrame.new(position))
+        cf = (ghostModel :: BasePart).CFrame
+    end
+    RequestPlace:FireServer(placingItemId, cf)
+end
+
+ConfirmPlacement.OnClientEvent:Connect(function(ok)
+    if ok then
+        placingCount -= 1
+        if placingCount <= 0 then
+            cancelPlacement()
         end
     end
-    ghostModel.Parent = workspace
-end
-
-function HeldItemController.tryPlace(position)
-    if not currentHeld then
-        return
-    end
-    if not insideBounds(position) then
-        return
-    end
-    local cfg = ItemsConfig.Types[currentHeld.typeId]
-    if not cfg then
-        return
-    end
-    spawnGhost(position, cfg)
-    RequestPlace:FireServer(currentHeld.uid, position)
-end
-
-ConfirmPlacement.OnClientEvent:Connect(function()
     if ghostModel then
         ghostModel:Destroy()
         ghostModel = nil
     end
-    stopHolding()
 end)
 
 PlacementRejected.OnClientEvent:Connect(function()
-    if ghostModel then
-        ghostModel:Destroy()
-        ghostModel = nil
-    end
+    -- keep ghost so player can adjust
 end)
 
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then
+mouse.Move:Connect(function()
+    if not placingItemId or not currentTemplate then
         return
     end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and currentHeld then
-        HeldItemController.tryPlace(mouse.Hit.Position)
+    lastMouseHit = mouse.Hit
+    if insideBounds(lastMouseHit.Position) then
+        if not ghostModel and currentTemplate then
+            spawnGhost(currentTemplate)
+        end
+        updateGhostAt(lastMouseHit)
+    else
+        if ghostModel then
+            ghostModel:Destroy()
+            ghostModel = nil
+        end
     end
 end)
 
-function HeldItemController.isHolding()
-    return currentHeld ~= nil
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then
+        return
+    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        tryPlace()
+    elseif input.KeyCode == Enum.KeyCode.R then
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
+            currentYaw += math.rad(90)
+        else
+            currentYaw += math.rad(15)
+        end
+        if lastMouseHit then
+            updateGhostAt(lastMouseHit)
+        end
+    elseif input.KeyCode == Enum.KeyCode.Escape then
+        cancelPlacement()
+    end
+end)
+
+function HeldItemController.isHolding(): boolean
+    return placingItemId ~= nil
 end
 
 return HeldItemController
