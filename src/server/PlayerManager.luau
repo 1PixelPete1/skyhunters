@@ -19,6 +19,20 @@ if not okSched then
     SaveScheduler = require("SaveScheduler")
 end
 
+local okRep, ReplicatedStorage = pcall(function()
+    return game:GetService("ReplicatedStorage")
+end)
+if not okRep then
+    ReplicatedStorage = nil
+end
+
+local okWorkspace, Workspace = pcall(function()
+    return game:GetService("Workspace")
+end)
+if not okWorkspace then
+    Workspace = nil
+end
+
 local PlayerManager = {}
 local playerData = {}
 
@@ -34,6 +48,77 @@ local function loadShared(name)
 end
 
 local ItemsConfig = loadShared("ItemsConfig")
+
+local function getModel(modelName)
+    if not ReplicatedStorage then
+        return nil
+    end
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if not assets then
+        return nil
+    end
+    local models = assets:FindFirstChild("Models")
+    if not models then
+        return nil
+    end
+    local model = models:FindFirstChild(modelName)
+    if not model then
+        return nil
+    end
+    return model:Clone()
+end
+
+local function toWorld(cf)
+    if type(cf) == "table" then
+        local px = cf.px or 0
+        local py = cf.py or 0
+        local pz = cf.pz or 0
+        local ry = cf.ry or 0
+        if CFrame and CFrame.new then
+            local base = CFrame.new(px, py, pz)
+            if CFrame.Angles then
+                return base * CFrame.Angles(0, ry, 0)
+            else
+                return base
+            end
+        end
+    elseif typeof and typeof(cf) == "CFrame" then
+        return cf
+    end
+    return CFrame.new(0, 0, 0)
+end
+
+local function spawnPlaced(uid, record)
+    if not Workspace then
+        return
+    end
+    local cfg = ItemsConfig.Types[record.itemId or record.typeId]
+    if not cfg then
+        return
+    end
+    local model = getModel(cfg.model)
+    if not model then
+        return
+    end
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.Anchored = true
+            p.CanCollide = true
+        end
+    end
+    local cf = toWorld(record.cf)
+    if model:IsA("BasePart") then
+        model.CFrame = cf
+    else
+        if model.PrimaryPart then
+            model:SetPrimaryPartCFrame(cf)
+        else
+            model:PivotTo(cf)
+        end
+    end
+    model.Name = uid
+    model.Parent = Workspace
+end
 
 local function createNewPlayerData(player)
     return {
@@ -100,14 +185,18 @@ function PlayerManager.GetPlayerData(player)
             Aether = require("Aether")
         end
         Aether.Init(data)
-        local total = 0
         for _, record in pairs(data.placed) do
-            local cfg = ItemsConfig.Types[record.typeId]
-            if cfg and (record.active ~= false) then
-                total = total + (cfg.rate or 0)
+            if record.kind == "producer" then
+                if not record.producerUid or not data.producers[record.producerUid] then
+                    local puid = Aether.AddProducer(data, record.itemId or record.typeId, record.rate)
+                    record.producerUid = puid
+                end
             end
         end
-        data.aether.totalRate = total
+        Aether.RebuildTotalRate(data)
+        for uid, record in pairs(data.placed) do
+            spawnPlaced(uid, record)
+        end
         SaveScheduler.start(player.UserId, function()
             DataStoreAdapter.Save(player, data)
         end)

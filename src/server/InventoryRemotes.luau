@@ -93,22 +93,25 @@ local function getModel(modelName)
     end
     return model:Clone()
 end
-evRequestPlace.OnServerEvent:Connect(function(player, uid, worldCFrame)
+evRequestPlace.OnServerEvent:Connect(function(player, typeId, worldCFrame)
     local data = PlayerManager.GetPlayerData(player)
-    if data.heldItem ~= uid then
+    if data.heldItem ~= typeId then
         evReject:FireClient(player)
         return
     end
-    local cfg = ItemsConfig.Types[uid]
-    if not cfg then
+    local result = PlacementService.Place(player, typeId, nil, worldCFrame)
+    if not result.ok then
         evReject:FireClient(player)
         return
     end
-    if not InventoryService.Consume(player, uid, 1) then
-        evReject:FireClient(player)
-        return
-    end
+    local cfg = ItemsConfig.Types[typeId]
     local model = getModel(cfg.model)
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.Anchored = true
+            p.CanCollide = true
+        end
+    end
     if model:IsA("BasePart") then
         model.CFrame = worldCFrame
     else
@@ -119,8 +122,11 @@ evRequestPlace.OnServerEvent:Connect(function(player, uid, worldCFrame)
         end
     end
     model.Parent = workspace
-    data.heldItem = nil
-    evConfirm:FireClient(player, true, model)
+    local remaining = data.inventory[typeId] or 0
+    if remaining <= 0 then
+        data.heldItem = nil
+    end
+    evConfirm:FireClient(player, true, { remaining = remaining, placedId = result.uid })
 end)
 
 return {
