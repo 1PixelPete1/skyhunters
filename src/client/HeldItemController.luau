@@ -73,27 +73,32 @@ local function getModel(modelName: string): Instance
     return model:Clone()
 end
 
-local DEFAULT_BOUNDS = {
+local plotBounds = {
     min = Vector3.new(-50, 0, -50),
     max = Vector3.new(50, 0, 50),
 }
 
-local plotBounds = {
-    min = DEFAULT_BOUNDS.min,
-    max = DEFAULT_BOUNDS.max,
-}
+-- Optional: rename to your real platform object (Part or Model)
+local PLOT_PLATFORM_NAME = "Baseplate"
 
 local function updatePlotBounds()
-    local platform = workspace:FindFirstChild("Plot") or workspace:FindFirstChild("Baseplate")
-    if platform and platform:IsA("BasePart") then
-        local cf, size = (platform :: BasePart):GetBoundingBox()
+    local platform = workspace:FindFirstChild(PLOT_PLATFORM_NAME)
+    if platform and platform:IsA("Model") then
+        local cf, size = platform:GetBoundingBox()
         plotBounds.min = cf.Position - size / 2
         plotBounds.max = cf.Position + size / 2
-    else
-        warn("[HeldItemController] Plot platform not found; using default bounds")
-        plotBounds.min = DEFAULT_BOUNDS.min
-        plotBounds.max = DEFAULT_BOUNDS.max
+        return
     end
+    if platform and platform:IsA("BasePart") then
+        local cf = platform.CFrame
+        local size = platform.Size
+        plotBounds.min = cf.Position - size / 2
+        plotBounds.max = cf.Position + size / 2
+        return
+    end
+    -- Fallback if platform is missing
+    plotBounds.min = Vector3.new(-50, 0, -50)
+    plotBounds.max = Vector3.new(50, 0, 50)
 end
 
 updatePlotBounds()
@@ -174,32 +179,33 @@ local function updateGhostAt(mouseHit: CFrame)
     pivotTo(cf, ghostModel)
 end
 
-local equipAttachmentOffset = CFrame.new(0, 3.5, 0)
-
 local function attachOverHead(character: Model, asset: Instance)
-    if heldModel then
-        heldModel:Destroy()
-    end
+    if heldModel then heldModel:Destroy() end
+
     local carry = asset:Clone()
     carry.Name = ("Carry_%s"):format(asset.Name)
     carry.Parent = character
+
     for _, d in ipairs(carry:GetDescendants()) do
         if d:IsA("BasePart") then
             d.Massless = true
             d.CanCollide = false
             d.Anchored = false
-        elseif d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Motor6D") or d:IsA("BallSocketConstraint") then
+        elseif d:IsA("Weld") or d:IsA("WeldConstraint")
+            or d:IsA("Motor6D") or d:IsA("BallSocketConstraint")
+            or d:IsA("HingeConstraint") or d:IsA("RodConstraint") then
             d:Destroy()
         end
     end
+
     local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
-    local base = (carry:IsA("Model") and ((carry :: Model).PrimaryPart or (carry :: Model):FindFirstChildWhichIsA("BasePart"))) or carry
+    local base = (carry:IsA("Model") and (carry.PrimaryPart or carry:FindFirstChildWhichIsA("BasePart"))) or carry
     if head and base and base:IsA("BasePart") then
         local weld = Instance.new("WeldConstraint")
         weld.Part0 = base
         weld.Part1 = head :: BasePart
         weld.Parent = base
-        carry:PivotTo((head :: BasePart).CFrame * equipAttachmentOffset)
+        carry:PivotTo((head :: BasePart).CFrame * CFrame.new(0, 3.5, 0))
     end
     heldModel = carry
 end
@@ -240,6 +246,7 @@ function HeldItemController.startHold(item)
     attachOverHead(character, currentTemplate)
     lastMouseHit = nil
     exitButton.Visible = true
+    -- Do not spawn the ghost yet; wait for mouse.Move + insideBounds
 end
 
 local function tryPlace()
@@ -270,10 +277,11 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
     end
     placingCount = payload and payload.remaining or 0
     if placingCount > 0 then
-        if lastMouseHit and insideBounds(lastMouseHit.Position) then
+        if lastMouseHit and insideBounds(lastMouseHit.Position) and currentTemplate then
             spawnGhost(currentTemplate)
             updateGhostAt(lastMouseHit)
         end
+        -- else: wait for next mouse.Move to re-enter bounds before recreating the ghost
     else
         cancelPlacement()
     end
@@ -284,12 +292,12 @@ PlacementRejected.OnClientEvent:Connect(function()
 end)
 
 mouse.Move:Connect(function()
-    if not placingItemId or not currentTemplate then
-        return
-    end
+    if not placingItemId or not currentTemplate then return end
+
     lastMouseHit = mouse.Hit
-    if insideBounds(lastMouseHit.Position) then
-        if not ghostModel and currentTemplate then
+    local pos = lastMouseHit.Position
+    if insideBounds(pos) then
+        if not ghostModel then
             spawnGhost(currentTemplate)
         end
         updateGhostAt(lastMouseHit)
