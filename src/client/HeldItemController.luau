@@ -302,7 +302,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if lastMouseHit then
             updateGhostAt(lastMouseHit)
         end
-    elseif input.KeyCode == Enum.KeyCode.Escape then
+    elseif input.KeyCode == Enum.KeyCode.X then
+
         cancelPlacement()
     end
 end)

@@ -47,6 +47,8 @@ function PlacementService.Place(player, typeId, plotId, worldCFrame)
     local uid = Uid.next("p")
     local prodUid = Aether.AddProducer(data, typeId, cfg.rate)
     local record = {
+        uid = uid,
+
         itemId = typeId,
         plotId = plotId,
         cf = toLocal(worldCFrame),
