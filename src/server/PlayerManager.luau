@@ -194,9 +194,11 @@ function PlayerManager.GetPlayerData(player)
             end
         end
         Aether.RebuildTotalRate(data)
+
         for uid, record in pairs(data.placed) do
             spawnPlaced(uid, record)
         end
+
         SaveScheduler.start(player.UserId, function()
             DataStoreAdapter.Save(player, data)
         end)

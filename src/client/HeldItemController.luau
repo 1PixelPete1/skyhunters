@@ -286,6 +286,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         tryPlace()
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        cancelPlacement()
     elseif input.KeyCode == Enum.KeyCode.R then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             currentYaw += math.rad(90)
@@ -301,6 +303,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             updateGhostAt(lastMouseHit)
         end
     elseif input.KeyCode == Enum.KeyCode.X then
+
         cancelPlacement()
     end
 end)
