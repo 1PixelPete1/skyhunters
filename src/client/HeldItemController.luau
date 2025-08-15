@@ -20,6 +20,7 @@ local heldModel: Instance? = nil
 local ghostModel: Instance? = nil
 local currentTemplate: Instance? = nil
 local lastMouseHit: CFrame? = nil
+local lastMouseOnPlatform = false
 
 local GRID = 1
 local snapEnabled = false
@@ -78,11 +79,14 @@ local plotBounds = {
     max = Vector3.new(50, 0, 50),
 }
 
+local plotPlatform: Instance? = nil
+
 -- Optional: rename to your real platform object (Part or Model)
 local PLOT_PLATFORM_NAME = "Baseplate"
 
 local function updatePlotBounds()
     local platform = workspace:FindFirstChild(PLOT_PLATFORM_NAME)
+    plotPlatform = platform
     if platform and platform:IsA("Model") then
         local cf, size = platform:GetBoundingBox()
         plotBounds.min = cf.Position - size / 2
@@ -99,6 +103,7 @@ local function updatePlotBounds()
     -- Fallback if platform is missing
     plotBounds.min = Vector3.new(-50, 0, -50)
     plotBounds.max = Vector3.new(50, 0, 50)
+    plotPlatform = nil
 end
 
 updatePlotBounds()
@@ -222,6 +227,8 @@ local function cancelPlacement()
         ghostModel:Destroy()
         ghostModel = nil
     end
+    lastMouseHit = nil
+    lastMouseOnPlatform = false
     exitButton.Visible = false
 end
 
@@ -245,6 +252,7 @@ function HeldItemController.startHold(item)
     local character = player.Character or player.CharacterAdded:Wait()
     attachOverHead(character, currentTemplate)
     lastMouseHit = nil
+    lastMouseOnPlatform = false
     exitButton.Visible = true
     -- Do not spawn the ghost yet; wait for mouse.Move + insideBounds
 end
@@ -277,7 +285,7 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
     end
     placingCount = payload and payload.remaining or 0
     if placingCount > 0 then
-        if lastMouseHit and insideBounds(lastMouseHit.Position) and currentTemplate then
+        if lastMouseHit and lastMouseOnPlatform and currentTemplate then
             spawnGhost(currentTemplate)
             updateGhostAt(lastMouseHit)
         end
@@ -296,7 +304,18 @@ mouse.Move:Connect(function()
 
     lastMouseHit = mouse.Hit
     local pos = lastMouseHit.Position
-    if insideBounds(pos) then
+    local target = mouse.Target
+    local targetIsPlot = false
+    if plotPlatform then
+        if plotPlatform:IsA("Model") then
+            targetIsPlot = target ~= nil and target:IsDescendantOf(plotPlatform)
+        else
+            targetIsPlot = target == plotPlatform
+        end
+    end
+    local onTopSurface = mouse.TargetSurface == Enum.NormalId.Top
+    local onPlot = targetIsPlot and onTopSurface and insideBounds(pos)
+    if onPlot then
         if not ghostModel then
             spawnGhost(currentTemplate)
         end
@@ -307,6 +326,7 @@ mouse.Move:Connect(function()
             ghostModel = nil
         end
     end
+    lastMouseOnPlatform = onPlot
 end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
