@@ -100,14 +100,15 @@ function PlayerManager.GetPlayerData(player)
             Aether = require("Aether")
         end
         Aether.Init(data)
-        local total = 0
         for _, record in pairs(data.placed) do
-            local cfg = ItemsConfig.Types[record.typeId]
-            if cfg and (record.active ~= false) then
-                total = total + (cfg.rate or 0)
+            if record.kind == "producer" then
+                if not record.producerUid or not data.producers[record.producerUid] then
+                    local puid = Aether.AddProducer(data, record.itemId or record.typeId, record.rate)
+                    record.producerUid = puid
+                end
             end
         end
-        data.aether.totalRate = total
+        Aether.RebuildTotalRate(data)
         SaveScheduler.start(player.UserId, function()
             DataStoreAdapter.Save(player, data)
         end)

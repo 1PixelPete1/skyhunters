@@ -45,15 +45,16 @@ function PlacementService.Place(player, typeId, plotId, worldCFrame)
     local data = PlayerManager.GetPlayerData(player)
     data.placed = data.placed or {}
     local uid = Uid.next("p")
+    local prodUid = Aether.AddProducer(data, typeId, cfg.rate)
     local record = {
-        typeId = typeId,
+        itemId = typeId,
         plotId = plotId,
-        ["local"] = toLocal(worldCFrame),
-        active = true,
+        cf = toLocal(worldCFrame),
+        kind = "producer",
+        rate = cfg.rate,
+        producerUid = prodUid,
     }
     data.placed[uid] = record
-    Aether.Settle(data)
-    data.aether.totalRate = (data.aether.totalRate or 0) + (cfg.rate or 0)
     return { ok = true, uid = uid, serverRecord = record }
 end
 
@@ -63,11 +64,11 @@ function PlacementService.Remove(player, uid)
     if not record then
         return { ok = false, err = "not_found" }
     end
-    local cfg = ItemsConfig.Types[record.typeId]
-    Aether.Settle(data)
-    data.aether.totalRate = (data.aether.totalRate or 0) - (cfg and cfg.rate or 0)
+    if record.producerUid then
+        Aether.RemoveProducer(data, record.producerUid)
+    end
     data.placed[uid] = nil
-    InventoryService.Add(player, record.typeId, 1)
+    InventoryService.Add(player, record.itemId or record.typeId, 1)
     return { ok = true }
 end
 
