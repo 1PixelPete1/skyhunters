@@ -73,10 +73,30 @@ local function getModel(modelName: string): Instance
     return model:Clone()
 end
 
-local plotBounds = {
+local DEFAULT_BOUNDS = {
     min = Vector3.new(-50, 0, -50),
     max = Vector3.new(50, 0, 50),
 }
+
+local plotBounds = {
+    min = DEFAULT_BOUNDS.min,
+    max = DEFAULT_BOUNDS.max,
+}
+
+local function updatePlotBounds()
+    local platform = workspace:FindFirstChild("Plot") or workspace:FindFirstChild("Baseplate")
+    if platform and platform:IsA("BasePart") then
+        local cf, size = (platform :: BasePart):GetBoundingBox()
+        plotBounds.min = cf.Position - size / 2
+        plotBounds.max = cf.Position + size / 2
+    else
+        warn("[HeldItemController] Plot platform not found; using default bounds")
+        plotBounds.min = DEFAULT_BOUNDS.min
+        plotBounds.max = DEFAULT_BOUNDS.max
+    end
+end
+
+updatePlotBounds()
 
 local function insideBounds(pos: Vector3): boolean
     return pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
@@ -168,6 +188,8 @@ local function attachOverHead(character: Model, asset: Instance)
             d.Massless = true
             d.CanCollide = false
             d.Anchored = false
+        elseif d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Motor6D") or d:IsA("BallSocketConstraint") then
+            d:Destroy()
         end
     end
     local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
@@ -216,8 +238,7 @@ function HeldItemController.startHold(item)
     currentTemplate = getModel(cfg.model)
     local character = player.Character or player.CharacterAdded:Wait()
     attachOverHead(character, currentTemplate)
-    spawnGhost(currentTemplate)
-    updateGhostAt(mouse.Hit)
+    lastMouseHit = nil
     exitButton.Visible = true
 end
 
@@ -249,8 +270,8 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
     end
     placingCount = payload and payload.remaining or 0
     if placingCount > 0 then
-        spawnGhost(currentTemplate)
-        if lastMouseHit then
+        if lastMouseHit and insideBounds(lastMouseHit.Position) then
+            spawnGhost(currentTemplate)
             updateGhostAt(lastMouseHit)
         end
     else
@@ -286,8 +307,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         tryPlace()
-    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-        cancelPlacement()
     elseif input.KeyCode == Enum.KeyCode.R then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             currentYaw += math.rad(90)
