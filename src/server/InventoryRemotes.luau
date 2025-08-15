@@ -93,7 +93,7 @@ local function getModel(modelName)
     end
     return model:Clone()
 end
-evRequestPlace.OnServerEvent:Connect(function(player, uid, position)
+evRequestPlace.OnServerEvent:Connect(function(player, uid, worldCFrame)
     local data = PlayerManager.GetPlayerData(player)
     if data.heldItem ~= uid then
         evReject:FireClient(player)
@@ -109,10 +109,18 @@ evRequestPlace.OnServerEvent:Connect(function(player, uid, position)
         return
     end
     local model = getModel(cfg.model)
-    model.CFrame = CFrame.new(position)
+    if model:IsA("BasePart") then
+        model.CFrame = worldCFrame
+    else
+        if model.PrimaryPart then
+            model:SetPrimaryPartCFrame(worldCFrame)
+        else
+            model:PivotTo(worldCFrame)
+        end
+    end
     model.Parent = workspace
     data.heldItem = nil
-    evConfirm:FireClient(player, model)
+    evConfirm:FireClient(player, true, model)
 end)
 
 return {
