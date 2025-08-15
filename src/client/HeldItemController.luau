@@ -22,7 +22,25 @@ local currentTemplate: Instance? = nil
 local lastMouseHit: CFrame? = nil
 
 local GRID = 1
+local snapEnabled = false
 local currentYaw = 0
+local lastPlace = 0
+
+local exitButton
+do
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "PlacementGui"
+    gui.ResetOnSpawn = false
+    gui.Parent = player:WaitForChild("PlayerGui")
+
+    exitButton = Instance.new("TextButton")
+    exitButton.Text = "×"
+    exitButton.Size = UDim2.new(0, 24, 0, 24)
+    exitButton.Position = UDim2.new(1, -28, 0, 4)
+    exitButton.AnchorPoint = Vector2.new(1, 0)
+    exitButton.Visible = false
+    exitButton.Parent = gui
+end
 
 local function getModel(modelName: string): Instance
     local assets = ReplicatedStorage:FindFirstChild("Assets")
@@ -99,6 +117,9 @@ local function spawnGhost(asset: Instance): Instance
             i.CanCollide = false
             i.CanQuery = false
             i.CanTouch = false
+            i.Anchored = true
+        elseif i:IsA("Weld") or i:IsA("WeldConstraint") or i:IsA("Motor6D") or i:IsA("BallSocketConstraint") then
+            i:Destroy()
         end
     end
     if g:IsA("Model") then
@@ -122,8 +143,14 @@ local function updateGhostAt(mouseHit: CFrame)
         return
     end
     local pos = mouseHit.Position
-    local snapped = Vector3.new(snap(pos.X, GRID), snap(pos.Y, GRID), snap(pos.Z, GRID))
-    local cf = CFrame.new(snapped) * CFrame.Angles(0, currentYaw, 0)
+    local useSnap = snapEnabled and GRID > 0 and not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
+    local basePos
+    if useSnap then
+        basePos = Vector3.new(snap(pos.X, GRID), snap(pos.Y, GRID), snap(pos.Z, GRID))
+    else
+        basePos = pos
+    end
+    local cf = CFrame.new(basePos) * CFrame.Angles(0, currentYaw, 0)
     pivotTo(cf, ghostModel)
 end
 
@@ -167,7 +194,12 @@ local function cancelPlacement()
         ghostModel:Destroy()
         ghostModel = nil
     end
+    exitButton.Visible = false
 end
+
+exitButton.Activated:Connect(function()
+    cancelPlacement()
+end)
 
 function HeldItemController.startHold(item)
     if placingItemId then
@@ -186,12 +218,18 @@ function HeldItemController.startHold(item)
     attachOverHead(character, currentTemplate)
     spawnGhost(currentTemplate)
     updateGhostAt(mouse.Hit)
+    exitButton.Visible = true
 end
 
 local function tryPlace()
     if not placingItemId or not ghostModel then
         return
     end
+    local now = tick()
+    if now - lastPlace < 0.2 then
+        return
+    end
+    lastPlace = now
     local cf
     if ghostModel:IsA("Model") then
         cf = ghostModel:GetPivot()
@@ -201,16 +239,22 @@ local function tryPlace()
     RequestPlace:FireServer(placingItemId, cf)
 end
 
-ConfirmPlacement.OnClientEvent:Connect(function(ok)
-    if ok then
-        placingCount -= 1
-        if placingCount <= 0 then
-            cancelPlacement()
-        end
+ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
+    if not ok then
+        return
     end
     if ghostModel then
         ghostModel:Destroy()
         ghostModel = nil
+    end
+    placingCount = payload and payload.remaining or 0
+    if placingCount > 0 then
+        spawnGhost(currentTemplate)
+        if lastMouseHit then
+            updateGhostAt(lastMouseHit)
+        end
+    else
+        cancelPlacement()
     end
 end)
 
@@ -242,12 +286,19 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         tryPlace()
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        cancelPlacement()
     elseif input.KeyCode == Enum.KeyCode.R then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             currentYaw += math.rad(90)
         else
             currentYaw += math.rad(15)
         end
+        if lastMouseHit then
+            updateGhostAt(lastMouseHit)
+        end
+    elseif input.KeyCode == Enum.KeyCode.G then
+        snapEnabled = not snapEnabled
         if lastMouseHit then
             updateGhostAt(lastMouseHit)
         end
