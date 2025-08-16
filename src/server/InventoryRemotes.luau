@@ -3,6 +3,8 @@ local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local BurstService = require(script.Parent:WaitForChild("BurstService"))
 local PlacementService = require(script.Parent:WaitForChild("PlacementService"))
 local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
+local SaveScheduler = require(script.Parent:WaitForChild("SaveScheduler"))
+local DataStoreAdapter = require(script.Parent:WaitForChild("DataStoreAdapter"))
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ItemsConfig = require(Shared:WaitForChild("ItemsConfig"))
@@ -33,7 +35,14 @@ local rfPlace = Instance.new("RemoteFunction")
 rfPlace.Name = "RF_PlaceItem"
 rfPlace.Parent = ReplicatedStorage
 rfPlace.OnServerInvoke = function(player, typeId, plotId, worldCFrame)
-    return PlacementService.Place(player, typeId, plotId, worldCFrame)
+    local result = PlacementService.Place(player, typeId, plotId, worldCFrame)
+    if result.ok then
+        local data = PlayerManager.GetPlayerData(player)
+        SaveScheduler.enqueue(player.UserId, function()
+            DataStoreAdapter.Save(player, data)
+        end)
+    end
+    return result
 end
 
 local rfRemove = Instance.new("RemoteFunction")
@@ -127,6 +136,9 @@ evRequestPlace.OnServerEvent:Connect(function(player, typeId, worldCFrame)
         data.heldItem = nil
     end
     evConfirm:FireClient(player, true, { remaining = remaining, placedId = result.uid })
+    SaveScheduler.enqueue(player.UserId, function()
+        DataStoreAdapter.Save(player, data)
+    end)
 end)
 
 return {

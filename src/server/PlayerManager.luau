@@ -68,18 +68,51 @@ local function getModel(modelName)
     return model:Clone()
 end
 
+local PLOT_PLATFORM_NAME = "Baseplate"
+
+local function getPlotBounds()
+    if not Workspace then
+        return Vector3.new(-50, 0, -50), Vector3.new(100, 0, 100)
+    end
+    local platform = Workspace:FindFirstChild(PLOT_PLATFORM_NAME)
+    if platform then
+        if platform:IsA("Model") then
+            local cf, size = platform:GetBoundingBox()
+            return cf.Position - size / 2, size
+        elseif platform:IsA("BasePart") then
+            local cf = platform.CFrame
+            return cf.Position - platform.Size / 2, platform.Size
+        end
+    end
+    return Vector3.new(-50, 0, -50), Vector3.new(100, 0, 100)
+end
+
 local function toWorld(cf)
     if type(cf) == "table" then
-        local px = cf.px or 0
-        local py = cf.py or 0
-        local pz = cf.pz or 0
+        local py = cf.y or cf.py or 0
         local ry = cf.ry or 0
-        if CFrame and CFrame.new then
-            local base = CFrame.new(px, py, pz)
-            if CFrame.Angles then
-                return base * CFrame.Angles(0, ry, 0)
-            else
-                return base
+        if cf.rx ~= nil and cf.rz ~= nil then
+            local min, size = getPlotBounds()
+            local px = min.X + cf.rx * size.X
+            local pz = min.Z + cf.rz * size.Z
+            if CFrame and CFrame.new then
+                local base = CFrame.new(px, py, pz)
+                if CFrame.Angles then
+                    return base * CFrame.Angles(0, ry, 0)
+                else
+                    return base
+                end
+            end
+        else
+            local px = cf.px or 0
+            local pz = cf.pz or 0
+            if CFrame and CFrame.new then
+                local base = CFrame.new(px, py, pz)
+                if CFrame.Angles then
+                    return base * CFrame.Angles(0, ry, 0)
+                else
+                    return base
+                end
             end
         end
     elseif typeof and typeof(cf) == "CFrame" then

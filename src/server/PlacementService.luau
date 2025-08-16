@@ -22,15 +22,40 @@ local rtypeof = typeof or function(obj)
     return type(obj)
 end
 
+local PLOT_PLATFORM_NAME = "Baseplate"
+
+local function getPlotBounds()
+    local platform
+    local ok, Workspace = pcall(function()
+        return game:GetService("Workspace")
+    end)
+    if ok and Workspace then
+        platform = Workspace:FindFirstChild(PLOT_PLATFORM_NAME)
+        if platform then
+            if platform:IsA("Model") then
+                local cf, size = platform:GetBoundingBox()
+                return cf.Position - size / 2, size
+            elseif platform:IsA("BasePart") then
+                local cf = platform.CFrame
+                return cf.Position - platform.Size / 2, platform.Size
+            end
+        end
+    end
+    return Vector3.new(-50, 0, -50), Vector3.new(100, 0, 100)
+end
+
 local function toLocal(cf)
-    if rtypeof(cf) == "CFrame" then
+    if rtypeof(cf) == "CFrame" or (type(cf) == "table" and cf.Position and cf.ToOrientation) then
         local px, py, pz = cf.Position.X, cf.Position.Y, cf.Position.Z
         local _, ry, _ = cf:ToOrientation()
-        return { px = px, py = py, pz = pz, ry = ry }
+        local min, size = getPlotBounds()
+        local rx = (px - min.X) / size.X
+        local rz = (pz - min.Z) / size.Z
+        return { rx = rx, rz = rz, y = py, ry = ry }
     elseif type(cf) == "table" then
         return cf
     else
-        return { px = 0, py = 0, pz = 0, ry = 0 }
+        return { rx = 0, rz = 0, y = 0, ry = 0 }
     end
 end
 

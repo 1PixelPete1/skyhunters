@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local StartHolding = ReplicatedStorage:WaitForChild("StartHoldingItem")
 local RequestPlace = ReplicatedStorage:WaitForChild("RequestPlaceItem")
@@ -148,17 +149,18 @@ local function spawnGhost(asset: Instance): Instance
             i.CanQuery = false
             i.CanTouch = false
             i.Anchored = true
-        elseif i:IsA("Weld") or i:IsA("WeldConstraint") or i:IsA("Motor6D") or i:IsA("BallSocketConstraint") then
+        elseif i:IsA("Weld") or i:IsA("WeldConstraint") or i:IsA("Motor6D")
+            or i:IsA("BallSocketConstraint") or i:IsA("HingeConstraint")
+            or i:IsA("RodConstraint") then
             i:Destroy()
         end
     end
+    ghostify(g)
     if g:IsA("Model") then
         g:ScaleTo(1)
         for _, d in ipairs(g:GetDescendants()) do
             ghostify(d)
         end
-    elseif g:IsA("BasePart") then
-        ghostify(g)
     end
     ghostModel = g
     return g
@@ -203,14 +205,14 @@ local function attachOverHead(character: Model, asset: Instance)
         end
     end
 
-    local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+    local hrp = character:FindFirstChild("HumanoidRootPart")
     local base = (carry:IsA("Model") and (carry.PrimaryPart or carry:FindFirstChildWhichIsA("BasePart"))) or carry
-    if head and base and base:IsA("BasePart") then
+    if hrp and base and base:IsA("BasePart") then
         local weld = Instance.new("WeldConstraint")
         weld.Part0 = base
-        weld.Part1 = head :: BasePart
+        weld.Part1 = hrp :: BasePart
         weld.Parent = base
-        carry:PivotTo((head :: BasePart).CFrame * CFrame.new(0, 3.5, 0))
+        carry:PivotTo((hrp :: BasePart).CFrame * CFrame.new(0, 0, -2))
     end
     heldModel = carry
 end
@@ -234,6 +236,24 @@ end
 
 exitButton.Activated:Connect(function()
     cancelPlacement()
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not placingItemId then
+        return
+    end
+    local character = player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return
+    end
+    local pos = hrp.Position
+    local within = pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X
+        and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
+        and pos.Y >= plotBounds.min.Y - 5 and pos.Y <= plotBounds.max.Y + 5
+    if not within then
+        cancelPlacement()
+    end
 end)
 
 function HeldItemController.startHold(item)
