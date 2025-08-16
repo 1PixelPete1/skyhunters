@@ -4,8 +4,10 @@
 -- Filters server-only items by tags; unobtainable/adminOnly are never granted.
 
 local ServerStorage = game:GetService("ServerStorage")
-local InventoryService = require(ServerStorage:WaitForChild("InventoryService"))
-local Economy = require(ServerStorage:WaitForChild("Economy"))
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local serverModules = ServerScriptService:WaitForChild("Server")
+local InventoryService = require(serverModules:WaitForChild("InventoryService"))
 local ServerItemConfig = require(ServerStorage:WaitForChild("ServerItemConfig"))
 
 local LootService = {}

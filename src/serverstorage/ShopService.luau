@@ -3,11 +3,13 @@
 -- Differences allowed: name, rarity, price. Everything else identical.
 
 local ServerStorage = game:GetService("ServerStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Economy = require(ServerStorage:WaitForChild("Economy"))
-local InventoryService = require(ServerStorage:WaitForChild("InventoryService"))
-local SaveScheduler = require(ServerStorage:WaitForChild("SaveScheduler"))
+local serverModules = ServerScriptService:WaitForChild("Server")
+local Economy = require(serverModules:WaitForChild("Economy"))
+local InventoryService = require(serverModules:WaitForChild("InventoryService"))
+local SaveScheduler = require(serverModules:WaitForChild("SaveScheduler"))
 local ServerItemConfig = require(ServerStorage:WaitForChild("ServerItemConfig"))
 local RateLimiter = require(ServerStorage.RateLimiter)
 local TxnLock = require(ServerStorage.TxnLock)
