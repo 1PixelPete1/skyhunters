@@ -252,6 +252,7 @@ Players.PlayerRemoving:Connect(function(player)
         SaveScheduler.enqueue(player.UserId, function()
             DataStoreAdapter.Save(player, data)
         end)
+        SaveScheduler.flushImmediate(player)
     end
     playerData[player] = nil
     SaveScheduler.remove(player.UserId)

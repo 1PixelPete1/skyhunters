@@ -77,5 +77,11 @@ function SaveScheduler.flush()
     end
 end
 
+function SaveScheduler.flushImmediate(player)
+    local uid = typeof(player) == "table" and player.UserId or player
+    run(uid)
+    return true
+end
+
 return SaveScheduler
 
