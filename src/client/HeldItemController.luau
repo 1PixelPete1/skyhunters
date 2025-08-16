@@ -121,17 +121,13 @@ local function pivotTo(cf: CFrame, modelOrPart: Instance)
     end
     if modelOrPart:IsA("Model") then
         local m = modelOrPart :: Model
-        if m.PrimaryPart then
-            m:SetPrimaryPartCFrame(cf)
-        else
+        if not m.PrimaryPart then
             local candidate = m:FindFirstChild("Primary") or m:FindFirstChild("Base") or m:FindFirstChildWhichIsA("BasePart")
             if candidate and candidate:IsA("BasePart") then
                 m.PrimaryPart = candidate
-                m:SetPrimaryPartCFrame(cf)
-            else
-                m:PivotTo(cf)
             end
         end
+        m:PivotTo(cf)
     end
 end
 
