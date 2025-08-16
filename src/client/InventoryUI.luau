@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
+local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
 local HeldItemController = require(script.Parent:WaitForChild("HeldItemController"))
 
 local RF_Fetch = ReplicatedStorage:WaitForChild("Inventory_FetchPage")
@@ -38,7 +39,17 @@ local function createCell()
         end
         local item = itemLookup[uid]
         if item then
-            HeldItemController.startHold(item)
+            local cfg = ItemsConfig.Types[item.typeId]
+            if cfg then
+                HeldItemController.Start({
+                    id = item.uid,
+                    model = cfg.model,
+                    type = "Build",
+                    weldTo = "Head",
+                    carryOffset = nil,
+                    count = item.count,
+                }, "build")
+            end
         end
     end)
     return frame
