@@ -22,6 +22,13 @@ if not CFrame then
     end
 end
 
+if not Vector3 then
+    Vector3 = {}
+    function Vector3.new(x, y, z)
+        return { X = x, Y = y, Z = z }
+    end
+end
+
 game = {
     GetService = function(self, name)
         if name == "Players" then

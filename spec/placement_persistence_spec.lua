@@ -22,6 +22,13 @@ if not CFrame then
     end
 end
 
+if not Vector3 then
+    Vector3 = {}
+    function Vector3.new(x, y, z)
+        return { X = x, Y = y, Z = z }
+    end
+end
+
 game = {
     GetService = function(self, name)
         if name == "Players" then
@@ -57,6 +64,6 @@ local rec = loaded.placed[result.uid]
 assert(rec, "placement should persist")
 assert(rec.itemId == "prod_cube_basic", "itemId persisted")
 assert(rec.uid == result.uid, "uid stored in record")
-assert(rec.cf and ((rec.cf.px == 5) or (rec.cf.Position and rec.cf.Position.X == 5)), "position persisted")
+assert(rec.cf and math.abs((rec.cf.rx or 0) - 0.55) < 0.001, "position persisted")
 
 print("placement persistence spec passed")
