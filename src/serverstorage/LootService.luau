@@ -4,9 +4,11 @@
 -- Filters server-only items by tags; unobtainable/adminOnly are never granted.
 
 local ServerStorage = game:GetService("ServerStorage")
--- local InventoryService = require(ServerStorage.InventoryService)
--- local EconomyService = require(ServerStorage.EconomyService)
--- local ServerItemConfig = require(ServerStorage.ServerItemConfig)
+local ServerScriptService = game:GetService("ServerScriptService")
+local ServerRoot = ServerScriptService:WaitForChild("Server")
+local InventoryService = require(ServerRoot:WaitForChild("InventoryService"))
+local Economy = require(ServerRoot:WaitForChild("Economy"))
+local ServerItemConfig = require(ServerStorage:WaitForChild("ServerItemConfig"))
 
 local LootService = {}
 
@@ -15,14 +17,38 @@ local function rng()
 end
 
 local function passesTags(def, includeTags, excludeTags)
-    -- TODO: implement according to your tag format (array or map)
+    local tags = def.tags or {}
+    if includeTags then
+        local found = false
+        for _, inc in ipairs(includeTags) do
+            for _, t in ipairs(tags) do
+                if t == inc then
+                    found = true
+                    break
+                end
+            end
+            if found then
+                break
+            end
+        end
+        if not found then
+            return false
+        end
+    end
+    if excludeTags then
+        for _, ex in ipairs(excludeTags) do
+            for _, t in ipairs(tags) do
+                if t == ex then
+                    return false
+                end
+            end
+        end
+    end
     return true
 end
 
 local function eligible(def)
-    -- Enforce obtainability/adminOnly server-side
-    -- return def and def.obtainable and not def.adminOnly
-    return true
+    return def and def.obtainable and not def.adminOnly
 end
 
 -- Weighting strategy is a policy choice; basic uniform for now.
@@ -41,35 +67,27 @@ function LootService.Roll(player, options)
     local includeTags = opts.includeTags
     local excludeTags = opts.excludeTags
 
-    -- Build server-side candidate pool
-    -- local pool = {}
-    -- for id, def in pairs(ServerItemConfig.items) do
-    --     if eligible(def) and passesTags(def, includeTags, excludeTags) then
-    --         if def.class == "Producer" then
-    --             table.insert(pool, { id = id, def = def })
-    --         end
-    --     end
-    -- end
+    local pool = {}
+    for id, def in pairs(ServerItemConfig.items) do
+        if def.class == "Producer" and eligible(def) and passesTags(def, includeTags, excludeTags) then
+            table.insert(pool, { id = id, weight = 1 })
+        end
+    end
 
     -- Use RNG
     local R = rng()
 
     for _ = 1, count do
-        -- Example: apply a flat fail roll with (1 - mod) chance if you want scarcity
-        -- if mod < 1 and R:NextNumber() > mod then
-        --     continue
-        -- end
-
-        -- local picked = pick(pool, R)
-        local picked = nil -- replace with actual pick
+        if mod < 1 and R:NextNumber() > mod then
+            continue
+        end
+        local picked = pick(pool, R)
         if picked then
-            -- Grant here (server-side):
-            -- InventoryService.AddItem(player, picked.id, 1)
+            InventoryService.Add(player, picked.id, 1)
             table.insert(drops, { id = picked.id, qty = 1 })
         end
     end
 
-    -- Optionally award currency here, same pattern, server-side only.
     return { ok = true, grants = drops }
 end
 
