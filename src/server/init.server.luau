@@ -343,6 +343,24 @@ end
 
 createSellLever()
 
+local function createShopNPC()
+    local workspace = game:GetService("Workspace")
+    local npc = Instance.new("Part")
+    npc.Name = "ShopNPC"
+    npc.Size = Vector3.new(2, 5, 2)
+    npc.Anchored = true
+    npc.Position = Vector3.new(-6, 2.5, 0)
+    npc.Parent = workspace
+
+    local prompt = Instance.new("ProximityPrompt")
+    prompt.ActionText = "Shop"
+    prompt.ObjectText = "Shopkeeper"
+    prompt.HoldDuration = 0.75
+    prompt.Parent = npc
+end
+
+createShopNPC()
+
 -- Run test 2 seconds after server starts
 wait(2)
 runAetherTest()

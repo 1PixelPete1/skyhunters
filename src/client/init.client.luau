@@ -159,3 +159,10 @@ if okInv then
     InventoryUI.Init()
 end
 
+local okShop, ShopUI = pcall(function()
+    return require(script:WaitForChild("ShopUI"))
+end)
+if okShop then
+    ShopUI.Init()
+end
+
