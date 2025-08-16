@@ -5,6 +5,12 @@ local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
 local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
+local CountChangedEvent = ReplicatedStorage:FindFirstChild("InventoryCountChanged")
+if not CountChangedEvent then
+    CountChangedEvent = Instance.new("BindableEvent")
+    CountChangedEvent.Name = "InventoryCountChanged"
+    CountChangedEvent.Parent = ReplicatedStorage
+end
 local HeldItemController = require(script.Parent:WaitForChild("HeldItemController"))
 
 local RF_Fetch = ReplicatedStorage:WaitForChild("Inventory_FetchPage")
@@ -48,6 +54,9 @@ local function createCell()
                     weldTo = "Head",
                     carryOffset = nil,
                     count = item.count,
+                    icon = cfg.icon,
+                    name = cfg.displayName,
+                    cameraBehavior = cfg.cameraBehavior,
                 }, "build")
             end
         end
@@ -82,6 +91,23 @@ local function renderGrid()
         table.insert(cells, cell)
     end
 end
+
+CountChangedEvent.Event:Connect(function(uid, newCount)
+    local item = itemLookup[uid]
+    if item then
+        item.count = newCount
+        if newCount <= 0 then
+            for i, existing in ipairs(items) do
+                if existing.uid == uid then
+                    table.remove(items, i)
+                    break
+                end
+            end
+            itemLookup[uid] = nil
+        end
+    end
+    renderGrid()
+end)
 
 local function fetchPage(reset)
     if reset then
