@@ -17,6 +17,9 @@
         }
       }
     },
+    "ServerStorage": {
+      "$path": "src/serverstorage"
+    },
     "ServerScriptService": {
       "Server": {
         "$path": "src/server"

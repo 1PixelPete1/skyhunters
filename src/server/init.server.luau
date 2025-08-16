@@ -57,6 +57,9 @@ local SaveScheduler = require(script:WaitForChild("SaveScheduler"))
 DebugCommands.SetAetherSnapshot(aetherSnapshot)
 
 game:BindToClose(function()
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        SaveScheduler.flushImmediate(player)
+    end
     SaveScheduler.flush()
 end)
 
