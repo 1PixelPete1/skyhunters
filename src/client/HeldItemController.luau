@@ -195,6 +195,7 @@ local function attachCarry(character: Model, asset: Instance, socketName: string
 
     local carry = asset:Clone()
     ModelUtils.ensurePrimaryPart(carry)
+
     carry.Name = ("Carry_%s"):format(asset.Name)
 
     for _, d in ipairs(carry:GetDescendants()) do
@@ -204,6 +205,7 @@ local function attachCarry(character: Model, asset: Instance, socketName: string
             d.Massless = true
         end
     end
+  
     ModelUtils.stripExternalConstraints(carry)
     ModelUtils.weldModelRigid(carry)
 
