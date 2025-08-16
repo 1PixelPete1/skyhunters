@@ -186,34 +186,74 @@ local function updateGhostAt(mouseHit: CFrame)
     pivotTo(cf, ghostModel)
 end
 
+local function ensurePrimaryPart(m: Model)
+    if m.PrimaryPart then
+        return
+    end
+    local root = m:FindFirstChild("Root") or m:FindFirstChildWhichIsA("BasePart")
+    if root then
+        m.PrimaryPart = root
+    end
+end
+
+local function stripExternalConstraints(m: Model)
+    for _, c in ipairs(m:GetDescendants()) do
+        if c:IsA("Constraint") then
+            local a0 = (c :: any).Attachment0
+            local a1 = (c :: any).Attachment1
+            local p0 = (c :: any).Part0
+            local p1 = (c :: any).Part1
+            if (a0 and not a0:IsDescendantOf(m)) or (a1 and not a1:IsDescendantOf(m))
+                or (p0 and not p0:IsDescendantOf(m)) or (p1 and not p1:IsDescendantOf(m)) then
+                c:Destroy()
+            end
+        elseif c:IsA("JointInstance") then
+            local p0 = (c :: any).Part0
+            local p1 = (c :: any).Part1
+            if (p0 and not p0:IsDescendantOf(m)) or (p1 and not p1:IsDescendantOf(m)) then
+                c:Destroy()
+            end
+        end
+    end
+end
+
 local function attachOverHead(character: Model, asset: Instance)
     if heldModel then heldModel:Destroy() end
 
     local carry = asset:Clone()
+    ensurePrimaryPart(carry)
     carry.Name = ("Carry_%s"):format(asset.Name)
-    carry.Parent = character
 
     for _, d in ipairs(carry:GetDescendants()) do
         if d:IsA("BasePart") then
-            d.Massless = true
-            d.CanCollide = false
             d.Anchored = false
-        elseif d:IsA("Weld") or d:IsA("WeldConstraint")
-            or d:IsA("Motor6D") or d:IsA("BallSocketConstraint")
-            or d:IsA("HingeConstraint") or d:IsA("RodConstraint") then
-            d:Destroy()
+            d.CanCollide = false
+            d.Massless = true
         end
     end
+    stripExternalConstraints(carry)
 
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local base = (carry:IsA("Model") and (carry.PrimaryPart or carry:FindFirstChildWhichIsA("BasePart"))) or carry
-    if hrp and base and base:IsA("BasePart") then
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = base
-        weld.Part1 = hrp :: BasePart
-        weld.Parent = base
-        carry:PivotTo((hrp :: BasePart).CFrame * CFrame.new(0, 0, -2))
+    local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+    if not head or not carry.PrimaryPart then
+        carry:Destroy()
+        return
     end
+
+    carry.Parent = character
+
+    local _, size = carry:GetBoundingBox()
+    local up = math.max(1.0, 0.5 * size.Y + 0.5)
+    local fwd = math.max(0.6, 0.25 * size.Z)
+    local offset = CFrame.new(0, up, -fwd)
+
+    carry:PivotTo((head :: BasePart).CFrame * offset)
+
+    local base = carry.PrimaryPart :: BasePart
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = base
+    weld.Part1 = head :: BasePart
+    weld.Parent = base
+
     heldModel = carry
 end
 
