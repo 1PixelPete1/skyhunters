@@ -10,6 +10,7 @@ local serverModules = ServerScriptService:WaitForChild("Server")
 local Economy = require(serverModules:WaitForChild("Economy"))
 local InventoryService = require(serverModules:WaitForChild("InventoryService"))
 local SaveScheduler = require(serverModules:WaitForChild("SaveScheduler"))
+local PlayerManager = require(serverModules:WaitForChild("PlayerManager"))
 local ServerItemConfig = require(ServerStorage:WaitForChild("ServerItemConfig"))
 local RateLimiter = require(ServerStorage.RateLimiter)
 local TxnLock = require(ServerStorage.TxnLock)
@@ -52,13 +53,16 @@ function ShopService.Purchase(player, payload)
     local total = unitPrice * qty
 
     return TxnLock.withLock(player, "purchase", function()
-        if (player.crumbs or 0) < total then
+        local data = PlayerManager.GetPlayerData(player)
+        local balance = data.crumbs or 0
+        if balance < total then
             return { ok = false, code = "INSUFFICIENT_FUNDS" }
         end
-        if not Economy.ApplyCrumbsDelta(player, -total, "purchase") then
+        if not Economy.ApplyCrumbsDelta(data, -total, "purchase") then
             return { ok = false, code = "INSUFFICIENT_FUNDS" }
         end
         InventoryService.Add(player, itemId, qty)
+        local newCount = InventoryService.GetCount(player, itemId)
 
         -- Persist
         if FORCE_DURABLE_SAVE then
@@ -66,7 +70,7 @@ function ShopService.Purchase(player, payload)
             -- Prefer a targeted, fast-save path here.
             local okSave = SaveScheduler.flushImmediate(player)
             if not okSave then
-                Economy.ApplyCrumbsDelta(player, total, "refund")
+                Economy.ApplyCrumbsDelta(data, total, "rollback")
                 InventoryService.Add(player, itemId, -qty)
                 return { ok = false, code = "SAVE_FAILED" }
             end
@@ -82,8 +86,8 @@ function ShopService.Purchase(player, payload)
             ok = true,
             itemId = itemId,
             qtyGranted = qty,
-            newBalance = player.crumbs,
-            newCount = (player.inventory and player.inventory[itemId]) or 0,
+            newBalance = data.crumbs,
+            newCount = newCount,
         }
     end)
 end
