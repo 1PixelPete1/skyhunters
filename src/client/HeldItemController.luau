@@ -8,10 +8,19 @@ local RequestPlace = ReplicatedStorage:WaitForChild("RequestPlaceItem")
 local ConfirmPlacement = ReplicatedStorage:WaitForChild("ConfirmPlacement")
 local PlacementRejected = ReplicatedStorage:WaitForChild("PlacementRejected")
 
-local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
+local ModelUtils = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ModelUtils"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
+
+type ItemDef = {
+    id: string,
+    model: string,
+    type: "Build" | "Equip",
+    weldTo: "Head" | "HumanoidRootPart" | "RightHand",
+    carryOffset: CFrame?,
+    count: number?,
+}
 
 local HeldItemController = {}
 
@@ -22,6 +31,8 @@ local ghostModel: Instance? = nil
 local currentTemplate: Instance? = nil
 local lastMouseHit: CFrame? = nil
 local lastMouseOnPlatform = false
+local currentItemDef: ItemDef? = nil
+local currentMode: ("build" | "equip")? = nil
 
 local GRID = 1
 local snapEnabled = false
@@ -109,10 +120,6 @@ end
 
 updatePlotBounds()
 
-local function insideBounds(pos: Vector3): boolean
-    return pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
-end
-
 -- positioning helper
 local function pivotTo(cf: CFrame, modelOrPart: Instance)
     if modelOrPart:IsA("BasePart") then
@@ -121,17 +128,13 @@ local function pivotTo(cf: CFrame, modelOrPart: Instance)
     end
     if modelOrPart:IsA("Model") then
         local m = modelOrPart :: Model
-        if m.PrimaryPart then
-            m:SetPrimaryPartCFrame(cf)
-        else
+        if not m.PrimaryPart then
             local candidate = m:FindFirstChild("Primary") or m:FindFirstChild("Base") or m:FindFirstChildWhichIsA("BasePart")
             if candidate and candidate:IsA("BasePart") then
                 m.PrimaryPart = candidate
-                m:SetPrimaryPartCFrame(cf)
-            else
-                m:PivotTo(cf)
             end
         end
+        m:PivotTo(cf)
     end
 end
 
@@ -175,45 +178,58 @@ local function updateGhostAt(mouseHit: CFrame)
         return
     end
     local pos = mouseHit.Position
+    local yTop = plotBounds.max.Y
     local useSnap = snapEnabled and GRID > 0 and not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
     local basePos
     if useSnap then
-        basePos = Vector3.new(snap(pos.X, GRID), snap(pos.Y, GRID), snap(pos.Z, GRID))
+        basePos = Vector3.new(snap(pos.X, GRID), yTop, snap(pos.Z, GRID))
     else
-        basePos = pos
+        basePos = Vector3.new(pos.X, yTop, pos.Z)
     end
     local cf = CFrame.new(basePos) * CFrame.Angles(0, currentYaw, 0)
     pivotTo(cf, ghostModel)
 end
 
-local function attachOverHead(character: Model, asset: Instance)
+local function attachCarry(character: Model, asset: Instance, socketName: string, offset: CFrame?)
     if heldModel then heldModel:Destroy() end
 
     local carry = asset:Clone()
+    ModelUtils.ensurePrimaryPart(carry)
     carry.Name = ("Carry_%s"):format(asset.Name)
-    carry.Parent = character
 
     for _, d in ipairs(carry:GetDescendants()) do
         if d:IsA("BasePart") then
-            d.Massless = true
-            d.CanCollide = false
             d.Anchored = false
-        elseif d:IsA("Weld") or d:IsA("WeldConstraint")
-            or d:IsA("Motor6D") or d:IsA("BallSocketConstraint")
-            or d:IsA("HingeConstraint") or d:IsA("RodConstraint") then
-            d:Destroy()
+            d.CanCollide = false
+            d.Massless = true
         end
     end
+    ModelUtils.stripExternalConstraints(carry)
+    ModelUtils.weldModelRigid(carry)
 
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local base = (carry:IsA("Model") and (carry.PrimaryPart or carry:FindFirstChildWhichIsA("BasePart"))) or carry
-    if hrp and base and base:IsA("BasePart") then
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = base
-        weld.Part1 = hrp :: BasePart
-        weld.Parent = base
-        carry:PivotTo((hrp :: BasePart).CFrame * CFrame.new(0, 0, -2))
+    local socket = character:FindFirstChild(socketName) or character:FindFirstChild("HumanoidRootPart")
+    if not socket or not carry.PrimaryPart then
+        carry:Destroy()
+        return
     end
+
+    carry.Parent = character
+
+    if not offset then
+        local _, size = carry:GetBoundingBox()
+        local up = math.max(1.0, 0.5 * size.Y + 0.5)
+        local fwd = math.max(0.6, 0.25 * size.Z)
+        offset = CFrame.new(0, up, -fwd)
+    end
+
+    carry:PivotTo((socket :: BasePart).CFrame * offset)
+
+    local base = carry.PrimaryPart :: BasePart
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = base
+    weld.Part1 = socket :: BasePart
+    weld.Parent = base
+
     heldModel = carry
 end
 
@@ -221,6 +237,8 @@ local function cancelPlacement()
     placingItemId = nil
     placingCount = 0
     currentTemplate = nil
+    currentItemDef = nil
+    currentMode = nil
     if heldModel then
         heldModel:Destroy()
         heldModel = nil
@@ -235,11 +253,11 @@ local function cancelPlacement()
 end
 
 exitButton.Activated:Connect(function()
-    cancelPlacement()
+    HeldItemController.Stop()
 end)
 
 RunService.Heartbeat:Connect(function()
-    if not placingItemId then
+    if currentMode ~= "build" then
         return
     end
     local character = player.Character
@@ -248,33 +266,45 @@ RunService.Heartbeat:Connect(function()
         return
     end
     local pos = hrp.Position
-    local within = pos.X >= plotBounds.min.X and pos.X <= plotBounds.max.X
-        and pos.Z >= plotBounds.min.Z and pos.Z <= plotBounds.max.Z
-        and pos.Y >= plotBounds.min.Y - 5 and pos.Y <= plotBounds.max.Y + 5
+    local within = ModelUtils.insideHorizontalBounds(pos, plotBounds)
     if not within then
-        cancelPlacement()
+        HeldItemController.Stop()
     end
 end)
 
-function HeldItemController.startHold(item)
-    if placingItemId then
+function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
+    if currentItemDef then
         return
     end
-    placingItemId = item.uid
-    placingCount = item.count or 1
-    StartHolding:FireServer(item.uid)
-    local cfg = ItemsConfig.Types[item.typeId]
-    if not cfg then
-        cancelPlacement()
-        return
+    currentItemDef = itemDef
+    currentMode = mode
+    if mode == "build" then
+        placingItemId = itemDef.id
+        placingCount = itemDef.count or 1
+        StartHolding:FireServer(itemDef.id)
+        currentTemplate = getModel(itemDef.model)
+        local character = player.Character or player.CharacterAdded:Wait()
+        attachCarry(character, currentTemplate, itemDef.weldTo or "Head", itemDef.carryOffset)
+        lastMouseHit = nil
+        lastMouseOnPlatform = false
+        exitButton.Visible = true
+    elseif mode == "equip" then
+        local character = player.Character or player.CharacterAdded:Wait()
+        local asset = getModel(itemDef.model)
+        attachCarry(character, asset, itemDef.weldTo or "RightHand", itemDef.carryOffset)
+        exitButton.Visible = true
     end
-    currentTemplate = getModel(cfg.model)
-    local character = player.Character or player.CharacterAdded:Wait()
-    attachOverHead(character, currentTemplate)
-    lastMouseHit = nil
-    lastMouseOnPlatform = false
-    exitButton.Visible = true
-    -- Do not spawn the ghost yet; wait for mouse.Move + insideBounds
+end
+
+HeldItemController.Stop = cancelPlacement
+
+function HeldItemController.Switch(itemDef: ItemDef, mode: "build" | "equip")
+    HeldItemController.Stop()
+    HeldItemController.Start(itemDef, mode)
+end
+
+function HeldItemController.GetCurrent()
+    return currentItemDef, currentMode
 end
 
 local function tryPlace()
@@ -311,7 +341,7 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
         end
         -- else: wait for next mouse.Move to re-enter bounds before recreating the ghost
     else
-        cancelPlacement()
+        HeldItemController.Stop()
     end
 end)
 
@@ -320,21 +350,11 @@ PlacementRejected.OnClientEvent:Connect(function()
 end)
 
 mouse.Move:Connect(function()
-    if not placingItemId or not currentTemplate then return end
+    if currentMode ~= "build" or not currentTemplate then return end
 
     lastMouseHit = mouse.Hit
     local pos = lastMouseHit.Position
-    local target = mouse.Target
-    local targetIsPlot = false
-    if plotPlatform then
-        if plotPlatform:IsA("Model") then
-            targetIsPlot = target ~= nil and target:IsDescendantOf(plotPlatform)
-        else
-            targetIsPlot = target == plotPlatform
-        end
-    end
-    local onTopSurface = mouse.TargetSurface == Enum.NormalId.Top
-    local onPlot = targetIsPlot and onTopSurface and insideBounds(pos)
+    local onPlot = ModelUtils.insideHorizontalBounds(pos, plotBounds)
     if onPlot then
         if not ghostModel then
             spawnGhost(currentTemplate)
@@ -353,9 +373,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
     if processed then
         return
     end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if currentMode == "build" and input.UserInputType == Enum.UserInputType.MouseButton1 then
         tryPlace()
-    elseif input.KeyCode == Enum.KeyCode.R then
+    elseif currentMode == "build" and input.KeyCode == Enum.KeyCode.R then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             currentYaw += math.rad(90)
         else
@@ -364,19 +384,19 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if lastMouseHit then
             updateGhostAt(lastMouseHit)
         end
-    elseif input.KeyCode == Enum.KeyCode.G then
+    elseif currentMode == "build" and input.KeyCode == Enum.KeyCode.G then
         snapEnabled = not snapEnabled
         if lastMouseHit then
             updateGhostAt(lastMouseHit)
         end
     elseif input.KeyCode == Enum.KeyCode.X then
 
-        cancelPlacement()
+        HeldItemController.Stop()
     end
 end)
 
 function HeldItemController.isHolding(): boolean
-    return placingItemId ~= nil
+    return currentItemDef ~= nil
 end
 
 return HeldItemController
