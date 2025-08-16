@@ -9,6 +9,8 @@ local ConfirmPlacement = ReplicatedStorage:WaitForChild("ConfirmPlacement")
 local PlacementRejected = ReplicatedStorage:WaitForChild("PlacementRejected")
 
 local ModelUtils = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ModelUtils"))
+local EquippedUI = require(script.Parent:WaitForChild("EquippedUI"))
+local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -20,6 +22,9 @@ type ItemDef = {
     weldTo: "Head" | "HumanoidRootPart" | "RightHand",
     carryOffset: CFrame?,
     count: number?,
+    icon: string?,
+    name: string?,
+    cameraBehavior: string?,
 }
 
 local HeldItemController = {}
@@ -33,6 +38,10 @@ local lastMouseHit: CFrame? = nil
 local lastMouseOnPlatform = false
 local currentItemDef: ItemDef? = nil
 local currentMode: ("build" | "equip")? = nil
+
+local savedCameraMode: Enum.CameraMode? = nil
+local savedMinZoom: number? = nil
+local savedMaxZoom: number? = nil
 
 local GRID = 1
 local snapEnabled = false
@@ -147,23 +156,18 @@ local function spawnGhost(asset: Instance): Instance
     g.Parent = workspace
     local function ghostify(i: Instance)
         if i:IsA("BasePart") then
-            i.Transparency = 0.5
-            i.CanCollide = false
-            i.CanQuery = false
-            i.CanTouch = false
             i.Anchored = true
-        elseif i:IsA("Weld") or i:IsA("WeldConstraint") or i:IsA("Motor6D")
-            or i:IsA("BallSocketConstraint") or i:IsA("HingeConstraint")
-            or i:IsA("RodConstraint") then
-            i:Destroy()
+            i.CanCollide = false
+            i.Transparency = 0.5
+            i.Massless = true
         end
     end
     ghostify(g)
+    for _, d in ipairs(g:GetDescendants()) do
+        ghostify(d)
+    end
     if g:IsA("Model") then
         g:ScaleTo(1)
-        for _, d in ipairs(g:GetDescendants()) do
-            ghostify(d)
-        end
     end
     ghostModel = g
     return g
@@ -198,12 +202,16 @@ local function attachCarry(character: Model, asset: Instance, socketName: string
 
     carry.Name = ("Carry_%s"):format(asset.Name)
 
-    for _, d in ipairs(carry:GetDescendants()) do
-        if d:IsA("BasePart") then
-            d.Anchored = false
-            d.CanCollide = false
-            d.Massless = true
+    local function prep(part: Instance)
+        if part:IsA("BasePart") then
+            part.Anchored = false
+            part.CanCollide = false
+            part.Massless = true
         end
+    end
+    prep(carry)
+    for _, d in ipairs(carry:GetDescendants()) do
+        prep(d)
     end
   
     ModelUtils.stripExternalConstraints(carry)
@@ -252,6 +260,19 @@ local function cancelPlacement()
     lastMouseHit = nil
     lastMouseOnPlatform = false
     exitButton.Visible = false
+    if savedCameraMode then
+        player.CameraMode = savedCameraMode
+        if savedMinZoom then
+            player.CameraMinZoomDistance = savedMinZoom
+        end
+        if savedMaxZoom then
+            player.CameraMaxZoomDistance = savedMaxZoom
+        end
+    end
+    savedCameraMode = nil
+    savedMinZoom = nil
+    savedMaxZoom = nil
+    EquippedUI.Hide()
 end
 
 exitButton.Activated:Connect(function()
@@ -280,6 +301,9 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     end
     currentItemDef = itemDef
     currentMode = mode
+    savedCameraMode = player.CameraMode
+    savedMinZoom = player.CameraMinZoomDistance
+    savedMaxZoom = player.CameraMaxZoomDistance
     if mode == "build" then
         placingItemId = itemDef.id
         placingCount = itemDef.count or 1
@@ -296,6 +320,19 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
         attachCarry(character, asset, itemDef.weldTo or "RightHand", itemDef.carryOffset)
         exitButton.Visible = true
     end
+    local behavior = itemDef.cameraBehavior or "free"
+    if behavior == "firstPerson" then
+        player.CameraMode = Enum.CameraMode.LockFirstPerson
+        player.CameraMinZoomDistance = 0.5
+        player.CameraMaxZoomDistance = 0.5
+    elseif behavior == "restricted" then
+        player.CameraMode = Enum.CameraMode.Classic
+        player.CameraMinZoomDistance = 6
+        player.CameraMaxZoomDistance = 12
+    else
+        player.CameraMode = Enum.CameraMode.Classic
+    end
+    EquippedUI.Show(itemDef.icon or "", itemDef.name or "", itemDef.count or placingCount or 1)
 end
 
 HeldItemController.Stop = cancelPlacement
@@ -310,7 +347,7 @@ function HeldItemController.GetCurrent()
 end
 
 local function tryPlace()
-    if not placingItemId or not ghostModel then
+    if not placingItemId or not ghostModel or placingCount <= 0 then
         return
     end
     local now = tick()
@@ -336,15 +373,17 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
         ghostModel = nil
     end
     placingCount = payload and payload.remaining or 0
-    if placingCount > 0 then
-        if lastMouseHit and lastMouseOnPlatform and currentTemplate then
-            spawnGhost(currentTemplate)
-            updateGhostAt(lastMouseHit)
-        end
-        -- else: wait for next mouse.Move to re-enter bounds before recreating the ghost
-    else
+    InventoryCountChanged:Fire(placingItemId, placingCount)
+    if placingCount <= 0 then
         HeldItemController.Stop()
+        return
     end
+    EquippedUI.Update(placingCount)
+    if lastMouseHit and lastMouseOnPlatform and currentTemplate then
+        spawnGhost(currentTemplate)
+        updateGhostAt(lastMouseHit)
+    end
+    -- else: wait for next mouse.Move to re-enter bounds before recreating the ghost
 end)
 
 PlacementRejected.OnClientEvent:Connect(function()

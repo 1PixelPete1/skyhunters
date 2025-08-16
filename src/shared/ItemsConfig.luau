@@ -15,6 +15,7 @@ return {
             burstValue = 25,
             stackable = true,
             icon = "rbxassetid://0",
+            cameraBehavior = "firstPerson",
         },
 
         prod_cube_basic = {
@@ -25,6 +26,7 @@ return {
             model = "TestSeed",
             footprint = Vector3Util.new(2, 2, 2),
             icon = "rbxassetid://0",
+            cameraBehavior = "free",
         },
     },
 }
