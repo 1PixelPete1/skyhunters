@@ -36,6 +36,11 @@ function InventoryService.Consume(player, typeId, qty)
     return true
 end
 
+function InventoryService.GetCount(player, typeId)
+    local data = PlayerManager.GetPlayerData(player)
+    return data.inventory[typeId] or 0
+end
+
 function InventoryService.GetPage(player, category, search, cursor)
     local data = PlayerManager.GetPlayerData(player)
     local items = {}

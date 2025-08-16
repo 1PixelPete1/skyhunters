@@ -14,6 +14,8 @@ local rarityColors = {
     Mythic = Color3.fromRGB(255, 0, 255),
 }
 
+local inventoryCount = {}
+
 local function createGui()
     local playerGui = localPlayer:WaitForChild("PlayerGui")
 
@@ -47,6 +49,14 @@ local function createGui()
     title.TextSize = 16
     title.Parent = frame
 
+    local crumbsLabel = Instance.new("TextLabel")
+    crumbsLabel.Size = UDim2.new(0, 80, 0, 24)
+    crumbsLabel.Position = UDim2.new(0, 5, 0, 5)
+    crumbsLabel.BackgroundTransparency = 1
+    crumbsLabel.TextColor3 = Color3.new(1, 1, 1)
+    crumbsLabel.Text = "0"
+    crumbsLabel.Parent = frame
+
     local close = Instance.new("TextButton")
     close.Size = UDim2.new(0, 80, 0, 24)
     close.Position = UDim2.new(1, -85, 0, 5)
@@ -76,10 +86,10 @@ local function createGui()
     list.BackgroundTransparency = 1
     list.Parent = frame
 
-    return screenGui, list, errorLabel
+    return screenGui, list, errorLabel, crumbsLabel
 end
 
-local function populateList(list, errorLabel)
+local function populateList(list, errorLabel, crumbsLabel)
     for _, child in ipairs(list:GetChildren()) do
         if child:IsA("Frame") then
             child:Destroy()
@@ -133,10 +143,8 @@ local function populateList(list, errorLabel)
                 buyButton.MouseButton1Click:Connect(function()
                     local result = RF_Purchase:InvokeServer({ itemId = id })
                     if result and result.ok then
-                        localPlayer.crumbs = result.newBalance
-                        local inv = localPlayer.inventory or {}
-                        inv[id] = result.newCount
-                        localPlayer.inventory = inv
+                        crumbsLabel.Text = tostring(result.newBalance)
+                        inventoryCount[id] = result.newCount
                         errorLabel.Text = "Purchased " .. (item.name or id)
                     else
                         errorLabel.Text = result and result.code or "Purchase failed"
@@ -154,11 +162,11 @@ local ShopUI = {}
 
 function ShopUI.Init()
     local prompt = workspace:WaitForChild("ShopNPC"):WaitForChild("ProximityPrompt")
-    local gui, list, errorLabel = createGui()
+    local gui, list, errorLabel, crumbsLabel = createGui()
 
     prompt.Triggered:Connect(function()
         gui.Enabled = true
-        populateList(list, errorLabel)
+        populateList(list, errorLabel, crumbsLabel)
     end)
 end
 
