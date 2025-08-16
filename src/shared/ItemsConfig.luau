@@ -28,6 +28,66 @@ return {
             icon = "rbxassetid://0",
             cameraBehavior = "free",
         },
+
+        prod_basic_common = {
+            category = "producers",
+            displayName = "Basic Producer",
+            rate = 0.5,
+            allowedSurface = "plot",
+            model = "TestSeed",
+            footprint = Vector3Util.new(2, 2, 2),
+            icon = "rbxassetid://0",
+            cameraBehavior = "free",
+            stackable = true,
+        },
+
+        prod_basic_uncommon = {
+            category = "producers",
+            displayName = "Sturdy Producer",
+            rate = 0.5,
+            allowedSurface = "plot",
+            model = "TestSeed",
+            footprint = Vector3Util.new(2, 2, 2),
+            icon = "rbxassetid://0",
+            cameraBehavior = "free",
+            stackable = true,
+        },
+
+        prod_basic_rare = {
+            category = "producers",
+            displayName = "Rare Producer",
+            rate = 0.5,
+            allowedSurface = "plot",
+            model = "TestSeed",
+            footprint = Vector3Util.new(2, 2, 2),
+            icon = "rbxassetid://0",
+            cameraBehavior = "free",
+            stackable = true,
+        },
+
+        prod_basic_legendary = {
+            category = "producers",
+            displayName = "Legendary Prod.",
+            rate = 0.5,
+            allowedSurface = "plot",
+            model = "TestSeed",
+            footprint = Vector3Util.new(2, 2, 2),
+            icon = "rbxassetid://0",
+            cameraBehavior = "free",
+            stackable = true,
+        },
+
+        prod_basic_admin = {
+            category = "producers",
+            displayName = "Admin Producer",
+            rate = 0.5,
+            allowedSurface = "plot",
+            model = "TestSeed",
+            footprint = Vector3Util.new(2, 2, 2),
+            icon = "rbxassetid://0",
+            cameraBehavior = "free",
+            stackable = true,
+        },
     },
 }
 
