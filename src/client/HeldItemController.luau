@@ -10,12 +10,10 @@ local PlacementRejected = ReplicatedStorage:WaitForChild("PlacementRejected")
 
 local ModelUtils = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ModelUtils"))
 local EquippedUI = require(script.Parent:WaitForChild("EquippedUI"))
-local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
 local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
 local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
 
 type ItemDef = {
     id: string,
@@ -35,21 +33,21 @@ local placingItemId: string? = nil
 local heldModel: Instance? = nil
 local ghostModel: Instance? = nil
 local currentTemplate: Instance? = nil
-local lastMouseHit: CFrame? = nil
-local lastMouseOnPlatform = false
 local currentItemDef: ItemDef? = nil
 local currentMode: ("build" | "equip")? = nil
 
 local savedCameraMode: Enum.CameraMode? = nil
 local savedMinZoom: number? = nil
 local savedMaxZoom: number? = nil
+local updateConn: RBXScriptConnection? = nil
+local countConn: RBXScriptConnection? = nil
+local canPlace = false
 
 local GRID = 1
 local snapEnabled = false
 local currentYaw = 0
-local lastPlace = 0
-
 local exitButton
+local hintLabel
 do
     local gui = Instance.new("ScreenGui")
     gui.Name = "PlacementGui"
@@ -63,6 +61,14 @@ do
     exitButton.AnchorPoint = Vector2.new(1, 0)
     exitButton.Visible = false
     exitButton.Parent = gui
+
+    hintLabel = Instance.new("TextLabel")
+    hintLabel.Size = UDim2.new(1, 0, 0, 24)
+    hintLabel.Position = UDim2.new(0, 0, 1, -28)
+    hintLabel.BackgroundTransparency = 1
+    hintLabel.TextColor3 = Color3.new(1, 1, 1)
+    hintLabel.Text = ""
+    hintLabel.Parent = gui
 end
 
 local function getModel(modelName: string): Instance
@@ -101,6 +107,11 @@ local plotBounds = {
     max = Vector3.new(50, 0, 50),
 }
 
+local plotCenterX = 0
+local plotCenterZ = 0
+local halfSizeX = 50
+local halfSizeZ = 50
+
 local plotPlatform: Instance? = nil
 
 -- Optional: rename to your real platform object (Part or Model)
@@ -113,6 +124,10 @@ local function updatePlotBounds()
         local cf, size = platform:GetBoundingBox()
         plotBounds.min = cf.Position - size / 2
         plotBounds.max = cf.Position + size / 2
+        plotCenterX = (plotBounds.min.X + plotBounds.max.X) / 2
+        plotCenterZ = (plotBounds.min.Z + plotBounds.max.Z) / 2
+        halfSizeX = (plotBounds.max.X - plotBounds.min.X) / 2
+        halfSizeZ = (plotBounds.max.Z - plotBounds.min.Z) / 2
         return
     end
     if platform and platform:IsA("BasePart") then
@@ -120,11 +135,19 @@ local function updatePlotBounds()
         local size = platform.Size
         plotBounds.min = cf.Position - size / 2
         plotBounds.max = cf.Position + size / 2
+        plotCenterX = (plotBounds.min.X + plotBounds.max.X) / 2
+        plotCenterZ = (plotBounds.min.Z + plotBounds.max.Z) / 2
+        halfSizeX = (plotBounds.max.X - plotBounds.min.X) / 2
+        halfSizeZ = (plotBounds.max.Z - plotBounds.min.Z) / 2
         return
     end
     -- Fallback if platform is missing
     plotBounds.min = Vector3.new(-50, 0, -50)
     plotBounds.max = Vector3.new(50, 0, 50)
+    plotCenterX = 0
+    plotCenterZ = 0
+    halfSizeX = 50
+    halfSizeZ = 50
     plotPlatform = nil
 end
 
@@ -174,26 +197,28 @@ local function spawnGhost(asset: Instance): Instance
     return g
 end
 
+local function showToast(msg: string)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Skyhunters", Text = msg, Duration = 2 })
+    end)
+end
+
+local function isPlayerInPlotXZ(): boolean
+    local character = player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return false
+    end
+    local p = hrp.Position
+    local dx = math.abs(p.X - plotCenterX)
+    local dz = math.abs(p.Z - plotCenterZ)
+    return dx <= halfSizeX and dz <= halfSizeZ
+end
+
 local function snap(v: number, step: number): number
     return math.floor((v + step / 2) / step) * step
 end
 
-local function updateGhostAt(mouseHit: CFrame)
-    if not ghostModel then
-        return
-    end
-    local pos = mouseHit.Position
-    local yTop = plotBounds.max.Y
-    local useSnap = snapEnabled and GRID > 0 and not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift))
-    local basePos
-    if useSnap then
-        basePos = Vector3.new(snap(pos.X, GRID), yTop, snap(pos.Z, GRID))
-    else
-        basePos = Vector3.new(pos.X, yTop, pos.Z)
-    end
-    local cf = CFrame.new(basePos) * CFrame.Angles(0, currentYaw, 0)
-    pivotTo(cf, ghostModel)
-end
 
 local function attachCarry(character: Model, asset: Instance, socketName: string, offset: CFrame?)
     if heldModel then heldModel:Destroy() end
@@ -249,6 +274,14 @@ local function cancelPlacement()
     currentTemplate = nil
     currentItemDef = nil
     currentMode = nil
+    if updateConn then
+        updateConn:Disconnect()
+        updateConn = nil
+    end
+    if countConn then
+        countConn:Disconnect()
+        countConn = nil
+    end
     if heldModel then
         heldModel:Destroy()
         heldModel = nil
@@ -257,8 +290,7 @@ local function cancelPlacement()
         ghostModel:Destroy()
         ghostModel = nil
     end
-    lastMouseHit = nil
-    lastMouseOnPlatform = false
+    hintLabel.Text = ""
     exitButton.Visible = false
     if savedCameraMode then
         player.CameraMode = savedCameraMode
@@ -279,24 +311,14 @@ exitButton.Activated:Connect(function()
     HeldItemController.Stop()
 end)
 
-RunService.Heartbeat:Connect(function()
-    if currentMode ~= "build" then
-        return
-    end
-    local character = player.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        return
-    end
-    local pos = hrp.Position
-    local within = ModelUtils.insideHorizontalBounds(pos, plotBounds)
-    if not within then
-        HeldItemController.Stop()
-    end
-end)
 
 function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     if currentItemDef then
+        return
+    end
+    InventoryState.InitOnce()
+    if InventoryState.GetCount(itemDef.id) <= 0 then
+        showToast("Out of items")
         return
     end
     currentItemDef = itemDef
@@ -304,17 +326,15 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     savedCameraMode = player.CameraMode
     savedMinZoom = player.CameraMinZoomDistance
     savedMaxZoom = player.CameraMaxZoomDistance
+    local character = player.Character or player.CharacterAdded:Wait()
     if mode == "build" then
         placingItemId = itemDef.id
         StartHolding:FireServer(itemDef.id)
         currentTemplate = getModel(itemDef.model)
-        local character = player.Character or player.CharacterAdded:Wait()
         attachCarry(character, currentTemplate, itemDef.weldTo or "Head", itemDef.carryOffset)
-        lastMouseHit = nil
-        lastMouseOnPlatform = false
+        spawnGhost(currentTemplate)
         exitButton.Visible = true
     elseif mode == "equip" then
-        local character = player.Character or player.CharacterAdded:Wait()
         local asset = getModel(itemDef.model)
         attachCarry(character, asset, itemDef.weldTo or "RightHand", itemDef.carryOffset)
         exitButton.Visible = true
@@ -333,6 +353,42 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     end
     local count = InventoryState.GetCount(itemDef.id)
     EquippedUI.Show(itemDef.icon or "", itemDef.name or "", count)
+    countConn = InventoryState.OnItemCountChanged:Connect(function(id, newCount)
+        if currentItemDef and id == currentItemDef.id then
+            EquippedUI.Update(newCount)
+            if newCount <= 0 then
+                HeldItemController.Stop()
+            end
+        end
+    end)
+    updateConn = RunService:BindToRenderStep("Placement_Update", Enum.RenderPriority.First.Value + 1, function()
+        if currentMode ~= "build" or not currentTemplate or not ghostModel then
+            return
+        end
+        local camera = workspace.CurrentCamera
+        local mousePos = UserInputService:GetMouseLocation()
+        local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.FilterDescendantsInstances = { character }
+        local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+        local hitPos
+        if result then
+            hitPos = result.Position
+        else
+            local planeY = plotBounds.max.Y
+            local t = (planeY - ray.Origin.Y) / ray.Direction.Y
+            hitPos = ray.Origin + ray.Direction * t
+        end
+        local basePos = Vector3.new(hitPos.X, plotBounds.max.Y, hitPos.Z)
+        if snapEnabled and GRID > 0 and not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
+            basePos = Vector3.new(snap(basePos.X, GRID), plotBounds.max.Y, snap(basePos.Z, GRID))
+        end
+        local cf = CFrame.new(basePos) * CFrame.Angles(0, currentYaw, 0)
+        pivotTo(cf, ghostModel)
+        canPlace = isPlayerInPlotXZ()
+        hintLabel.Text = canPlace and "" or "Step onto your plot to place"
+    end)
 end
 
 HeldItemController.Stop = cancelPlacement
@@ -377,11 +433,9 @@ local function tryPlace()
     if not placingItemId or not ghostModel or InventoryState.GetCount(placingItemId) <= 0 then
         return
     end
-    local now = tick()
-    if now - lastPlace < 0.2 then
+    if not canPlace then
         return
     end
-    lastPlace = now
     local cf
     if ghostModel:IsA("Model") then
         cf = ghostModel:GetPivot()
@@ -399,44 +453,15 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
         ghostModel:Destroy()
         ghostModel = nil
     end
-    local newCount = payload and payload.remaining or 0
-    InventoryState.SetCount(placingItemId, newCount)
-    InventoryCountChanged:Fire(placingItemId, newCount)
-    if newCount <= 0 then
-        HeldItemController.Stop()
-        return
-    end
-    EquippedUI.Update(newCount)
-    if lastMouseHit and lastMouseOnPlatform and currentTemplate then
+    if currentTemplate then
         spawnGhost(currentTemplate)
-        updateGhostAt(lastMouseHit)
     end
-    -- else: wait for next mouse.Move to re-enter bounds before recreating the ghost
 end)
 
 PlacementRejected.OnClientEvent:Connect(function()
     -- keep ghost so player can adjust
 end)
 
-mouse.Move:Connect(function()
-    if currentMode ~= "build" or not currentTemplate then return end
-
-    lastMouseHit = mouse.Hit
-    local pos = lastMouseHit.Position
-    local onPlot = ModelUtils.insideHorizontalBounds(pos, plotBounds)
-    if onPlot then
-        if not ghostModel then
-            spawnGhost(currentTemplate)
-        end
-        updateGhostAt(lastMouseHit)
-    else
-        if ghostModel then
-            ghostModel:Destroy()
-            ghostModel = nil
-        end
-    end
-    lastMouseOnPlatform = onPlot
-end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then
@@ -450,14 +475,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
         else
             currentYaw += math.rad(15)
         end
-        if lastMouseHit then
-            updateGhostAt(lastMouseHit)
-        end
     elseif currentMode == "build" and input.KeyCode == Enum.KeyCode.G then
         snapEnabled = not snapEnabled
-        if lastMouseHit then
-            updateGhostAt(lastMouseHit)
-        end
     elseif input.KeyCode == Enum.KeyCode.X then
 
         HeldItemController.Stop()

@@ -5,7 +5,6 @@ local localPlayer = Players.LocalPlayer
 
 local RF_FetchShopSnapshot = ReplicatedStorage:WaitForChild("ShopRemotes"):WaitForChild("RF_FetchShopSnapshot")
 local RF_Purchase = ReplicatedStorage.ShopRemotes:WaitForChild("RF_Purchase")
-local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
 local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
 local rarityColors = {
@@ -96,6 +95,9 @@ local function createGui()
     list = listFrame
     errorLabel = err
     crumbsLabel = crumb
+    InventoryState.OnCrumbsChanged:Connect(function(amount)
+        crumbsLabel.Text = tostring(amount)
+    end)
     return gui
 end
 
@@ -149,12 +151,20 @@ local function populateList(catalog)
                 buyButton.Text = "Buy"
                 buyButton.Parent = entry
 
+                local function updateBuyState()
+                    buyButton.Active = InventoryState.GetCrumbs() >= (item.displayPrice or 0)
+                    buyButton.AutoButtonColor = buyButton.Active
+                end
+                updateBuyState()
+                InventoryState.OnCrumbsChanged:Connect(updateBuyState)
+
                 buyButton.MouseButton1Click:Connect(function()
+                    if not buyButton.Active then
+                        return
+                    end
                     local result = RF_Purchase:InvokeServer({ itemId = id })
                     if result and result.ok then
-                        crumbsLabel.Text = tostring(result.newBalance)
-                        InventoryState.SetCount(id, result.newCount)
-                        InventoryCountChanged:Fire(id, result.newCount)
+                        InventoryState.SetCrumbs(result.newBalance or InventoryState.GetCrumbs())
                         errorLabel.Text = "Purchased " .. (item.name or id)
                     else
                         errorLabel.Text = result and result.code or "Purchase failed"
@@ -180,11 +190,13 @@ local function open()
         errorLabel.Text = "Failed to load catalog"
         return
     end
-    crumbsLabel.Text = tostring(snapshot.balance or 0)
+    InventoryState.SetCrumbs(snapshot.balance or 0)
+    crumbsLabel.Text = tostring(InventoryState.GetCrumbs())
     populateList(snapshot.catalog)
 end
 
 function ShopUI.Init()
+    InventoryState.InitOnce()
     createGui()
     local prompt = workspace:WaitForChild("ShopNPC"):WaitForChild("ProximityPrompt")
     prompt.Triggered:Connect(open)
