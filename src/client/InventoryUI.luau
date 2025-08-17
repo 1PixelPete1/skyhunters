@@ -4,7 +4,6 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
-local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
 local CountChangedEvent = ReplicatedStorage:FindFirstChild("InventoryCountChanged")
 if not CountChangedEvent then
     CountChangedEvent = Instance.new("BindableEvent")
@@ -45,20 +44,11 @@ local function createCell()
         end
         local item = itemLookup[uid]
         if item then
-            local cfg = ItemsConfig.Types[item.typeId]
-            if cfg then
-                HeldItemController.Start({
-                    id = item.uid,
-                    model = cfg.model,
-                    type = "Build",
-                    weldTo = "Head",
-                    carryOffset = nil,
-                    count = item.count,
-                    icon = cfg.icon,
-                    name = cfg.displayName,
-                    cameraBehavior = cfg.cameraBehavior,
-                }, "build")
+            local current, mode = HeldItemController.GetCurrent()
+            if current and current.id == item.uid and mode == "build" then
+                return
             end
+            HeldItemController.Switch(item.uid, "build")
         end
     end)
     return frame

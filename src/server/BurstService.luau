@@ -30,5 +30,10 @@ function BurstService.Use(player, typeId)
     return { ok = true }
 end
 
+function BurstService.Interact(player, uid)
+    -- TODO: convert growth into aether; allow overflow that decays
+    return { ok = false, code = "NOT_IMPLEMENTED" }
+end
+
 return BurstService
 
