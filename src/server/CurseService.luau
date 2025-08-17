@@ -1,5 +1,11 @@
 local CurseService = {}
 
+--[[
+TODO: manage temporary player curses.
+Aims: grant, remove, and query curses while applying stat modifiers.
+Acceptance: curses stack, expire, and affect gameplay stats predictably.
+]]
+
 function CurseService.GrantCurse(player, curseId, stacks, ttl)
     -- TODO: add curse to player data
 end

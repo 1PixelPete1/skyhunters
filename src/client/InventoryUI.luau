@@ -11,6 +11,7 @@ if not CountChangedEvent then
     CountChangedEvent.Parent = ReplicatedStorage
 end
 local HeldItemController = require(script.Parent:WaitForChild("HeldItemController"))
+local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
 local RF_Fetch = ReplicatedStorage:WaitForChild("Inventory_FetchPage")
 
@@ -96,6 +97,7 @@ CountChangedEvent.Event:Connect(function(uid, newCount)
             itemLookup[uid] = nil
         end
     end
+    InventoryState.SetCount(uid, newCount)
     renderGrid()
 end)
 
@@ -109,6 +111,7 @@ local function fetchPage(reset)
     for _, item in ipairs(page) do
         table.insert(items, item)
         itemLookup[item.uid] = item
+        InventoryState.SetCount(item.uid, item.count)
     end
     nextCursor = newCursor
 end
