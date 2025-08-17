@@ -3,10 +3,9 @@
 -- deterministic traversal and keeps numeric data structures instead of real
 -- Instances so that it can run inside the unit tests.
 
-local GrowthVisualizer = {}
+local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
 
-local LoomConfigs = require("looms/LoomConfigs")
-local GrowthProfiles = require("looms/GrowthProfiles")
+local GrowthVisualizer = {}
 
 -- visual state keyed by loomUid
 -- each entry: {segments = { {yaw,pitch,roll,lengthScale,thicknessScale,fill}, ...}}
