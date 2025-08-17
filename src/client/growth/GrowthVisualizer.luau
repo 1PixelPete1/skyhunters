@@ -4,7 +4,7 @@
 -- Instances so that it can run inside the unit tests.
 
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-local GrowthProfiles = require(game.ReplicatedStorage.looms.GrowthProfiles)
+local GrowthProfiles = require(game.ReplicatedStorage.growth.GrowthProfiles)
 local GrowthVisualizer = {}
 
 -- visual state keyed by loomUid
@@ -101,43 +101,65 @@ function GrowthVisualizer.Render(container, loomState)
     local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
     local tie = config.growthDefaults.relativeScaleTie or 0
 
-    -- clear old children
-    for _, child in ipairs(container:GetChildren()) do
-        child:Destroy()
-    end
-
-    -- build segment data
-    local yaw, pitch, roll = 0,0,0
-    local prevCFrame = CFrame.new(0,0,0)
+    -- Build segment numerics
+    local yaw, pitch, roll = 0, 0, 0
     for i = 1, segCount do
         local seg = segments[i]
         if not seg then
             seg = { yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0 }
             segments[i] = seg
         end
-        local delta = GrowthProfiles.rotDelta(profile, rng, {})
+        local delta = GrowthProfiles.rotDelta(profile, rng, {}) -- your state if needed
         if profile.continuity == "accumulate" then
-            yaw = yaw + delta.yaw
-            pitch = pitch + delta.pitch
-            roll = roll + delta.roll
+            yaw += delta.yaw; pitch += delta.pitch; roll += delta.roll
         else
             yaw, pitch, roll = delta.yaw, delta.pitch, delta.roll
         end
         seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
 
-        seg.lengthScale = 1 + rng:NextNumber(-jitter.length, jitter.length)
-        seg.thicknessScale = 1 + rng:NextNumber(-jitter.thickness, jitter.thickness)
+        local lenJit = rng:NextNumber(-jitter.length, jitter.length)
+        local thickJit = rng:NextNumber(-jitter.thickness, jitter.thickness)
+        seg.lengthScale = 1 + lenJit
+        seg.thicknessScale = 1 + lenJit * tie + thickJit * (1 - tie)
+    end
 
-        -- actually spawn a Part
-        if (loomState.g or 0) >= (i/segCount)*100 then
-            local part = Instance.new("Part")
-            part.Anchored = true
-            part.Size = Vector3.new(0.3*seg.thicknessScale, 2*seg.lengthScale, 0.3*seg.thicknessScale)
-            local rot = CFrame.Angles(pitch, yaw, roll)
-            part.CFrame = prevCFrame * rot * CFrame.new(0, part.Size.Y/2, 0)
-            part.Color = Color3.fromRGB(0, 200, 0)
-            part.Parent = container
-            prevCFrame = part.CFrame * CFrame.new(0, part.Size.Y/2, 0)
+    local fills = computeSegmentFill(segCount, loomState.g or 0)
+    for i = 1, segCount do
+        segments[i].fill = fills[i]
+    end
+
+    -- === Rendering to Workspace via scene API ===
+    -- loomState.scene must be a table with:
+    --   scene.Clear()
+    --   scene.Spawn(inst, cf)
+    --   scene.ResolveModel(refListOrRef)  (we'll pass this from UI/Main using ModelResolver)
+    if not loomState.scene then
+        warn("GrowthVisualizer.Render: loomState.scene missing; nothing will spawn.")
+        return
+    end
+
+    loomState.scene.Clear()
+
+    local currentCF = CFrame.new(0,0,0)
+    for i, seg in ipairs(segments) do
+        if seg.fill > 0 then
+            local isTerminal = (i == segCount)
+            -- Pick model by depth vs terminal
+            local refList
+            if isTerminal and config.models and config.models.byDepth and config.models.byDepth.terminal then
+                refList = config.models.byDepth.terminal
+            elseif config.models and config.models.byDepth and config.models.byDepth[i-1] then
+                refList = config.models.byDepth[i-1]
+            end
+
+            local model = loomState.scene.ResolveModel(refList)
+            if model then
+                local rot = CFrame.Angles(seg.pitch, seg.yaw, seg.roll)
+                local length = 2 * seg.lengthScale
+                local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
+                loomState.scene.Spawn(model, stepCF)
+                currentCF = stepCF * CFrame.new(0, length/2, 0)
+            end
         end
     end
 end
