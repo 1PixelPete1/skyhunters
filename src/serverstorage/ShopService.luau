@@ -25,28 +25,40 @@ function ShopService.FetchCatalog(player)
     return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PublicItemCatalog"))
 end
 
+function ShopService.FetchShopSnapshot(player)
+    local catalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PublicItemCatalog"))
+    local data = PlayerManager.GetPlayerData(player)
+    local balance = data.crumbs or 0
+    return { catalog = catalog, balance = balance }
+end
+
 -- payload = { itemId: string, qty?: number (ignored/clamped to 1), txnId?: string }
 function ShopService.Purchase(player, payload)
+    local function deny(code)
+        print("[SHOP] PURCHASE_DENY", player.UserId, code)
+        return { ok = false, code = code }
+    end
+
     -- Basic input validation
     if typeof(payload) ~= "table" then
-        return { ok = false, code = "BAD_REQUEST" }
+        return deny("BAD_REQUEST")
     end
     local itemId = payload.itemId
     if typeof(itemId) ~= "string" then
-        return { ok = false, code = "BAD_REQUEST" }
+        return deny("BAD_REQUEST")
     end
 
     -- Rate limit (small window)
     if not RateLimiter.Allow(player, "purchase", 6, 3.0) then
-        return { ok = false, code = "RATE_LIMITED" }
+        return deny("RATE_LIMITED")
     end
 
     local def = ServerItemConfig.items[itemId]
     if not def or def.class ~= "Producer" then
-        return { ok = false, code = "NOT_FOR_SALE" }
+        return deny("NOT_FOR_SALE")
     end
     if not def.obtainable or def.adminOnly then
-        return { ok = false, code = "UNOBTAINABLE" }
+        return deny("UNOBTAINABLE")
     end
     local unitPrice = def.price or math.huge
     local qty = 1
@@ -56,10 +68,10 @@ function ShopService.Purchase(player, payload)
         local data = PlayerManager.GetPlayerData(player)
         local balance = data.crumbs or 0
         if balance < total then
-            return { ok = false, code = "INSUFFICIENT_FUNDS" }
+            return deny("INSUFFICIENT_FUNDS")
         end
         if not Economy.ApplyCrumbsDelta(data, -total, "purchase") then
-            return { ok = false, code = "INSUFFICIENT_FUNDS" }
+            return deny("INSUFFICIENT_FUNDS")
         end
         InventoryService.Add(player, itemId, qty)
         local newCount = InventoryService.GetCount(player, itemId)
@@ -72,7 +84,7 @@ function ShopService.Purchase(player, payload)
             if not okSave then
                 Economy.ApplyCrumbsDelta(data, total, "rollback")
                 InventoryService.Add(player, itemId, -qty)
-                return { ok = false, code = "SAVE_FAILED" }
+                return deny("SAVE_FAILED")
             end
         else
             -- Normal path: enqueue/batch
@@ -80,6 +92,8 @@ function ShopService.Purchase(player, payload)
                 SaveScheduler.flushImmediate(player)
             end)
         end
+
+        print("[SHOP] PURCHASE_OK", player.UserId, itemId, total, "balance=" .. tostring(data.crumbs))
 
         -- Return authoritative result
         return {

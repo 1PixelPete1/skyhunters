@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local localPlayer = Players.LocalPlayer
 
-local RF_FetchCatalog = ReplicatedStorage:WaitForChild("ShopRemotes"):WaitForChild("RF_FetchCatalog")
+local RF_FetchShopSnapshot = ReplicatedStorage:WaitForChild("ShopRemotes"):WaitForChild("RF_FetchShopSnapshot")
 local RF_Purchase = ReplicatedStorage.ShopRemotes:WaitForChild("RF_Purchase")
 
 local rarityColors = {
@@ -16,13 +16,18 @@ local rarityColors = {
 
 local inventoryCount = {}
 
+local screenGui
+local list
+local errorLabel
+local crumbsLabel
+
 local function createGui()
     local playerGui = localPlayer:WaitForChild("PlayerGui")
 
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "ShopGUI"
-    screenGui.Enabled = false
-    screenGui.Parent = playerGui
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ShopGUI"
+    gui.Enabled = false
+    gui.Parent = playerGui
 
     local plate = Instance.new("ImageLabel")
     plate.Name = "Plate"
@@ -31,7 +36,7 @@ local function createGui()
     plate.AnchorPoint = Vector2.new(0.5, 0.5)
     plate.BackgroundTransparency = 1
     plate.Image = "rbxassetid://0"
-    plate.Parent = screenGui
+    plate.Parent = gui
 
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, -20, 1, -20)
@@ -49,13 +54,13 @@ local function createGui()
     title.TextSize = 16
     title.Parent = frame
 
-    local crumbsLabel = Instance.new("TextLabel")
-    crumbsLabel.Size = UDim2.new(0, 80, 0, 24)
-    crumbsLabel.Position = UDim2.new(0, 5, 0, 5)
-    crumbsLabel.BackgroundTransparency = 1
-    crumbsLabel.TextColor3 = Color3.new(1, 1, 1)
-    crumbsLabel.Text = "0"
-    crumbsLabel.Parent = frame
+    local crumb = Instance.new("TextLabel")
+    crumb.Size = UDim2.new(0, 80, 0, 24)
+    crumb.Position = UDim2.new(0, 5, 0, 5)
+    crumb.BackgroundTransparency = 1
+    crumb.TextColor3 = Color3.new(1, 1, 1)
+    crumb.Text = "0"
+    crumb.Parent = frame
 
     local close = Instance.new("TextButton")
     close.Size = UDim2.new(0, 80, 0, 24)
@@ -65,31 +70,35 @@ local function createGui()
     close.Text = "Close"
     close.Parent = frame
     close.MouseButton1Click:Connect(function()
-        screenGui.Enabled = false
+        gui.Enabled = false
     end)
 
-    local errorLabel = Instance.new("TextLabel")
-    errorLabel.Size = UDim2.new(1, -10, 0, 20)
-    errorLabel.Position = UDim2.new(0, 5, 1, -25)
-    errorLabel.BackgroundTransparency = 1
-    errorLabel.TextColor3 = Color3.new(1, 0.3, 0.3)
-    errorLabel.Text = ""
-    errorLabel.TextSize = 14
-    errorLabel.Parent = frame
+    local err = Instance.new("TextLabel")
+    err.Size = UDim2.new(1, -10, 0, 20)
+    err.Position = UDim2.new(0, 5, 1, -25)
+    err.BackgroundTransparency = 1
+    err.TextColor3 = Color3.new(1, 0.3, 0.3)
+    err.Text = ""
+    err.TextSize = 14
+    err.Parent = frame
 
-    local list = Instance.new("ScrollingFrame")
-    list.Name = "List"
-    list.Size = UDim2.new(1, -10, 1, -60)
-    list.Position = UDim2.new(0, 5, 0, 35)
-    list.CanvasSize = UDim2.new(0, 0, 0, 0)
-    list.ScrollBarThickness = 6
-    list.BackgroundTransparency = 1
-    list.Parent = frame
+    local listFrame = Instance.new("ScrollingFrame")
+    listFrame.Name = "List"
+    listFrame.Size = UDim2.new(1, -10, 1, -60)
+    listFrame.Position = UDim2.new(0, 5, 0, 35)
+    listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    listFrame.ScrollBarThickness = 6
+    listFrame.BackgroundTransparency = 1
+    listFrame.Parent = frame
 
-    return screenGui, list, errorLabel, crumbsLabel
+    screenGui = gui
+    list = listFrame
+    errorLabel = err
+    crumbsLabel = crumb
+    return gui
 end
 
-local function populateList(list, errorLabel, crumbsLabel)
+local function populateList(catalog)
     for _, child in ipairs(list:GetChildren()) do
         if child:IsA("Frame") then
             child:Destroy()
@@ -97,7 +106,6 @@ local function populateList(list, errorLabel, crumbsLabel)
     end
     errorLabel.Text = ""
 
-    local catalog = RF_FetchCatalog:InvokeServer()
     if typeof(catalog) ~= "table" or typeof(catalog.items) ~= "table" then
         errorLabel.Text = "Failed to load catalog"
         return
@@ -160,15 +168,27 @@ end
 
 local ShopUI = {}
 
-function ShopUI.Init()
-    local prompt = workspace:WaitForChild("ShopNPC"):WaitForChild("ProximityPrompt")
-    local gui, list, errorLabel, crumbsLabel = createGui()
-
-    prompt.Triggered:Connect(function()
-        gui.Enabled = true
-        populateList(list, errorLabel, crumbsLabel)
-    end)
+local function open()
+    if not screenGui then
+        createGui()
+    end
+    screenGui.Enabled = true
+    local snapshot = RF_FetchShopSnapshot:InvokeServer()
+    if typeof(snapshot) ~= "table" then
+        errorLabel.Text = "Failed to load catalog"
+        return
+    end
+    crumbsLabel.Text = tostring(snapshot.balance or 0)
+    populateList(snapshot.catalog)
 end
+
+function ShopUI.Init()
+    createGui()
+    local prompt = workspace:WaitForChild("ShopNPC"):WaitForChild("ProximityPrompt")
+    prompt.Triggered:Connect(open)
+end
+
+ShopUI.Open = open
 
 return ShopUI
 

@@ -11,6 +11,7 @@ local PlacementRejected = ReplicatedStorage:WaitForChild("PlacementRejected")
 local ModelUtils = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ModelUtils"))
 local EquippedUI = require(script.Parent:WaitForChild("EquippedUI"))
 local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
+local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -337,7 +338,34 @@ end
 
 HeldItemController.Stop = cancelPlacement
 
-function HeldItemController.Switch(itemDef: ItemDef, mode: "build" | "equip")
+local function buildItemDef(itemId: string, mode: "build" | "equip"): ItemDef?
+    local cfg = ItemsConfig.Types[itemId]
+    if not cfg then
+        return nil
+    end
+    -- TODO: fetch actual inventory count
+    local def: ItemDef = {
+        id = itemId,
+        model = cfg.model,
+        weldTo = mode == "build" and "Head" or "RightHand",
+        carryOffset = nil,
+        count = 1,
+        icon = cfg.icon,
+        name = cfg.displayName,
+        cameraBehavior = cfg.cameraBehavior,
+    }
+    return def
+end
+
+function HeldItemController.Switch(itemId: string, mode: "build" | "equip")
+    local current, currentMode = HeldItemController.GetCurrent()
+    if current and current.id == itemId and currentMode == mode then
+        return
+    end
+    local itemDef = buildItemDef(itemId, mode)
+    if not itemDef then
+        return
+    end
     HeldItemController.Stop()
     HeldItemController.Start(itemDef, mode)
 end
