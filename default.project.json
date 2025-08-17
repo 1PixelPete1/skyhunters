@@ -16,6 +16,9 @@
           "$path": "src/shared/Models"
         }
       },
+      "models": {
+        "$path": "src/shared/Models"
+      },
       "growth": {
         "$path": "src/client/growth"
       },

@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GrowthVisualizer = require(ReplicatedStorage.growth.GrowthVisualizer)
 local LoomConfigs = require(ReplicatedStorage.looms.LoomConfigs)
+local VisualScene = require(script.Parent.VisualScene)
+local ModelResolver = require(script.Parent.ModelResolver)
 
 local LoomDesigner = {}
 
@@ -46,52 +48,21 @@ function LoomDesigner.SetOverrides(overrides)
 	end
 end
 
--- utility: clear out previous preview parts
-local function clearChildren(container)
-	for _, child in ipairs(container:GetChildren()) do
-		child:Destroy()
-	end
-end
+function LoomDesigner.RebuildPreview(_container)
+        if not state.configId then return end
 
-function LoomDesigner.RebuildPreview(container)
-	if not state.configId then return end
-
-	-- run numeric growth sim
-	GrowthVisualizer.Render(container, {
-		loomUid = 0, -- single preview loom
-		configId = state.configId,
-		baseSeed = state.baseSeed,
-		g = state.g,
-		overrides = state.overrides,
-	})
-
-	local visual = GrowthVisualizer._getVisualState(0)
-	if not visual then return end
-
-	clearChildren(container)
-
-	-- build visible parts for each filled segment
-	local prevCFrame = CFrame.new(0,0,0)
-	local segLength = 2
-	for _, seg in ipairs(visual.segments) do
-		if seg.fill > 0 then
-			local part = Instance.new("Part")
-			part.Anchored = true
-			part.Size = Vector3.new(
-				0.2 * seg.thicknessScale,
-				segLength * seg.lengthScale,
-				0.2 * seg.thicknessScale
-			)
-			-- orient segment by yaw/pitch/roll
-			local rot = CFrame.Angles(seg.pitch, seg.yaw, seg.roll)
-			part.CFrame = prevCFrame * rot * CFrame.new(0, part.Size.Y/2, 0)
-			part.Color = Color3.fromRGB(100, 200, 100)
-			part.Parent = container
-
-			-- advance for next segment
-			prevCFrame = part.CFrame * CFrame.new(0, part.Size.Y/2, 0)
-		end
-	end
+        GrowthVisualizer.Render(nil, {
+                loomUid = 0,
+                configId = state.configId,
+                baseSeed = state.baseSeed,
+                g = state.g,
+                overrides = state.overrides,
+                scene = {
+                        Clear = VisualScene.Clear,
+                        Spawn = VisualScene.Spawn,
+                        ResolveModel = ModelResolver.ResolveFromList,
+                },
+        })
 end
 
 -- Simple validation that checks for expected field types. Returns true if the
