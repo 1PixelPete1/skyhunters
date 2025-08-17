@@ -1,5 +1,12 @@
 local MinionService = {}
 
+--[[
+TODO: drive decorative minions.
+Aims: synchronize minion spawns, reactions, and behaviors around the
+      player's base.
+Acceptance: minions appear, celebrate on sales, and tick autonomously.
+]]
+
 function MinionService.SyncForPlayer(player)
     -- TODO: spawn or update minions around base
 end

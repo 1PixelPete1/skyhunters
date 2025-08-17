@@ -17,6 +17,14 @@ local ItemsConfig = loadShared("ItemsConfig")
 
 local BurstService = {}
 
+--[[
+TODO: finalize burst item handling.
+Aims: allow consumables to grant temporary aether boosts and interact
+      with growth conversions.
+Acceptance: consuming a burst item reliably applies its value and
+            interaction hooks support future features.
+]]
+
 function BurstService.Use(player, typeId)
     local cfg = ItemsConfig.Types[typeId]
     if not cfg or cfg.category ~= "burst" then

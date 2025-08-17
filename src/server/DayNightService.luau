@@ -1,5 +1,12 @@
 local DayNightService = {}
 
+--[[
+TODO: manage global day/night cycle.
+Aims: control cycle length and broadcast time changes.
+Acceptance: cycle progresses smoothly and clients can query normalized
+            time of day.
+]]
+
 function DayNightService.SetCycleLength(seconds)
     -- TODO: set day/night cycle length
 end

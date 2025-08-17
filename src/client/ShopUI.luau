@@ -5,6 +5,8 @@ local localPlayer = Players.LocalPlayer
 
 local RF_FetchShopSnapshot = ReplicatedStorage:WaitForChild("ShopRemotes"):WaitForChild("RF_FetchShopSnapshot")
 local RF_Purchase = ReplicatedStorage.ShopRemotes:WaitForChild("RF_Purchase")
+local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
+local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
 local rarityColors = {
     Common = Color3.fromRGB(200, 200, 200),
@@ -14,7 +16,6 @@ local rarityColors = {
     Mythic = Color3.fromRGB(255, 0, 255),
 }
 
-local inventoryCount = {}
 
 local screenGui
 local list
@@ -152,7 +153,8 @@ local function populateList(catalog)
                     local result = RF_Purchase:InvokeServer({ itemId = id })
                     if result and result.ok then
                         crumbsLabel.Text = tostring(result.newBalance)
-                        inventoryCount[id] = result.newCount
+                        InventoryState.SetCount(id, result.newCount)
+                        InventoryCountChanged:Fire(id, result.newCount)
                         errorLabel.Text = "Purchased " .. (item.name or id)
                     else
                         errorLabel.Text = result and result.code or "Purchase failed"

@@ -12,6 +12,7 @@ local ModelUtils = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local EquippedUI = require(script.Parent:WaitForChild("EquippedUI"))
 local InventoryCountChanged = ReplicatedStorage:WaitForChild("InventoryCountChanged")
 local ItemsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemsConfig"))
+local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -31,7 +32,6 @@ type ItemDef = {
 local HeldItemController = {}
 
 local placingItemId: string? = nil
-local placingCount = 0
 local heldModel: Instance? = nil
 local ghostModel: Instance? = nil
 local currentTemplate: Instance? = nil
@@ -246,7 +246,6 @@ end
 
 local function cancelPlacement()
     placingItemId = nil
-    placingCount = 0
     currentTemplate = nil
     currentItemDef = nil
     currentMode = nil
@@ -307,7 +306,6 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     savedMaxZoom = player.CameraMaxZoomDistance
     if mode == "build" then
         placingItemId = itemDef.id
-        placingCount = itemDef.count or 1
         StartHolding:FireServer(itemDef.id)
         currentTemplate = getModel(itemDef.model)
         local character = player.Character or player.CharacterAdded:Wait()
@@ -333,7 +331,8 @@ function HeldItemController.Start(itemDef: ItemDef, mode: "build" | "equip")
     else
         player.CameraMode = Enum.CameraMode.Classic
     end
-    EquippedUI.Show(itemDef.icon or "", itemDef.name or "", itemDef.count or placingCount or 1)
+    local count = InventoryState.GetCount(itemDef.id)
+    EquippedUI.Show(itemDef.icon or "", itemDef.name or "", count)
 end
 
 HeldItemController.Stop = cancelPlacement
@@ -375,7 +374,7 @@ function HeldItemController.GetCurrent()
 end
 
 local function tryPlace()
-    if not placingItemId or not ghostModel or placingCount <= 0 then
+    if not placingItemId or not ghostModel or InventoryState.GetCount(placingItemId) <= 0 then
         return
     end
     local now = tick()
@@ -400,13 +399,14 @@ ConfirmPlacement.OnClientEvent:Connect(function(ok, payload)
         ghostModel:Destroy()
         ghostModel = nil
     end
-    placingCount = payload and payload.remaining or 0
-    InventoryCountChanged:Fire(placingItemId, placingCount)
-    if placingCount <= 0 then
+    local newCount = payload and payload.remaining or 0
+    InventoryState.SetCount(placingItemId, newCount)
+    InventoryCountChanged:Fire(placingItemId, newCount)
+    if newCount <= 0 then
         HeldItemController.Stop()
         return
     end
-    EquippedUI.Update(placingCount)
+    EquippedUI.Update(newCount)
     if lastMouseHit and lastMouseOnPlatform and currentTemplate then
         spawnGhost(currentTemplate)
         updateGhostAt(lastMouseHit)

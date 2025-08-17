@@ -1,5 +1,11 @@
 local WorldGenService = {}
 
+--[[
+TODO: procedural island generation.
+Aims: spawn/despawn islands from prefabs and expose active listings.
+Acceptance: generated islands track by id and can be queried or removed.
+]]
+
 function WorldGenService.SpawnIsland(spec)
     -- TODO: assemble island from prefabs
     return 0

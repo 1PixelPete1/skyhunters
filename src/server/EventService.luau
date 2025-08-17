@@ -1,5 +1,11 @@
 local EventService = {}
 
+--[[
+TODO: orchestrate timed world events.
+Aims: schedule, start, and end events with arbitrary payloads.
+Acceptance: events can be queued and queried for active status.
+]]
+
 function EventService.Schedule(id, at, data)
     -- TODO: schedule an event
 end
