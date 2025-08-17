@@ -6,6 +6,7 @@
 local WeaverService = {}
 
 local looms = {}
+local harvestLocks = {}
 
 function WeaverService.OnNodesEligible(loomUid, eligible)
     local state = looms[loomUid]
@@ -29,14 +30,29 @@ function WeaverService.ActivateSome(loomUid)
 end
 
 function WeaverService.TryHarvest(player, loomUid, nodeId)
+    local lock = harvestLocks[loomUid]
+    if not lock then
+        lock = {}
+        harvestLocks[loomUid] = lock
+    end
+    if lock[nodeId] then
+        return false, "duplicate_harvest"
+    end
+    lock[nodeId] = true
+
     local state = looms[loomUid]
-    if not state then return false, "unknown_loom" end
+    if not state then
+        lock[nodeId] = nil
+        return false, "unknown_loom"
+    end
     for i, id in ipairs(state.occupied) do
         if id == nodeId then
             table.remove(state.occupied, i)
+            lock[nodeId] = nil
             return true, nil
         end
     end
+    lock[nodeId] = nil
     return false, "node_not_occupied"
 end
 
