@@ -4,12 +4,6 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local InventoryConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InventoryConfig"))
-local CountChangedEvent = ReplicatedStorage:FindFirstChild("InventoryCountChanged")
-if not CountChangedEvent then
-    CountChangedEvent = Instance.new("BindableEvent")
-    CountChangedEvent.Name = "InventoryCountChanged"
-    CountChangedEvent.Parent = ReplicatedStorage
-end
 local HeldItemController = require(script.Parent:WaitForChild("HeldItemController"))
 local InventoryState = require(script.Parent:WaitForChild("InventoryState"))
 
@@ -45,6 +39,12 @@ local function createCell()
         end
         local item = itemLookup[uid]
         if item then
+            if InventoryState.GetCount(item.uid) <= 0 then
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Skyhunters", Text = "Out of items", Duration = 2 })
+                end)
+                return
+            end
             local current, mode = HeldItemController.GetCurrent()
             if current and current.id == item.uid and mode == "build" then
                 return
@@ -83,7 +83,7 @@ local function renderGrid()
     end
 end
 
-CountChangedEvent.Event:Connect(function(uid, newCount)
+InventoryState.OnItemCountChanged:Connect(function(uid, newCount)
     local item = itemLookup[uid]
     if item then
         item.count = newCount
@@ -97,7 +97,6 @@ CountChangedEvent.Event:Connect(function(uid, newCount)
             itemLookup[uid] = nil
         end
     end
-    InventoryState.SetCount(uid, newCount)
     renderGrid()
 end)
 
@@ -109,9 +108,9 @@ local function fetchPage(reset)
     end
     local page, newCursor = RF_Fetch:InvokeServer(currentCategory, currentSearch, nextCursor)
     for _, item in ipairs(page) do
+        item.count = InventoryState.GetCount(item.uid)
         table.insert(items, item)
         itemLookup[item.uid] = item
-        InventoryState.SetCount(item.uid, item.count)
     end
     nextCursor = newCursor
 end
@@ -122,6 +121,7 @@ local function refresh()
 end
 
 function InventoryUI.Init()
+    InventoryState.InitOnce()
     local playerGui = localPlayer:WaitForChild("PlayerGui")
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "InventoryGUI"

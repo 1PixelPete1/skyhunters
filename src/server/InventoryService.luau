@@ -1,4 +1,23 @@
 local PlayerManager = require(script.Parent:WaitForChild("PlayerManager"))
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local function getPushEvent()
+    local ok, folder = pcall(function()
+        return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Inventory"):WaitForChild("RE_InventoryPush")
+    end)
+    if ok then
+        return folder
+    end
+    return nil
+end
+
+local function pushCount(player, itemId)
+    local ev = getPushEvent()
+    if not ev then
+        return
+    end
+    ev:FireClient(player, { id = itemId, newCount = InventoryService.GetCount(player, itemId) })
+end
 
 local function loadShared(name)
     local ok, ReplicatedStorage = pcall(function()
@@ -19,6 +38,7 @@ function InventoryService.Add(player, typeId, qty)
     qty = qty or 1
     local data = PlayerManager.GetPlayerData(player)
     data.inventory[typeId] = (data.inventory[typeId] or 0) + qty
+    pushCount(player, typeId)
     return true
 end
 
@@ -33,6 +53,7 @@ function InventoryService.Consume(player, typeId, qty)
     if data.inventory[typeId] <= 0 then
         data.inventory[typeId] = nil
     end
+    pushCount(player, typeId)
     return true
 end
 
