@@ -4,7 +4,7 @@
 -- Instances so that it can run inside the unit tests.
 
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-
+local GrowthProfiles = require(game.ReplicatedStorage.looms.GrowthProfiles)
 local GrowthVisualizer = {}
 
 -- visual state keyed by loomUid
@@ -101,15 +101,21 @@ function GrowthVisualizer.Render(container, loomState)
     local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
     local tie = config.growthDefaults.relativeScaleTie or 0
 
-    local state = {}
-    local yaw, pitch, roll = 0, 0, 0
+    -- clear old children
+    for _, child in ipairs(container:GetChildren()) do
+        child:Destroy()
+    end
+
+    -- build segment data
+    local yaw, pitch, roll = 0,0,0
+    local prevCFrame = CFrame.new(0,0,0)
     for i = 1, segCount do
         local seg = segments[i]
         if not seg then
             seg = { yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0 }
             segments[i] = seg
         end
-        local delta = GrowthProfiles.rotDelta(profile, rng, state)
+        local delta = GrowthProfiles.rotDelta(profile, rng, {})
         if profile.continuity == "accumulate" then
             yaw = yaw + delta.yaw
             pitch = pitch + delta.pitch
@@ -119,16 +125,20 @@ function GrowthVisualizer.Render(container, loomState)
         end
         seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
 
-        local lenJit = rng:NextNumber(-jitter.length, jitter.length)
-        local thickJit = rng:NextNumber(-jitter.thickness, jitter.thickness)
-        seg.lengthScale = 1 + lenJit
-        seg.thicknessScale = 1 + lenJit * tie + thickJit * (1 - tie)
-    end
+        seg.lengthScale = 1 + rng:NextNumber(-jitter.length, jitter.length)
+        seg.thicknessScale = 1 + rng:NextNumber(-jitter.thickness, jitter.thickness)
 
-    local fills = computeSegmentFill(segCount, loomState.g or 0)
-    for i = 1, segCount do
-        segments[i].fill = fills[i]
-
+        -- actually spawn a Part
+        if (loomState.g or 0) >= (i/segCount)*100 then
+            local part = Instance.new("Part")
+            part.Anchored = true
+            part.Size = Vector3.new(0.3*seg.thicknessScale, 2*seg.lengthScale, 0.3*seg.thicknessScale)
+            local rot = CFrame.Angles(pitch, yaw, roll)
+            part.CFrame = prevCFrame * rot * CFrame.new(0, part.Size.Y/2, 0)
+            part.Color = Color3.fromRGB(0, 200, 0)
+            part.Parent = container
+            prevCFrame = part.CFrame * CFrame.new(0, part.Size.Y/2, 0)
+        end
     end
 end
 
