@@ -51,6 +51,11 @@ function GrowthService.RegisterLoom(player, configId, rarity, overrides, baseSee
         overrides = overrides,
         completed = false,
     }
+    local complexity = computeComplexity(config, overrides)
+    local rarityMul = Rarity.GetGrowthMultiplier(rarity)
+    local rate = BASE_RATE * rarityMul / complexity
+    local totalTime = 100 / rate
+    print(string.format("GrowthService.RegisterLoom uid=%s complexity=%.2f rate=%.4f time=%.2f", uid, complexity, rate, totalTime))
     return uid
 end
 
