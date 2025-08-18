@@ -54,6 +54,7 @@ local function clamp(v, mn, mx)
     return v
 end
 local GrowthVisualizer = {}
+GrowthVisualizer._PLUGIN_VERSION = _PLUGIN_VERSION
 
 -- visual state keyed by loomUid
 -- each entry: {segments = { {yaw,pitch,roll,lengthScale,thicknessScale,fill}, ...}}
