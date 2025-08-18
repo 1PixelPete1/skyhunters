@@ -29,13 +29,6 @@ do
     if not GrowthProfiles then error("[GrowthVisualizer] Could not resolve GrowthProfiles") end
 end
 
-local SegmentBuilder
-do
-    local root = script and script:FindFirstAncestor("LoomDesigner")
-    if root and root:FindFirstChild("SegmentBuilder") then
-        SegmentBuilder = require(root.SegmentBuilder)
-    end
-end
 local function clamp(v, mn, mx)
     if v < mn then return mn end
     if v > mx then return mx end
@@ -124,6 +117,32 @@ local function getVisual(loomUid)
     return v
 end
 
+local function renderSegments(scene, cfg, segments)
+    if not scene or not scene.Spawn then
+        return
+    end
+    for _, seg in ipairs(segments) do
+        local shape = cfg.partType or Enum.PartType.Ball
+        local size
+        if shape == Enum.PartType.Ball then
+            size = Vector3.new(seg.thickness, seg.thickness, seg.thickness)
+        else
+            size = Vector3.new(seg.thickness, seg.length, seg.thickness)
+        end
+        scene.Spawn({
+            class = "Part",
+            shape = shape,
+            size = size,
+            cframe   = seg.cframe,
+            material = cfg.material or Enum.Material.SmoothPlastic,
+            color    = cfg.color,
+            anchored = true,
+            canCollide = false,
+            name = "Segment",
+        })
+    end
+end
+
 function GrowthVisualizer.Render(container, loomState)
     local config = LoomConfigs[loomState.configId]
     if not config then return end
@@ -188,36 +207,26 @@ function GrowthVisualizer.Render(container, loomState)
     end
 
     -- === Rendering to Workspace via scene API ===
-    if not loomState.scene then return end
+    local scene = loomState.scene
+    if scene and scene.Clear then scene.Clear() end
 
-    loomState.scene.Clear()
-
-    local currentCF = CFrame.new(0,0,0)
-    for i, seg in ipairs(segments) do
-        if seg.fill > 0 then
-            local inst = SegmentBuilder and SegmentBuilder.Build({
-                mode = matOverrides.mode or "Model",
-                depth = i-1,
-                isTerminal = (i == segCount),
-                modelConfig = matOverrides.model,
-                partConfig = matOverrides.part,
-                resolver = { ResolveFromList = loomState.scene.ResolveModel },
-                configModels = config.models,
-                lengthScale = seg.lengthScale,
-                thicknessScale = seg.thicknessScale,
-            })
-            if inst then
+    if scene and scene.Spawn then
+        local cfg = matOverrides.part or {}
+        local segOut = {}
+        local currentCF = CFrame.new(0,0,0)
+        local baseLength = cfg.baseLength or 2
+        local baseThickness = cfg.baseThickness or 1
+        for i, seg in ipairs(segments) do
+            if seg.fill > 0 then
                 local rot = CFrame.Angles(math.rad(seg.pitch), math.rad(seg.yaw), math.rad(seg.roll))
-                local baseLength = 2
-                if matOverrides.mode == "Part" and matOverrides.part and matOverrides.part.baseLength then
-                    baseLength = matOverrides.part.baseLength
-                end
                 local length = baseLength * seg.lengthScale
+                local thickness = baseThickness * seg.thicknessScale
                 local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
-                loomState.scene.Spawn(inst, stepCF)
+                segOut[#segOut+1] = {cframe = stepCF, length = length, thickness = thickness}
                 currentCF = stepCF * CFrame.new(0, length/2, 0)
             end
         end
+        renderSegments(scene, cfg, segOut)
     end
 end
 

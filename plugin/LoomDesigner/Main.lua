@@ -19,9 +19,6 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
-local SegmentBuilder = RequireUtil.fromRelative(script.Parent, {"SegmentBuilder"})
-SegmentBuilder = RequireUtil.must(SegmentBuilder, "LoomDesigner/SegmentBuilder")
-
 local LoomDesigner = {}
 
 -- current working state used by the designer
@@ -154,8 +151,23 @@ function LoomDesigner.RebuildPreview(_container)
 
         local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
         local pivot = pp and pp.Position or Vector3.new()
-        local count = #model:GetDescendants()
-        print(string.format("Spawned PreviewBranch at %s with %d parts", tostring(pivot), count))
+        local basePartCount = 0
+        for _, d in ipairs(model:GetDescendants()) do
+                if d:IsA("BasePart") then basePartCount += 1 end
+        end
+        print(string.format("Spawned PreviewBranch at %s with %d BaseParts", tostring(pivot), basePartCount))
+        if basePartCount == 0 then
+                VisualScene.Spawn({
+                        name="DebugSegment",
+                        shape=Enum.PartType.Ball,
+                        size=Vector3.new(0.8,0.8,0.8),
+                        cframe=CFrame.new(0,3,0),
+                        color=Color3.fromRGB(255,0,0),
+                        anchored=true,
+                        canCollide=false,
+                })
+                warn("[LoomDesigner] Render produced 0 BaseParts; placed DebugSegment for visibility.")
+        end
 end
 
 -- Simple validation that checks for expected field types. Returns true if the
