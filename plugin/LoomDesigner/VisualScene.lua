@@ -1,6 +1,8 @@
 --!strict
 local VisualScene = {}
 
+local previewModel: Model? = nil
+
 function VisualScene.GetPreviewRoot()
     local ws = game:GetService("Workspace")
     local root = ws:FindFirstChild("LoomPreview")
@@ -12,15 +14,20 @@ function VisualScene.GetPreviewRoot()
     return root
 end
 
+function VisualScene.SetPreviewModel(model: Model)
+    previewModel = model
+end
+
 function VisualScene.Clear()
-    local root = VisualScene.GetPreviewRoot()
-    for _, c in ipairs(root:GetChildren()) do
-        c:Destroy()
+    if previewModel then
+        for _, c in ipairs(previewModel:GetChildren()) do
+            c:Destroy()
+        end
     end
 end
 
 function VisualScene.Spawn(instance, cf)
-    local root = VisualScene.GetPreviewRoot()
+    local root = previewModel or VisualScene.GetPreviewRoot()
     if cf then
         -- Apply CFrame to Models or Parts
         if instance:IsA("Model") then

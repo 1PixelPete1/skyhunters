@@ -33,19 +33,41 @@ local function getRefList(params)
     return nil
 end
 
+local function parsePartType(s: any)
+    s = tostring(s):lower()
+    local map = {
+        sphere = "Ball",
+        ball = "Ball",
+        round = "Ball",
+        block = "Block",
+        cube = "Block",
+        cylinder = "Cylinder",
+        tube = "Cylinder",
+    }
+    local name = map[s]
+    if name then
+        return Enum.PartType[name]
+    end
+    return Enum.PartType.Block
+end
+
 function SegmentBuilder.Build(params)
     if params.mode == "Part" then
         local cfg = params.partConfig or {}
+        local pType = cfg.partType
+        if typeof(pType) ~= "EnumItem" then
+            pType = parsePartType(pType)
+        end
         local part
-        if cfg.partType == Enum.PartType.Sphere then
+        if pType == Enum.PartType.Ball then
             part = Instance.new("Part")
             part.Shape = Enum.PartType.Ball
-        elseif cfg.partType == Enum.PartType.Cylinder then
+        elseif pType == Enum.PartType.Cylinder then
             part = Instance.new("Part")
             part.Shape = Enum.PartType.Cylinder
-        elseif cfg.partType == Enum.PartType.Wedge then
+        elseif pType == Enum.PartType.Wedge then
             part = Instance.new("WedgePart")
-        elseif cfg.partType == Enum.PartType.CornerWedge then
+        elseif pType == Enum.PartType.CornerWedge then
             part = Instance.new("CornerWedgePart")
         else
             part = Instance.new("Part")
@@ -64,9 +86,9 @@ function SegmentBuilder.Build(params)
         local length = baseLength * lengthScale
         local thick = baseThickness * thicknessScale
 
-        if cfg.partType == Enum.PartType.Sphere then
+        if pType == Enum.PartType.Ball then
             part.Size = Vector3.new(thick, thick, thick)
-        elseif cfg.partType == Enum.PartType.Cylinder then
+        elseif pType == Enum.PartType.Cylinder then
             part.Size = Vector3.new(thick, length, thick)
         else
             part.Size = Vector3.new(thick, length, thick)
