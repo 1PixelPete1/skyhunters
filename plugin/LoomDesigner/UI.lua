@@ -65,6 +65,25 @@ end)
 return box
 end
 
+local function checkbox(parent: Instance, label: string, defaultState: boolean, onToggle: (boolean)->())
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0,180,0,24)
+btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+btn.TextColor3 = Color3.new(1,1,1)
+local state = defaultState
+local function render()
+    btn.Text = (state and "[x] " or "[ ] ") .. label
+end
+btn.MouseButton1Click:Connect(function()
+    state = not state
+    render()
+    onToggle(state)
+end)
+render()
+btn.Parent = parent
+return btn
+end
+
 -- Overlay-safe dropdown: mounts popup to popupHost
 local function dropdown(parent: Instance, popupHost: Frame, label: string, options: {string}, defaultIndex: number, onSelect: (string)->())
 local row = Instance.new("Frame")
@@ -94,25 +113,6 @@ local popup: Frame? = nil
 local function closePopup()
 open = false
 if popup then popup:Destroy(); popup = nil end
-end
-
-local function checkbox(parent: Instance, label: string, defaultState: boolean, onToggle: (boolean)->())
-local btn = Instance.new("TextButton")
-btn.Size = UDim2.new(0,180,0,24)
-btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-btn.TextColor3 = Color3.new(1,1,1)
-local state = defaultState
-local function render()
-    btn.Text = (state and "[x] " or "[ ] ") .. label
-end
-btn.MouseButton1Click:Connect(function()
-    state = not state
-    render()
-    onToggle(state)
-end)
-render()
-btn.Parent = parent
-return btn
 end
 
 btn.MouseButton1Click:Connect(function()
