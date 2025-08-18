@@ -2,6 +2,33 @@
 local RequireUtil = require(script.Parent.RequireUtil)
 local SegmentBuilder = {}
 
+function SegmentBuilder.BuildSegment(opts)
+    local p = Instance.new("Part")
+    p.Name = "Segment"
+    p.Anchored = (opts.anchored ~= false)
+    p.CanCollide = (opts.canCollide == true)
+    p.Material = opts.material or Enum.Material.SmoothPlastic
+    if opts.color then p.Color = opts.color end
+
+    local t = math.max(0.05, opts.thickness or 0.5)
+    local L = math.max(0.05, opts.length or 1)
+
+    local pt = opts.partType or Enum.PartType.Ball
+    if pt == Enum.PartType.Ball then
+        p.Shape = Enum.PartType.Ball
+        p.Size = Vector3.new(t, t, t)
+    elseif pt == Enum.PartType.Cylinder then
+        p.Shape = Enum.PartType.Cylinder
+        p.Size = Vector3.new(t, L, t)
+    else
+        p.Shape = Enum.PartType.Block
+        p.Size = Vector3.new(t, L, t)
+    end
+
+    if opts.cframe then p.CFrame = opts.cframe end
+    return p
+end
+
 -- Builds a single segment Instance according to materialization mode.
 -- params = {
 --   mode = "Model" | "Part",
