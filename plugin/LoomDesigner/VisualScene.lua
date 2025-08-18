@@ -1,4 +1,5 @@
 --!strict
+local RequireUtil = require(script.Parent.RequireUtil)
 local VisualScene = {}
 
 local previewModel: Model? = nil

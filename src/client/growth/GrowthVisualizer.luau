@@ -5,14 +5,37 @@
 
 local LoomConfigs
 local GrowthProfiles
-if rawget(_G, "game") and game.ReplicatedStorage then
-    LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-    GrowthProfiles = require(game.ReplicatedStorage.growth.GrowthProfiles)
-else
-    LoomConfigs = require("looms/LoomConfigs")
-    GrowthProfiles = require("looms/GrowthProfiles")
+do
+    local ok, RS = pcall(game.GetService, game, "ReplicatedStorage")
+    if ok and RS then
+        LoomConfigs = LoomConfigs or (RS:FindFirstChild("looms") and RS.looms:FindFirstChild("LoomConfigs") and require(RS.looms.LoomConfigs))
+        GrowthProfiles = GrowthProfiles or (RS:FindFirstChild("growth") and RS.growth:FindFirstChild("GrowthProfiles") and require(RS.growth.GrowthProfiles))
+    end
+    if not LoomConfigs then
+        local root = script and script:FindFirstAncestor("LoomDesigner")
+        if root then
+            local lc = root:FindFirstChild("looms")
+            if lc and lc:FindFirstChild("LoomConfigs") then LoomConfigs = require(lc.LoomConfigs) end
+        end
+    end
+    if not GrowthProfiles then
+        local root = script and script:FindFirstAncestor("LoomDesigner")
+        if root then
+            local gr = root:FindFirstChild("growth")
+            if gr and gr:FindFirstChild("GrowthProfiles") then GrowthProfiles = require(gr.GrowthProfiles) end
+        end
+    end
+    if not LoomConfigs then error("[GrowthVisualizer] Could not resolve LoomConfigs") end
+    if not GrowthProfiles then error("[GrowthVisualizer] Could not resolve GrowthProfiles") end
 end
-local SegmentBuilder = require("LoomDesigner/SegmentBuilder")
+
+local SegmentBuilder
+do
+    local root = script and script:FindFirstAncestor("LoomDesigner")
+    if root and root:FindFirstChild("SegmentBuilder") then
+        SegmentBuilder = require(root.SegmentBuilder)
+    end
+end
 local function clamp(v, mn, mx)
     if v < mn then return mn end
     if v > mx then return mx end
@@ -172,7 +195,7 @@ function GrowthVisualizer.Render(container, loomState)
     local currentCF = CFrame.new(0,0,0)
     for i, seg in ipairs(segments) do
         if seg.fill > 0 then
-            local inst = SegmentBuilder.Build({
+            local inst = SegmentBuilder and SegmentBuilder.Build({
                 mode = matOverrides.mode or "Model",
                 depth = i-1,
                 isTerminal = (i == segCount),

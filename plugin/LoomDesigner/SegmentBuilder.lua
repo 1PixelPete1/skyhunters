@@ -1,4 +1,5 @@
 --!strict
+local RequireUtil = require(script.Parent.RequireUtil)
 local SegmentBuilder = {}
 
 -- Builds a single segment Instance according to materialization mode.
