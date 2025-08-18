@@ -96,6 +96,25 @@ open = false
 if popup then popup:Destroy(); popup = nil end
 end
 
+local function checkbox(parent: Instance, label: string, defaultState: boolean, onToggle: (boolean)->())
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0,180,0,24)
+btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+btn.TextColor3 = Color3.new(1,1,1)
+local state = defaultState
+local function render()
+    btn.Text = (state and "[x] " or "[ ] ") .. label
+end
+btn.MouseButton1Click:Connect(function()
+    state = not state
+    render()
+    onToggle(state)
+end)
+render()
+btn.Parent = parent
+return btn
+end
+
 btn.MouseButton1Click:Connect(function()
 if open then closePopup(); return end
 open = true
@@ -198,8 +217,10 @@ local secConfig = makeSection(scroll, "Branch Config")
 local secSeed   = makeSection(scroll, "Seed / Randomness")
 local secGrowth = makeSection(scroll, "Growth Progression")
 local secSeg    = makeSection(scroll, "Segment Overrides")
+local secPath   = makeSection(scroll, "Path Style")
 local secGeo    = makeSection(scroll, "Segment Geometry")
 local secRot    = makeSection(scroll, "Rotation Rules")
+local secDeco   = makeSection(scroll, "Decorations")
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -240,6 +261,23 @@ seedLabel.Text = "Current Seed: " .. tostring(newSeed)
 LoomDesigner.RebuildPreview(nil)
 end)
 
+checkbox(secSeed, "Seed affects segmentCount", true, function(val)
+    LoomDesigner.SetOverrides({seedAffects = {segmentCount = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+checkbox(secSeed, "Seed affects curvature", true, function(val)
+    LoomDesigner.SetOverrides({seedAffects = {curvature = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+checkbox(secSeed, "Seed affects frequency", true, function(val)
+    LoomDesigner.SetOverrides({seedAffects = {frequency = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+checkbox(secSeed, "Seed affects jitter", true, function(val)
+    LoomDesigner.SetOverrides({seedAffects = {jitter = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
 labeledTextBox(secGrowth, "Growth % (0-100)", "50", function(txt)
 local n = tonumber(txt)
 if n then
@@ -254,6 +292,71 @@ local o = {}
 if n then o.segmentCount = math.max(1, math.floor(n)) end
 LoomDesigner.SetOverrides(o)
 LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secSeg, "SegmentCount Min", "", function(txt)
+local n = tonumber(txt)
+if n then
+    LoomDesigner.SetOverrides({segmentCountMin = n})
+    LoomDesigner.RebuildPreview(nil)
+end
+end)
+
+labeledTextBox(secSeg, "SegmentCount Max", "", function(txt)
+local n = tonumber(txt)
+if n then
+    LoomDesigner.SetOverrides({segmentCountMax = n})
+    LoomDesigner.RebuildPreview(nil)
+end
+end)
+
+local function setPath(field, value)
+    LoomDesigner.SetOverrides({path = {[field] = value}})
+    LoomDesigner.RebuildPreview(nil)
+end
+
+dropdown(secPath, popupHost, "Style", {"straight","curved","zigzag","noise","sigmoid","chaotic"}, 2, function(opt)
+    setPath("style", opt)
+end)
+
+labeledTextBox(secPath, "Amplitude Deg", "10", function(txt)
+local n = tonumber(txt)
+if n then setPath("amplitudeDeg", n) end
+end)
+
+labeledTextBox(secPath, "Frequency", "0.35", function(txt)
+local n = tonumber(txt)
+if n then setPath("frequency", n) end
+end)
+
+labeledTextBox(secPath, "Curvature", "0.35", function(txt)
+local n = tonumber(txt)
+if n then setPath("curvature", n) end
+end)
+
+labeledTextBox(secPath, "Zigzag Every", "1", function(txt)
+local n = tonumber(txt)
+if n then setPath("zigzagEvery", n) end
+end)
+
+labeledTextBox(secPath, "Sigmoid K", "6", function(txt)
+local n = tonumber(txt)
+if n then setPath("sigmoidK", n) end
+end)
+
+labeledTextBox(secPath, "Sigmoid Mid", "0.5", function(txt)
+local n = tonumber(txt)
+if n then setPath("sigmoidMid", n) end
+end)
+
+labeledTextBox(secPath, "Chaotic R", "3.9", function(txt)
+local n = tonumber(txt)
+if n then setPath("chaoticR", n) end
+end)
+
+labeledTextBox(secPath, "Micro Jitter Deg", "2", function(txt)
+local n = tonumber(txt)
+if n then setPath("microJitterDeg", n) end
 end)
 
 -- === Segment Geometry ===
@@ -300,6 +403,13 @@ local r,g,b = s:match("^rgb%((%d+),(%d+),(%d+)%)$")
 if not r then
     r,g,b = s:match("^(%d+),(%d+),(%d+)$")
 end
+local function parseVector3(s)
+    local x,y,z = tostring(s):match("^%s*([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)%s*$")
+    if x then
+        return Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+    end
+    return Vector3.new()
+end
 if r and g and b then
     return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
 end
@@ -318,6 +428,88 @@ if c then
     LoomDesigner.SetOverrides({materialization = {part = {color = c}}})
     LoomDesigner.RebuildPreview(nil)
 end
+end)
+
+checkbox(secDeco, "Enable Decorations", false, function(val)
+    LoomDesigner.SetOverrides({decorations = {enabled = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secDeco, "Kind", "leaf", function(txt)
+    LoomDesigner.SetOverrides({decorations = {types = {[1] = {kind = txt}}}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secDeco, "AssetId", "", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {assetId = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Density/Seg", "0.5", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {densityPerSeg = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Scale Min", "0.6", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {scaleMin = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Scale Max", "1.2", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {scaleMax = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Yaw", "45", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {yaw = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Pitch", "20", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {pitch = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Roll", "20", function(txt)
+    local n = tonumber(txt)
+    if n then
+        LoomDesigner.SetOverrides({decorations = {types = {[1] = {roll = n}}}})
+        LoomDesigner.RebuildPreview(nil)
+    end
+end)
+
+labeledTextBox(secDeco, "Color", "auto", function(txt)
+    LoomDesigner.SetOverrides({decorations = {types = {[1] = {color = txt}}}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secDeco, "Attach", "along", function(txt)
+    LoomDesigner.SetOverrides({decorations = {attach = txt}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secDeco, "Offset (x,y,z)", "0,0.2,0", function(txt)
+    local v = parseVector3(txt)
+    LoomDesigner.SetOverrides({decorations = {offset = v}})
+    LoomDesigner.RebuildPreview(nil)
 end)
 
 -- === Rotation Rules ===

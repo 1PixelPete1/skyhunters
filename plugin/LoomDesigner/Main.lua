@@ -4,10 +4,11 @@
 
 local RequireUtil = require(script.Parent.RequireUtil)
 
--- Prefer game modules (ReplicatedStorage), fallback to copies shipped with the plugin
-local GrowthVisualizer = RequireUtil.fromReplicatedStorage({"growth","GrowthVisualizer"})
-    or RequireUtil.fromRelative(script.Parent.Parent, {"growth","GrowthVisualizer"})
+-- Prefer plugin-local GrowthVisualizer so Studio uses scene-driven version
+local GrowthVisualizer = RequireUtil.fromRelative(script.Parent.Parent, {"growth","GrowthVisualizer"})
+    or RequireUtil.fromReplicatedStorage({"growth","GrowthVisualizer"})
 GrowthVisualizer = RequireUtil.must(GrowthVisualizer, "growth/GrowthVisualizer")
+print("[LoomDesigner] GrowthVisualizer:", GrowthVisualizer._PLUGIN_VERSION or "unknown")
 
 local LoomConfigs = RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
     or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
@@ -113,6 +114,18 @@ end
 
 function LoomDesigner.RebuildPreview(_container)
         if not state.configId then return end
+
+        -- robust configId fallback
+        if not LoomConfigs[state.configId] then
+                local firstId; for k in pairs(LoomConfigs) do firstId = k break end
+                if firstId then
+                        warn(("[LoomDesigner] Unknown configId '%s'. Using '%s'"):format(tostring(state.configId), firstId))
+                        state.configId = firstId
+                else
+                        warn("[LoomDesigner] LoomConfigs empty; skipping preview")
+                        return
+                end
+        end
 
         local parent = ensurePreviewParent()
         clearExistingPreview(parent)
