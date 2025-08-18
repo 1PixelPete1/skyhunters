@@ -175,6 +175,8 @@ local secConfig = makeSection(scroll, "Branch Config")
 local secSeed   = makeSection(scroll, "Seed / Randomness")
 local secGrowth = makeSection(scroll, "Growth Progression")
 local secSeg    = makeSection(scroll, "Segment Overrides")
+local secGeo    = makeSection(scroll, "Segment Geometry")
+local secRot    = makeSection(scroll, "Rotation Rules")
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -219,6 +221,86 @@ local n = tonumber(txt)
 local o = {}
 if n then o.segmentCount = math.max(1, math.floor(n)) end
 LoomDesigner.SetOverrides(o)
+LoomDesigner.RebuildPreview(nil)
+end)
+
+-- === Segment Geometry ===
+dropdown(secGeo, popupHost, "Mode", {"Model", "Part"}, 1, function(opt)
+local o = {materialization = {mode = opt}}
+LoomDesigner.SetOverrides(o)
+LoomDesigner.RebuildPreview(nil)
+end)
+
+dropdown(secGeo, popupHost, "Part Type", {"Block","Sphere","Cylinder","Wedge","CornerWedge"}, 1, function(opt)
+local o = {materialization = {part = {partType = Enum.PartType[opt]}}}
+LoomDesigner.SetOverrides(o)
+LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secGeo, "Base Length", "2", function(txt)
+local n = tonumber(txt)
+if n then
+    LoomDesigner.SetOverrides({materialization = {part = {baseLength = n}}})
+    LoomDesigner.RebuildPreview(nil)
+end
+end)
+
+labeledTextBox(secGeo, "Base Thickness", "1", function(txt)
+local n = tonumber(txt)
+if n then
+    LoomDesigner.SetOverrides({materialization = {part = {baseThickness = n}}})
+    LoomDesigner.RebuildPreview(nil)
+end
+end)
+
+local function parseColor(txt)
+if txt:match("^#%x%x%x%x%x%x$") then
+    local r = tonumber(string.sub(txt,2,3),16)
+    local g = tonumber(string.sub(txt,4,5),16)
+    local b = tonumber(string.sub(txt,6,7),16)
+    return Color3.fromRGB(r,g,b)
+end
+local r,g,b = txt:match("^(%d+),(%d+),(%d+)$")
+if r then return Color3.fromRGB(tonumber(r),tonumber(g),tonumber(b)) end
+return nil
+end
+
+labeledTextBox(secGeo, "Color", "#ffffff", function(txt)
+local c = parseColor(txt)
+if c then
+    LoomDesigner.SetOverrides({materialization = {part = {color = c}}})
+    LoomDesigner.RebuildPreview(nil)
+end
+end)
+
+-- === Rotation Rules ===
+labeledTextBox(secRot, "Yaw Clamp Deg", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = n}})
+LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secRot, "Pitch Clamp Deg", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({rotationRules = {pitchClampDeg = n}})
+LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secRot, "Extra Roll/Seg", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({rotationRules = {extraRollPerSegDeg = n}})
+LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secRot, "Random Roll Range", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({rotationRules = {randomRollRangeDeg = n}})
+LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secRot, "FaceForward Bias", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({rotationRules = {faceForwardBias = n}})
 LoomDesigner.RebuildPreview(nil)
 end)
 end

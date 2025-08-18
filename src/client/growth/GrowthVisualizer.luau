@@ -3,8 +3,21 @@
 -- deterministic traversal and keeps numeric data structures instead of real
 -- Instances so that it can run inside the unit tests.
 
-local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-local GrowthProfiles = require(game.ReplicatedStorage.growth.GrowthProfiles)
+local LoomConfigs
+local GrowthProfiles
+if rawget(_G, "game") and game.ReplicatedStorage then
+    LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
+    GrowthProfiles = require(game.ReplicatedStorage.growth.GrowthProfiles)
+else
+    LoomConfigs = require("looms/LoomConfigs")
+    GrowthProfiles = require("looms/GrowthProfiles")
+end
+local SegmentBuilder = require("LoomDesigner/SegmentBuilder")
+local function clamp(v, mn, mx)
+    if v < mn then return mn end
+    if v > mx then return mx end
+    return v
+end
 local GrowthVisualizer = {}
 
 -- visual state keyed by loomUid
@@ -95,11 +108,14 @@ function GrowthVisualizer.Render(container, loomState)
     local v = getVisual(loomState.loomUid)
     local segments = v.segments
 
-    local segCount = (loomState.overrides and loomState.overrides.segmentCount) or config.growthDefaults.segmentCount
+    local overrides = loomState.overrides or {}
+    local segCount = overrides.segmentCount or config.growthDefaults.segmentCount
     local rng = Random.new(loomState.baseSeed or 0)
-    local profile = GrowthProfiles.clampProfile((loomState.overrides and loomState.overrides.profile) or config.profileDefaults)
+    local profile = GrowthProfiles.clampProfile(overrides.profile or config.profileDefaults)
     local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
     local tie = config.growthDefaults.relativeScaleTie or 0
+    local rotRules = overrides.rotationRules or {}
+    local matOverrides = overrides.materialization or {mode = "Model"}
 
     -- Build segment numerics
     local yaw, pitch, roll = 0, 0, 0
@@ -109,11 +125,31 @@ function GrowthVisualizer.Render(container, loomState)
             seg = { yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0 }
             segments[i] = seg
         end
-        local delta = GrowthProfiles.rotDelta(profile, rng, {}) -- your state if needed
-        if profile.continuity == "accumulate" then
-            yaw += delta.yaw; pitch += delta.pitch; roll += delta.roll
+        local delta = GrowthProfiles.rotDelta(profile, rng, {})
+        local cont = rotRules.continuity or profile.continuity or "accumulate"
+        if cont == "accumulate" then
+            yaw = yaw + delta.yaw
+            pitch = pitch + delta.pitch
+            roll = roll + delta.roll
         else
             yaw, pitch, roll = delta.yaw, delta.pitch, delta.roll
+        end
+        if rotRules.extraRollPerSegDeg then
+            roll = roll + rotRules.extraRollPerSegDeg
+        end
+        if rotRules.randomRollRangeDeg then
+            roll = roll + rng:NextNumber(-rotRules.randomRollRangeDeg, rotRules.randomRollRangeDeg)
+        end
+        if rotRules.yawClampDeg then
+            yaw = clamp(yaw, -rotRules.yawClampDeg, rotRules.yawClampDeg)
+        end
+        if rotRules.pitchClampDeg then
+            pitch = clamp(pitch, -rotRules.pitchClampDeg, rotRules.pitchClampDeg)
+        end
+        local bias = rotRules.faceForwardBias
+        if bias and bias > 0 then
+            yaw = yaw * (1 - bias)
+            pitch = pitch * (1 - bias)
         end
         seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
 
@@ -129,35 +165,33 @@ function GrowthVisualizer.Render(container, loomState)
     end
 
     -- === Rendering to Workspace via scene API ===
-    -- loomState.scene must be a table with:
-    --   scene.Clear()
-    --   scene.Spawn(inst, cf)
-    --   scene.ResolveModel(refListOrRef)  (we'll pass this from UI/Main using ModelResolver)
-    if not loomState.scene then
-        warn("GrowthVisualizer.Render: loomState.scene missing; nothing will spawn.")
-        return
-    end
+    if not loomState.scene then return end
 
     loomState.scene.Clear()
 
     local currentCF = CFrame.new(0,0,0)
     for i, seg in ipairs(segments) do
         if seg.fill > 0 then
-            local isTerminal = (i == segCount)
-            -- Pick model by depth vs terminal
-            local refList
-            if isTerminal and config.models and config.models.byDepth and config.models.byDepth.terminal then
-                refList = config.models.byDepth.terminal
-            elseif config.models and config.models.byDepth and config.models.byDepth[i-1] then
-                refList = config.models.byDepth[i-1]
-            end
-
-            local model = loomState.scene.ResolveModel(refList)
-            if model then
-                local rot = CFrame.Angles(seg.pitch, seg.yaw, seg.roll)
-                local length = 2 * seg.lengthScale
+            local inst = SegmentBuilder.Build({
+                mode = matOverrides.mode or "Model",
+                depth = i-1,
+                isTerminal = (i == segCount),
+                modelConfig = matOverrides.model,
+                partConfig = matOverrides.part,
+                resolver = { ResolveFromList = loomState.scene.ResolveModel },
+                configModels = config.models,
+                lengthScale = seg.lengthScale,
+                thicknessScale = seg.thicknessScale,
+            })
+            if inst then
+                local rot = CFrame.Angles(math.rad(seg.pitch), math.rad(seg.yaw), math.rad(seg.roll))
+                local baseLength = 2
+                if matOverrides.mode == "Part" and matOverrides.part and matOverrides.part.baseLength then
+                    baseLength = matOverrides.part.baseLength
+                end
+                local length = baseLength * seg.lengthScale
                 local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
-                loomState.scene.Spawn(model, stepCF)
+                loomState.scene.Spawn(inst, stepCF)
                 currentCF = stepCF * CFrame.new(0, length/2, 0)
             end
         end

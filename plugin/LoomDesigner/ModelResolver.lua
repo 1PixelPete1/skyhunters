@@ -1,11 +1,19 @@
 --!strict
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedStorage
+if rawget(_G, "game") and game.GetService then
+    ReplicatedStorage = game:GetService("ReplicatedStorage")
+else
+    ReplicatedStorage = {FindFirstChild=function() return nil end}
+end
 
 local ModelResolver = {}
 
-local modelsFolder = ReplicatedStorage:WaitForChild("models", 2)
+local modelsFolder
+if ReplicatedStorage and ReplicatedStorage.WaitForChild then
+    modelsFolder = ReplicatedStorage:WaitForChild("models", 2)
+end
 
-function ModelResolver.ResolveOne(ref: any): Instance?
+function ModelResolver.ResolveOne(ref)
     if type(ref) == "string" then
         if modelsFolder then
             local m = modelsFolder:FindFirstChild(ref)
@@ -24,13 +32,13 @@ function ModelResolver.ResolveOne(ref: any): Instance?
         warn("ModelResolver: failed to load asset id "..tostring(ref))
         return nil
     else
-        warn("ModelResolver: unsupported ref type "..typeof(ref))
+        warn("ModelResolver: unsupported ref type "..type(ref))
         return nil
     end
 end
 
 -- Pick an entry from { "nameA", "nameB", ... } (or asset ids)
-function ModelResolver.ResolveFromList(list: {any}?): Instance?
+function ModelResolver.ResolveFromList(list)
     if not list or #list == 0 then return nil end
     -- For now just pick first; later randomize if needed
     return ModelResolver.ResolveOne(list[1])
