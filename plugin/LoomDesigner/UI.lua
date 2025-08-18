@@ -170,6 +170,28 @@ layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = scroll
 
+local spawnBtn = Instance.new("TextButton")
+spawnBtn.Size = UDim2.new(0,180,0,26)
+spawnBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+spawnBtn.TextColor3 = Color3.new(1,1,1)
+spawnBtn.Parent = scroll
+
+local function updateSpawnLabel()
+local folder = workspace:FindFirstChild("LoomPreview")
+if folder and folder:FindFirstChild("PreviewBranch") then
+spawnBtn.Text = "Rebuild Preview"
+else
+spawnBtn.Text = "Spawn Preview"
+end
+end
+
+spawnBtn.MouseButton1Click:Connect(function()
+LoomDesigner.RebuildPreview(nil)
+updateSpawnLabel()
+end)
+
+updateSpawnLabel()
+
 -- === Sections ===
 local secConfig = makeSection(scroll, "Branch Config")
 local secSeed   = makeSection(scroll, "Seed / Randomness")
@@ -189,22 +211,31 @@ LoomDesigner.SetConfigId(id)
 LoomDesigner.RebuildPreview(nil)
 end)
 
-labeledTextBox(secSeed, "Seed", "12345", function(txt)
-local n = tonumber(txt)
-if n then
-LoomDesigner.SetSeed(n)
+local seedLabel
+local seedBox = labeledTextBox(secSeed, "Seed", tostring(LoomDesigner.GetSeed()), function(txt)
+LoomDesigner.SetSeed(txt)
 LoomDesigner.RebuildPreview(nil)
-end
+seedBox.Text = tostring(LoomDesigner.GetSeed())
+seedLabel.Text = "Current Seed: " .. tostring(LoomDesigner.GetSeed())
 end)
+seedLabel = Instance.new("TextLabel")
+seedLabel.BackgroundTransparency = 1
+seedLabel.TextColor3 = Color3.fromRGB(200,200,200)
+seedLabel.Size = UDim2.new(1,0,0,20)
+seedLabel.TextXAlignment = Enum.TextXAlignment.Left
+seedLabel.Text = "Current Seed: " .. tostring(LoomDesigner.GetSeed())
+seedLabel.Parent = secSeed
 
 local randBtn = Instance.new("TextButton")
-randBtn.Text = "Randomize Seed"
+randBtn.Text = "Reroll"
 randBtn.Size = UDim2.new(0,180,0,26)
 randBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
 randBtn.TextColor3 = Color3.new(1,1,1)
 randBtn.Parent = secSeed
 randBtn.MouseButton1Click:Connect(function()
-LoomDesigner.RandomizeSeed()
+local newSeed = LoomDesigner.RandomizeSeed()
+seedBox.Text = tostring(newSeed)
+seedLabel.Text = "Current Seed: " .. tostring(newSeed)
 LoomDesigner.RebuildPreview(nil)
 end)
 
@@ -231,7 +262,7 @@ LoomDesigner.SetOverrides(o)
 LoomDesigner.RebuildPreview(nil)
 end)
 
-dropdown(secGeo, popupHost, "Part Type", {"Block","Sphere","Cylinder","Wedge","CornerWedge"}, 1, function(opt)
+dropdown(secGeo, popupHost, "Part Type", {"Block","Ball","Cylinder","Wedge","CornerWedge"}, 1, function(opt)
 local o = {materialization = {part = {partType = Enum.PartType[opt]}}}
 LoomDesigner.SetOverrides(o)
 LoomDesigner.RebuildPreview(nil)
@@ -253,20 +284,35 @@ if n then
 end
 end)
 
-local function parseColor(txt)
-if txt:match("^#%x%x%x%x%x%x$") then
-    local r = tonumber(string.sub(txt,2,3),16)
-    local g = tonumber(string.sub(txt,4,5),16)
-    local b = tonumber(string.sub(txt,6,7),16)
-    return Color3.fromRGB(r,g,b)
+local NamedColors = {
+white=Color3.new(1,1,1), black=Color3.new(0,0,0), red=Color3.new(1,0,0),
+lime=Color3.new(0,1,0), blue=Color3.new(0,0,1), yellow=Color3.new(1,1,0),
+cyan=Color3.new(0,1,1), magenta=Color3.new(1,0,1), gray=Color3.fromRGB(128,128,128),
+grey=Color3.fromRGB(128,128,128), brown=Color3.fromRGB(165,42,42)
+}
+
+local function parseColor3(s)
+if typeof(s) == "Color3" then return s end
+s = tostring(s):lower():gsub("%s+", "")
+if NamedColors[s] then return NamedColors[s] end
+local r,g,b = s:match("^rgb%((%d+),(%d+),(%d+)%)$")
+if not r then
+    r,g,b = s:match("^(%d+),(%d+),(%d+)$")
 end
-local r,g,b = txt:match("^(%d+),(%d+),(%d+)$")
-if r then return Color3.fromRGB(tonumber(r),tonumber(g),tonumber(b)) end
-return nil
+if r and g and b then
+    return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
+end
+if s:sub(1,1) ~= "#" then s = "#" .. s end
+local hex = s:match("^#(%x%x)(%x%x)(%x%x)$")
+if hex then
+    local rr,gg,bb = s:sub(2,3), s:sub(4,5), s:sub(6,7)
+    return Color3.fromRGB(tonumber(rr,16), tonumber(gg,16), tonumber(bb,16))
+end
+return Color3.fromRGB(255,255,255)
 end
 
 labeledTextBox(secGeo, "Color", "#ffffff", function(txt)
-local c = parseColor(txt)
+local c = parseColor3(txt)
 if c then
     LoomDesigner.SetOverrides({materialization = {part = {color = c}}})
     LoomDesigner.RebuildPreview(nil)

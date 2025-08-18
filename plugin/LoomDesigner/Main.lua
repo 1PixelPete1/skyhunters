@@ -41,23 +41,43 @@ local state = {
         },
 }
 
+local function hashToInt(s)
+        s = tostring(s)
+        local h = 2166136261
+        for i = 1, #s do
+                h = (h ~ string.byte(s, i)) * 16777619 % 2^32
+        end
+        return h % 2147483647
+end
+
+local function normalizeSeed(seed)
+        if typeof(seed) == "number" then
+                return math.floor(seed)
+        end
+        return hashToInt(seed)
+end
+
 function LoomDesigner.Start(plugin)
 	print("LoomDesigner plugin started", plugin)
 	return state
 end
 
 function LoomDesigner.SetConfigId(id)
-	state.configId = id
+        state.configId = id
 end
 
 function LoomDesigner.SetSeed(seed)
-	state.baseSeed = seed
+        state.baseSeed = normalizeSeed(seed)
 end
 
 function LoomDesigner.RandomizeSeed()
-	local rng = Random.new(os.clock())
-	state.baseSeed = rng:NextInteger(1, 2^31 - 1)
-	return state.baseSeed
+        local rng = Random.new(os.clock() * 1e6)
+        state.baseSeed = rng:NextInteger(1, 2^31 - 1)
+        return state.baseSeed
+end
+
+function LoomDesigner.GetSeed()
+        return state.baseSeed
 end
 
 function LoomDesigner.SetGrowthPercent(g)
@@ -83,21 +103,65 @@ function LoomDesigner.SetOverrides(overrides)
         deepMerge(state.overrides, overrides)
 end
 
+local function ensurePreviewParent()
+        local folder = workspace:FindFirstChild("LoomPreview")
+        if not folder then
+                folder = Instance.new("Folder")
+                folder.Name = "LoomPreview"
+                folder.Parent = workspace
+        end
+        return folder
+end
+
+local function clearExistingPreview(parent)
+        local old = parent:FindFirstChild("PreviewBranch")
+        if old then
+                old:Destroy()
+        end
+end
+
 function LoomDesigner.RebuildPreview(_container)
         if not state.configId then return end
 
-        GrowthVisualizer.Render(nil, {
-                loomUid = 0,
-                configId = state.configId,
-                baseSeed = state.baseSeed,
-                g = state.g,
-                overrides = state.overrides,
-                scene = {
-                        Clear = VisualScene.Clear,
-                        Spawn = VisualScene.Spawn,
-                        ResolveModel = ModelResolver.ResolveFromList,
-                },
-        })
+        local parent = ensurePreviewParent()
+        clearExistingPreview(parent)
+        local model = Instance.new("Model")
+        model.Name = "PreviewBranch"
+        model.Parent = parent
+        VisualScene.SetPreviewModel(model)
+
+        local ok, err = pcall(function()
+                GrowthVisualizer.Render(nil, {
+                        loomUid = 0,
+                        configId = state.configId,
+                        baseSeed = state.baseSeed,
+                        g = state.g,
+                        overrides = state.overrides,
+                        scene = {
+                                Clear = VisualScene.Clear,
+                                Spawn = VisualScene.Spawn,
+                                ResolveModel = ModelResolver.ResolveFromList,
+                        },
+                })
+        end)
+
+        if not ok then
+                warn("RebuildPreview failed: ", err)
+                return
+        end
+
+        local sb = Instance.new("SelectionBox")
+        sb.Adornee = model
+        sb.LineThickness = 0.05
+        sb.Parent = model
+        task.delay(2, function()
+                sb:Destroy()
+        end)
+
+        local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+        local pivot = pp and pp.Position or Vector3.new()
+        local count = #model:GetDescendants()
+        print(string.format("Spawned PreviewBranch at %s with %d parts", tostring(pivot), count))
 end
 
 -- Simple validation that checks for expected field types. Returns true if the
