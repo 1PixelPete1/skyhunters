@@ -2,21 +2,43 @@
 -- LoomDesigner plugin. Manages a tiny state object representing the designer
 -- selections and can export configs to a Lua file.
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedStorage
+local GrowthVisualizer
+local LoomConfigs
+if rawget(_G, "game") and game.GetService then
+        ReplicatedStorage = game:GetService("ReplicatedStorage")
+        GrowthVisualizer = require(ReplicatedStorage.growth.GrowthVisualizer)
+        LoomConfigs = require(ReplicatedStorage.looms.LoomConfigs)
+else
+        ReplicatedStorage = {}
+        GrowthVisualizer = require("growth/GrowthVisualizer")
+        LoomConfigs = require("looms/LoomConfigs")
+end
 
-local GrowthVisualizer = require(ReplicatedStorage.growth.GrowthVisualizer)
-local LoomConfigs = require(ReplicatedStorage.looms.LoomConfigs)
-local VisualScene = require(script.Parent.VisualScene)
-local ModelResolver = require(script.Parent.ModelResolver)
+local VisualScene
+local ModelResolver
+local SegmentBuilder
+if script and script.Parent then
+        VisualScene = require(script.Parent.VisualScene)
+        ModelResolver = require(script.Parent.ModelResolver)
+        SegmentBuilder = require(script.Parent.SegmentBuilder)
+else
+        VisualScene = require("LoomDesigner/VisualScene")
+        ModelResolver = require("LoomDesigner/ModelResolver")
+        SegmentBuilder = require("LoomDesigner/SegmentBuilder")
+end
 
 local LoomDesigner = {}
 
 -- current working state used by the designer
 local state = {
-	configId = "oak_branch", -- default config, replace with one from LoomConfigs
-	baseSeed = 12345,
-	g = 50, -- growth percent
-	overrides = {},
+        configId = "oak_branch", -- default config, replace with one from LoomConfigs
+        baseSeed = 12345,
+        g = 50, -- growth percent
+        overrides = {
+                materialization = { mode = "Model" },
+                rotationRules = {},
+        },
 }
 
 function LoomDesigner.Start(plugin)
@@ -42,10 +64,23 @@ function LoomDesigner.SetGrowthPercent(g)
 	state.g = g
 end
 
+local function deepMerge(dst, src)
+        for k, v in pairs(src) do
+                if type(v) == "table" then
+                        local sub = dst[k]
+                        if type(sub) ~= "table" then
+                                sub = {}
+                                dst[k] = sub
+                        end
+                        deepMerge(sub, v)
+                else
+                        dst[k] = v
+                end
+        end
+end
+
 function LoomDesigner.SetOverrides(overrides)
-	for k, v in pairs(overrides) do
-		state.overrides[k] = v
-	end
+        deepMerge(state.overrides, overrides)
 end
 
 function LoomDesigner.RebuildPreview(_container)

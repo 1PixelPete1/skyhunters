@@ -1,7 +1,7 @@
 --!strict
 local VisualScene = {}
 
-function VisualScene.GetPreviewRoot(): Instance
+function VisualScene.GetPreviewRoot()
     local ws = game:GetService("Workspace")
     local root = ws:FindFirstChild("LoomPreview")
     if not root then
@@ -19,7 +19,7 @@ function VisualScene.Clear()
     end
 end
 
-function VisualScene.Spawn(instance: Instance, cf: CFrame?)
+function VisualScene.Spawn(instance, cf)
     local root = VisualScene.GetPreviewRoot()
     if cf then
         -- Apply CFrame to Models or Parts
