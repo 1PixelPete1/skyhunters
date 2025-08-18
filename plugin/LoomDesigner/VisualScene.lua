@@ -3,6 +3,17 @@ local VisualScene = {}
 local _previewModel: Model? = nil
 local _firstBasePart: BasePart? = nil
 
+local InsertService = game:GetService("InsertService")
+
+local function spawnAsset(assetId: number, parent: Instance): Instance?
+    local ok, model = pcall(function()
+        return InsertService:LoadAsset(assetId)
+    end)
+    if not ok or not model then return nil end
+    model.Parent = parent
+    return model
+end
+
 function VisualScene.SetPreviewModel(m: Model)
     _previewModel = m
     _firstBasePart = nil
@@ -35,6 +46,26 @@ function VisualScene.Spawn(spec)
         return spec
     end
     if type(spec) ~= "table" then return nil end
+
+    if spec.assetId then
+        local inst = spawnAsset(spec.assetId, _previewModel)
+        if inst then
+            if typeof(spec.cframe) == "CFrame" then
+                local bp
+                if inst:IsA("Model") then
+                    bp = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+                elseif inst:IsA("BasePart") then
+                    bp = inst
+                end
+                if bp then
+                    local delta = spec.cframe:ToWorldSpace(CFrame.new())
+                    inst:PivotTo(delta)
+                end
+            end
+            return inst
+        end
+        -- fall back to primitive part if asset failed
+    end
 
     local part = Instance.new("Part")
     part.Name = spec.name or "Segment"
