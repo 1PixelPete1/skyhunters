@@ -1,4 +1,5 @@
 --!strict
+local RequireUtil = require(script.Parent.RequireUtil)
 local LoomDesigner = require(script.Parent.Main)
 
 local UI = {}

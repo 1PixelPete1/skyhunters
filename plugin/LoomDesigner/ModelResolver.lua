@@ -1,4 +1,5 @@
 --!strict
+local RequireUtil = require(script.Parent.RequireUtil)
 local ReplicatedStorage
 if rawget(_G, "game") and game.GetService then
     ReplicatedStorage = game:GetService("ReplicatedStorage")

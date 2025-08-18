@@ -2,31 +2,25 @@
 -- LoomDesigner plugin. Manages a tiny state object representing the designer
 -- selections and can export configs to a Lua file.
 
-local ReplicatedStorage
-local GrowthVisualizer
-local LoomConfigs
-if rawget(_G, "game") and game.GetService then
-        ReplicatedStorage = game:GetService("ReplicatedStorage")
-        GrowthVisualizer = require(ReplicatedStorage.growth.GrowthVisualizer)
-        LoomConfigs = require(ReplicatedStorage.looms.LoomConfigs)
-else
-        ReplicatedStorage = {}
-        GrowthVisualizer = require("growth/GrowthVisualizer")
-        LoomConfigs = require("looms/LoomConfigs")
-end
+local RequireUtil = require(script.Parent.RequireUtil)
 
-local VisualScene
-local ModelResolver
-local SegmentBuilder
-if script and script.Parent then
-        VisualScene = require(script.Parent.VisualScene)
-        ModelResolver = require(script.Parent.ModelResolver)
-        SegmentBuilder = require(script.Parent.SegmentBuilder)
-else
-        VisualScene = require("LoomDesigner/VisualScene")
-        ModelResolver = require("LoomDesigner/ModelResolver")
-        SegmentBuilder = require("LoomDesigner/SegmentBuilder")
-end
+-- Prefer game modules (ReplicatedStorage), fallback to copies shipped with the plugin
+local GrowthVisualizer = RequireUtil.fromReplicatedStorage({"growth","GrowthVisualizer"})
+    or RequireUtil.fromRelative(script.Parent.Parent, {"growth","GrowthVisualizer"})
+GrowthVisualizer = RequireUtil.must(GrowthVisualizer, "growth/GrowthVisualizer")
+
+local LoomConfigs = RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
+    or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
+
+local VisualScene = RequireUtil.fromRelative(script.Parent, {"VisualScene"})
+VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
+
+local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
+ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
+
+local SegmentBuilder = RequireUtil.fromRelative(script.Parent, {"SegmentBuilder"})
+SegmentBuilder = RequireUtil.must(SegmentBuilder, "LoomDesigner/SegmentBuilder")
 
 local LoomDesigner = {}
 
@@ -45,7 +39,7 @@ local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
         for i = 1, #s do
-                h = (h ~ string.byte(s, i)) * 16777619 % 2^32
+                h = (bit32.bxor(h, string.byte(s, i))) * 16777619 % 2^32
         end
         return h % 2147483647
 end
