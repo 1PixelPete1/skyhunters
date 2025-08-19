@@ -103,6 +103,9 @@ end
 local GrowthVisualizer = {}
 GrowthVisualizer._PLUGIN_VERSION = _PLUGIN_VERSION
 
+local debugInfo = {}
+GrowthVisualizer._debug = debugInfo
+
 -- visual state keyed by loomUid
 -- each entry: {segments = { {yaw,pitch,roll,lengthScale,thicknessScale,fill}, ...}}
 
@@ -265,6 +268,26 @@ function GrowthVisualizer.Render(container, loomState)
     -- heading jitter
     local enableMicroJitter = overrides.enableMicroJitter == true
     local microJitter = tonumber(overrides.microJitterDeg) or 0
+    local seedAffects = overrides.seedAffects
+
+    for k in pairs(debugInfo) do debugInfo[k] = nil end
+    if overrides.debug then
+        debugInfo.style = profile.kind
+        debugInfo.ampDeg = profile.ampDeg
+        debugInfo.freq = profile.frequency
+        debugInfo.curvature = profile.curvature
+        debugInfo.zigzagSwap = profile.zigzagSwap
+        debugInfo.sigmoidK = profile.sigmoidK
+        debugInfo.sigmoidMid = profile.sigmoidMid
+        debugInfo.chaoticR = profile.chaoticR
+        debugInfo.microJitter = microJitter
+        debugInfo.seedAffects = seedAffects
+        debugInfo.segCount = segCount
+        debugInfo.continuity = cont
+        debugInfo.yawClampDeg = yClamp
+        debugInfo.pitchClampDeg = pClamp
+        debugInfo.faceForwardBias = rotRules.faceForwardBias
+    end
 
     -- twist controls
     local twistStrength = tonumber(overrides.twistStrengthDegPerSeg) or 0
@@ -285,6 +308,10 @@ function GrowthVisualizer.Render(container, loomState)
         -- per-segment deltas (degrees)
         local delta = GrowthProfiles.rotDelta(profile, rngProfile, state)
         local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
+        if overrides.debug then
+            debugInfo.baseAngles = debugInfo.baseAngles or {}
+            debugInfo.baseAngles[i] = {baseYaw = dy, basePitch = dp}
+        end
 
         if enableMicroJitter then
             local j = microJitter
@@ -315,6 +342,16 @@ function GrowthVisualizer.Render(container, loomState)
         local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
         seg.lengthScale    = baseS * (1 + lenJ)
         seg.thicknessScale = baseS * (1 + thJ)
+        if overrides.debug then
+            debugInfo.segments = debugInfo.segments or {}
+            local segDebug = debugInfo.segments[i] or {}
+            segDebug.yaw = yaw
+            segDebug.pitch = pitch
+            segDebug.roll = roll
+            segDebug.lengthScale = seg.lengthScale
+            segDebug.thicknessScale = seg.thicknessScale
+            debugInfo.segments[i] = segDebug
+        end
     end
 
     -- fills
@@ -325,6 +362,9 @@ function GrowthVisualizer.Render(container, loomState)
         for i=1, segCount do fills[i] = 1 end
     else
         fills = computeSegmentFill(segCount, loomState.g or 0)
+    end
+    if overrides.debug then
+        debugInfo.fills = fills
     end
     for i = 1, segCount do
         segments[i].fill = fills[i]
@@ -397,16 +437,19 @@ function GrowthVisualizer.Render(container, loomState)
         end
     end
 
-    GrowthVisualizer._debug = {
-        kind = profile.kind,
-        segCount = segCount,
-        cont = cont,
-        yawClamp = yClamp,
-        pitchClamp = pClamp,
-        twistStrength = twistStrength,
-        twistRngRange = twistRngRange,
-        sizeProfile = overrides.scaleProfile,
-    }
+    if overrides.debug then
+        print("[GrowthVisualizer Debug]")
+        print("Style:", debugInfo.style, "Segments:", debugInfo.segCount)
+        print("Continuity:", debugInfo.continuity, "Yaw Clamp:", debugInfo.yawClampDeg, "Pitch Clamp:", debugInfo.pitchClampDeg)
+        for i = 1, debugInfo.segCount or 0 do
+            local seg = debugInfo.segments and debugInfo.segments[i] or {}
+            local base = debugInfo.baseAngles and debugInfo.baseAngles[i] or {}
+            print(string.format(
+                "Seg %02d | BaseYaw %.2f BasePitch %.2f | Yaw %.2f Pitch %.2f Roll %.2f | LenS %.2f ThickS %.2f",
+                i, base.baseYaw or 0, base.basePitch or 0, seg.yaw or 0, seg.pitch or 0, seg.roll or 0, seg.lengthScale or 1, seg.thicknessScale or 1
+            ))
+        end
+    end
 end
 
 function GrowthVisualizer.Release(container, loomUid)
