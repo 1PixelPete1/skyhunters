@@ -197,6 +197,72 @@ local function computeSegmentFill(N, g)
     return fills
 end
 
+local function triangular(rng, a, b, mode)
+    local u = rng:unit()
+    local c = (mode - a) / (b - a)
+    if u < c then
+        return a + math.sqrt(u * (b - a) * (mode - a))
+    else
+        return b - math.sqrt((1 - u) * (b - a) * (b - mode))
+    end
+end
+
+local function sampleSegCountTri(rng, minN, maxN, modeN)
+    local x = triangular(rng, minN - 0.49, maxN + 0.49, modeN)
+    x = math.floor(x + 0.5)
+    if x < minN then x = minN end
+    if x > maxN then x = maxN end
+    return x
+end
+
+local function normal01(rng)
+    if rng._spare then
+        local z = rng._spare
+        rng._spare = nil
+        return z
+    end
+    local u1 = math.max(rng:unit(), 1e-12)
+    local u2 = rng:unit()
+    local r = math.sqrt(-2 * math.log(u1))
+    local th = 2 * math.pi * u2
+    rng._spare = r * math.sin(th)
+    return r * math.cos(th)
+end
+
+local function normalClamped(rng, a, b, mu, sigma)
+    local x = mu + sigma * normal01(rng)
+    if x < a then x = a end
+    if x > b then x = b end
+    return x
+end
+
+local function sampleSegCountNormal(rng, minN, maxN, meanN, sd)
+    local x = normalClamped(rng, minN - 0.49, maxN + 0.49, meanN, sd)
+    x = math.floor(x + 0.5)
+    if x < minN then x = minN end
+    if x > maxN then x = maxN end
+    return x
+end
+
+local function biasedRange(rng, a, b, bias)
+    local u = rng:unit()
+    local t
+    if bias > 0 then
+        t = u ^ (1 / bias)
+    else
+        t = u
+    end
+    return a + (b - a) * t
+end
+
+local function sampleSegCountBiased(rng, minN, maxN, bias)
+    local x = biasedRange(rng, minN - 0.49, maxN + 0.49, bias)
+    x = math.floor(x + 0.5)
+    if x < minN then x = minN end
+    if x > maxN then x = maxN end
+    return x
+end
+
 local function getVisual(loomUid)
     local v = visuals[loomUid]
     if not v then
@@ -247,6 +313,7 @@ function GrowthVisualizer.Render(container, loomState)
     profile = GrowthProfiles.clampProfile(profile)
     local state = v._profileState or {}
     v._profileState = state
+    state.seed = loomState.baseSeed or 0
 
     -- RNG streams
     local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
@@ -261,7 +328,20 @@ function GrowthVisualizer.Render(container, loomState)
     local segCount = tonumber(overrides.segmentCount)
     if not segCount then
         local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
-        segCount = rngMacro:NextInteger(mn, mx)
+        local mode = overrides.segmentCountMode or "uniform"
+        if mode == "triangular" then
+            local modeN = tonumber(overrides.segmentCountModeN) or math.floor((mn + mx) / 2)
+            segCount = sampleSegCountTri(rngMacro, mn, mx, modeN)
+        elseif mode == "normal" then
+            local meanN = tonumber(overrides.segmentCountMean) or math.floor((mn + mx) / 2)
+            local sd = tonumber(overrides.segmentCountSd) or ((mx - mn) / 6)
+            segCount = sampleSegCountNormal(rngMacro, mn, mx, meanN, sd)
+        elseif mode == "biased" then
+            local bias = tonumber(overrides.segmentCountBias) or 1
+            segCount = sampleSegCountBiased(rngMacro, mn, mx, bias)
+        else
+            segCount = rngMacro:NextInteger(mn, mx)
+        end
     end
     segCount = math.max(1, math.floor(segCount))
     profile.maxSegments = segCount
