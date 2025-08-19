@@ -298,6 +298,89 @@ local function renderSegments(scene, cfg, segments)
     end
 end
 
+-- deterministic decoration placement
+local function placeDecorations(scene, baseSeed, segOut, config, overrides, partCfg)
+    local decoCfg = overrides.decorations
+    if not (decoCfg and decoCfg.enabled and decoCfg.types and #decoCfg.types > 0) then
+        if config and config.models and config.models.decorations then
+            decoCfg = { enabled = true, types = config.models.decorations }
+        else
+            return
+        end
+    end
+    for _, seg in ipairs(segOut) do
+        if seg.fill == 1 then
+        for _, typ in ipairs(decoCfg.types) do
+            local depth = seg.depth or 0
+            if depth >= (typ.minDepth or 0) and depth <= (typ.maxDepth or math.huge) then
+                local rngD = SeedUtil.rng(baseSeed, "deco", seg.chainId or 0, seg.index or 0, depth)
+                local density = tonumber(typ.density or typ.densityPerSeg or 0) or 0
+                local count, extra
+                if typ.perLength then
+                    local k = density * (seg.length or 1)
+                    count = math.floor(k)
+                    extra = k - count
+                else
+                    count = math.floor(density)
+                    extra = density - count
+                end
+                local function placeOne()
+                    local cf = seg.cframe
+                    if typ.placement == "tip" then
+                        cf = cf * CFrame.new(0, (seg.length or 0)/2, 0)
+                    elseif typ.placement == "junction" then
+                        cf = cf * CFrame.new(0, -(seg.length or 0)/2, 0)
+                    end
+                    if typ.rotation == "upright" then
+                        cf = CFrame.new(cf.Position)
+                    end
+                    local yaw = tonumber(typ.yaw or 0) or 0
+                    local pitch = tonumber(typ.pitch or 0) or 0
+                    local roll = tonumber(typ.roll or 0) or 0
+                    local yawR = rngD:NextNumber(-yaw, yaw)
+                    local pitchR = rngD:NextNumber(-pitch, pitch)
+                    local rollR = rngD:NextNumber(-roll, roll)
+                    cf = cf * CFrame.Angles(math.rad(pitchR), math.rad(rollR), math.rad(yawR))
+                    local smin = tonumber(typ.scaleMin or 1) or 1
+                    local smax = tonumber(typ.scaleMax or 1) or 1
+                    local scale = rngD:NextNumber(smin, smax)
+                    local spec
+                    if typ.models and #typ.models > 0 and scene.ResolveModel then
+                        local idx = rngD:NextInteger(1, #typ.models)
+                        local inst = scene.ResolveModel(typ.models, { select = function(L) return L[idx] end })
+                        if inst then
+                            spec = { instance = inst, cframe = cf, scale = Vector3.new(scale, scale, scale) }
+                        end
+                    end
+                    if not spec then
+                        spec = {
+                            class = "Part",
+                            size = Vector3.new(scale, scale, scale),
+                            cframe = cf,
+                            material = partCfg and partCfg.material or Enum.Material.SmoothPlastic,
+                            color = partCfg and partCfg.color or Color3.new(1,1,1),
+                            anchored = true,
+                            canCollide = false,
+                            name = "Deco",
+                        }
+                    end
+                    scene.Spawn(spec)
+                end
+                local placed = 0
+                for _ = 1, count do
+                    if typ.maxPerChain and placed >= typ.maxPerChain then break end
+                    placeOne()
+                    placed = placed + 1
+                end
+                if (not typ.maxPerChain or placed < typ.maxPerChain) and rngD:NextNumber() < extra then
+                    placeOne()
+                end
+            end
+        end
+        end
+    end
+end
+
 function GrowthVisualizer.Render(container, loomState)
     local config = LoomConfigs[loomState.configId]
     if not config then return end
@@ -497,7 +580,15 @@ function GrowthVisualizer.Render(container, loomState)
                 local thickness = baseThickness * (seg.thicknessScale or 1)
                 if not isfinite(thickness) or thickness <= 0 then thickness = baseThickness end
                 local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
-                segOut[#segOut+1] = {cframe = stepCF, length = length, thickness = thickness}
+                segOut[#segOut+1] = {
+                    cframe = stepCF,
+                    length = length,
+                    thickness = thickness,
+                    fill = seg.fill,
+                    index = i,
+                    chainId = 0,
+                    depth = 0,
+                }
                 currentCF = stepCF * CFrame.new(0, length/2, 0)
             end
         end
@@ -545,49 +636,7 @@ function GrowthVisualizer.Render(container, loomState)
             renderSegments(scene, cfg, segOut)
         end
 
-        local decorations = overrides.decorations or {}
-        if decorations.enabled then
-            local attach = decorations.attach or "along"
-            local offset = decorations.offset or Vector3.new()
-            for _, seg in ipairs(segOut) do
-                for _, typ in ipairs(decorations.types or {}) do
-                    local density = typ.densityPerSeg or 0
-                    local count = math.floor(density)
-                    local extra = density - count
-                    local function placeOne()
-                        local decoCF = seg.cframe
-                        if attach == "tip" then
-                            decoCF = seg.cframe * CFrame.new(0, seg.length/2, 0)
-                        elseif attach == "junction" then
-                            decoCF = seg.cframe * CFrame.new(0, -seg.length/2, 0)
-                        end
-                        decoCF = decoCF * CFrame.new(offset)
-                        local yawR = rngMicro:NextNumber(-(typ.yaw or 0), typ.yaw or 0)
-                        local pitchR = rngMicro:NextNumber(-(typ.pitch or 0), typ.pitch or 0)
-                        local rollR = rngMicro:NextNumber(-(typ.roll or 0), typ.roll or 0)
-                        decoCF = decoCF * CFrame.Angles(math.rad(pitchR), math.rad(rollR), math.rad(yawR))
-                        local scale = rngMicro:NextNumber(typ.scaleMin or 1, typ.scaleMax or 1)
-                        local spec
-                        if typ.kind == "asset" and typ.assetId then
-                            spec = {assetId = typ.assetId, cframe = decoCF}
-                        else
-                            spec = {
-                                class = "Part",
-                                size = Vector3.new(scale, scale, scale),
-                                cframe = decoCF,
-                                color = typ.color == "auto" and cfg.color or typ.color,
-                                anchored = true,
-                                canCollide = false,
-                                name = "Deco",
-                            }
-                        end
-                        scene.Spawn(spec)
-                    end
-                    for _ = 1, count do placeOne() end
-                    if rngMicro:NextNumber() < extra then placeOne() end
-                end
-            end
-        end
+        placeDecorations(scene, loomState.baseSeed or 0, segOut, config, overrides, cfg)
     end
 
     if overrides.debug then
