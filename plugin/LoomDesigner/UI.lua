@@ -219,6 +219,7 @@ local secGrowth = makeSection(scroll, "Growth Progression")
 local secSeg    = makeSection(scroll, "Segment Overrides")
 local secPath   = makeSection(scroll, "Path Style")
 local secGeo    = makeSection(scroll, "Segment Geometry")
+local secScale  = makeSection(scroll, "Size Profile")
 local secRot    = makeSection(scroll, "Rotation Rules")
 local secDeco   = makeSection(scroll, "Decorations")
 
@@ -275,6 +276,11 @@ checkbox(secSeed, "Seed affects frequency", true, function(val)
 end)
 checkbox(secSeed, "Seed affects jitter", true, function(val)
     LoomDesigner.SetOverrides({seedAffects = {jitter = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+checkbox(secSeed, "Seed affects twist", true, function(val)
+    LoomDesigner.SetOverrides({seedAffects = {twist = val}})
     LoomDesigner.RebuildPreview(nil)
 end)
 
@@ -430,6 +436,70 @@ if c then
 end
 end)
 
+-- === Size Profile ===
+local currentProfile = {mode = "constant", value = 1, enableJitter = true}
+local valueBox, startBox, finishBox, baseBox, ampBox, powerBox
+
+local function commitProfile()
+    LoomDesigner.SetOverrides({scaleProfile = currentProfile})
+    LoomDesigner.RebuildPreview(nil)
+end
+
+local function updateProfileVis()
+    local mode = currentProfile.mode
+    if valueBox then valueBox.Parent.Visible = (mode == "constant") end
+    local lin = (mode == "linear_down" or mode == "linear_up")
+    if startBox then startBox.Parent.Visible = lin end
+    if finishBox then finishBox.Parent.Visible = lin end
+    local bell = (mode == "bell" or mode == "inverse_bell")
+    if baseBox then baseBox.Parent.Visible = bell end
+    if ampBox then ampBox.Parent.Visible = bell end
+    if powerBox then powerBox.Parent.Visible = bell end
+end
+
+dropdown(secScale, popupHost, "Mode", {"constant","linear_down","linear_up","bell","inverse_bell"}, 1, function(opt)
+    currentProfile.mode = opt
+    commitProfile()
+    updateProfileVis()
+end)
+
+valueBox = labeledTextBox(secScale, "Value", "1", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.value = n; commitProfile() end
+end)
+
+startBox = labeledTextBox(secScale, "Start", "1", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.start = n; commitProfile() end
+end)
+
+finishBox = labeledTextBox(secScale, "Finish", "0.6", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.finish = n; commitProfile() end
+end)
+
+baseBox = labeledTextBox(secScale, "Base", "0.7", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.base = n; commitProfile() end
+end)
+
+ampBox = labeledTextBox(secScale, "Amp", "0.5", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.amp = n; commitProfile() end
+end)
+
+powerBox = labeledTextBox(secScale, "Power", "2", function(txt)
+    local n = tonumber(txt)
+    if n then currentProfile.power = n; commitProfile() end
+end)
+
+checkbox(secScale, "Enable Size Jitter", true, function(val)
+    currentProfile.enableJitter = val
+    commitProfile()
+end)
+
+updateProfileVis()
+
 checkbox(secDeco, "Enable Decorations", false, function(val)
     LoomDesigner.SetOverrides({decorations = {enabled = val}})
     LoomDesigner.RebuildPreview(nil)
@@ -513,6 +583,19 @@ labeledTextBox(secDeco, "Offset (x,y,z)", "0,0.2,0", function(txt)
 end)
 
 -- === Rotation Rules ===
+dropdown(secRot, popupHost, "Continuity", {"Auto", "Accumulate", "Absolute"}, 1, function(opt)
+    local val
+    if opt == "Accumulate" then
+        val = "accumulate"
+    elseif opt == "Absolute" then
+        val = "absolute"
+    else
+        val = false
+    end
+    LoomDesigner.SetOverrides({rotationRules = {continuity = val}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
 labeledTextBox(secRot, "Yaw Clamp Deg", "", function(txt)
 local n = tonumber(txt)
 LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = n}})
