@@ -25,6 +25,14 @@ do
             if gr and gr:FindFirstChild("GrowthProfiles") then GrowthProfiles = require(gr.GrowthProfiles) end
         end
     end
+    if not LoomConfigs then
+        local okL, mod = pcall(require, "looms/LoomConfigs")
+        if okL then LoomConfigs = mod end
+    end
+    if not GrowthProfiles then
+        local okG, mod = pcall(require, "looms/GrowthProfiles")
+        if okG then GrowthProfiles = mod end
+    end
     if not LoomConfigs then error("[GrowthVisualizer] Could not resolve LoomConfigs") end
     if not GrowthProfiles then error("[GrowthVisualizer] Could not resolve GrowthProfiles") end
 end
@@ -44,7 +52,20 @@ do
         end
     end
 end
-if not SeedUtil then error("[GrowthVisualizer] Could not resolve SeedUtil") end
+if not SeedUtil then
+    local okS, mod = pcall(require, "LoomDesigner/SeedUtil")
+    if okS then SeedUtil = mod end
+end
+if not SeedUtil then
+    SeedUtil = {
+        rng = function(seed)
+            return Random.new(seed)
+        end,
+        noiseOffsets = function()
+            return 0,0,0
+        end,
+    }
+end
 
 local _PLUGIN_VERSION = "scene-spawn-2025-08-18"
 
@@ -52,6 +73,40 @@ local function clamp(v, mn, mx)
     if v < mn then return mn end
     if v > mx then return mx end
     return v
+end
+
+local styleClampDefaults = {
+    straight = {yaw = 4,  pitch = 3},
+    curved   = {yaw = 22, pitch = 10},
+    zigzag   = {yaw = 28, pitch = 6},
+    noise    = {yaw = 16, pitch = 16},
+    chaotic  = {yaw = 34, pitch = 18},
+    sigmoid  = {yaw = 18, pitch = 8},
+}
+
+local function evalScaleProfile(i, N, prof)
+    prof = prof or {mode = "constant", value = 1.0}
+    local t = (i - 1) / math.max(1, N - 1)
+
+    local function lerp(a, b, x)
+        return a + (b - a) * x
+    end
+
+    if prof.mode == "constant" then
+        return prof.value or 1.0
+    elseif prof.mode == "linear_down" then
+        return lerp(prof.start or 1.0, prof.finish or 0.6, t)
+    elseif prof.mode == "linear_up" then
+        return lerp(prof.start or 0.6, prof.finish or 1.0, t)
+    elseif prof.mode == "bell" then
+        local p = prof.power or 2.0
+        return (1 - (2 * t - 1) ^ 2) ^ p * (prof.amp or 0.5) + (prof.base or 0.5)
+    elseif prof.mode == "inverse_bell" then
+        local p = prof.power or 2.0
+        local ends = (1 - ((t - 0.5) ^ 2 / 0.25)) ^ p
+        return (prof.base or 0.7) + (prof.amp or 0.3) * ends
+    end
+    return 1.0
 end
 local GrowthVisualizer = {}
 GrowthVisualizer._PLUGIN_VERSION = _PLUGIN_VERSION
@@ -181,7 +236,7 @@ function GrowthVisualizer.Render(container, loomState)
     local sigmoidMid = tonumber(path.sigmoidMid) or 0.5
     local chaoticR = tonumber(path.chaoticR) or 3.9
     local microJitter = tonumber(path.microJitterDeg) or 2
-    local seedAffects = overrides.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true}
+    local seedAffects = overrides.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true, twist=true}
 
     local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
 
@@ -223,7 +278,7 @@ function GrowthVisualizer.Render(container, loomState)
     local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
     local tie = config.growthDefaults.relativeScaleTie or 0
 
-    local function styleAngles(styleName: string, i: number, N: number)
+    local function styleAngles(styleName, i, N)
         local t = (i - 1) / math.max(1, N - 1)
         local baseYaw, basePitch = 0, 0
 
@@ -235,7 +290,8 @@ function GrowthVisualizer.Render(container, loomState)
             baseYaw = sweep * env
             basePitch = (ampDeg * 0.35) * env
         elseif styleName == "zigzag" then
-            local sign = (((i - 1) // math.max(1, zigzagSwap)) % 2 == 0) and 1 or -1
+            local group = math.max(1, zigzagSwap)
+            local sign = ((math.floor((i - 1) / group) % 2) == 0) and 1 or -1
             baseYaw = sign * ampDeg
             basePitch = 0
         elseif styleName == "noise" then
@@ -271,8 +327,8 @@ function GrowthVisualizer.Render(container, loomState)
             local u = math.max(0, (i / math.max(1, N)) - 0.7) / 0.3
             tailDamp = 1.0 - math.min(1, u * u)
         end
-        dy *= tailDamp
-        dp *= tailDamp
+        dy = dy * tailDamp
+        dp = dp * tailDamp
 
         return dy, dp, 0
     end
@@ -288,33 +344,47 @@ function GrowthVisualizer.Render(container, loomState)
             segments[i] = seg
         end
         local dy, dp, dr = styleAngles(style, i, segCount)
+        local extraRoll = tonumber(rotRules.extraRollPerSegDeg) or 0
+        local rollRange = tonumber(rotRules.randomRollRangeDeg) or 0
+        local twistEnabled = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
+        if twistEnabled then
+            dr = (dr or 0) + extraRoll + rngMicro:NextNumber(-rollRange, rollRange)
+        else
+            dr = (dr or 0) + extraRoll
+        end
         local defaultCont =
             (style == "zigzag" or style == "noise" or style == "chaotic") and "absolute" or "accumulate"
         local cont = rotRules.continuity or defaultCont
         if cont == "accumulate" then
-            yaw += dy
-            pitch += dp
-            roll += dr
+            yaw = yaw + dy
+            pitch = pitch + dp
+            roll = roll + dr
         else
             yaw, pitch, roll = dy, dp, dr
         end
-        if rotRules.yawClampDeg then
-            yaw = clamp(yaw, -rotRules.yawClampDeg, rotRules.yawClampDeg)
+        local yClamp = rotRules.yawClampDeg
+        local pClamp = rotRules.pitchClampDeg
+        if not yClamp or not pClamp then
+            local d = styleClampDefaults[style] or {}
+            yClamp = yClamp or d.yaw
+            pClamp = pClamp or d.pitch
         end
-        if rotRules.pitchClampDeg then
-            pitch = clamp(pitch, -rotRules.pitchClampDeg, rotRules.pitchClampDeg)
-        end
+        if yClamp then yaw = clamp(yaw, -yClamp, yClamp) end
+        if pClamp then pitch = clamp(pitch, -pClamp, pClamp) end
         if rotRules.faceForwardBias then
-            yaw *= (1 - rotRules.faceForwardBias)
-            pitch *= (1 - rotRules.faceForwardBias)
+            yaw = yaw * (1 - rotRules.faceForwardBias)
+            pitch = pitch * (1 - rotRules.faceForwardBias)
         end
 
         seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
 
-        local lenJ = rngMicro:NextNumber(-jitter.length, jitter.length)
-        local thJ = rngMicro:NextNumber(-jitter.thickness, jitter.thickness)
-        seg.lengthScale = 1 + lenJ
-        seg.thicknessScale = 1 + lenJ * tie + thJ * (1 - tie)
+        local prof = overrides.scaleProfile
+        local baseS = evalScaleProfile(i, segCount, prof)
+        local applyJitter = (prof == nil) or (prof.enableJitter ~= false)
+        local lenJ = applyJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
+        local thJ = applyJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
+        seg.lengthScale = baseS * (1 + lenJ)
+        seg.thicknessScale = baseS * (1 + lenJ * tie + thJ * (1 - tie))
     end
 
     local fills = computeSegmentFill(segCount, loomState.g or 0)
@@ -333,7 +403,7 @@ function GrowthVisualizer.Render(container, loomState)
         local baseThickness = cfg.baseThickness or 1
         for i, seg in ipairs(segments) do
             if seg.fill > 0 then
-                local rot = CFrame.Angles(math.rad(seg.pitch), math.rad(seg.yaw), math.rad(seg.roll))
+                local rot = CFrame.Angles(math.rad(seg.pitch), math.rad(seg.roll), math.rad(seg.yaw))
                 local length = baseLength * seg.lengthScale
                 local thickness = baseThickness * seg.thicknessScale
                 local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
@@ -363,7 +433,7 @@ function GrowthVisualizer.Render(container, loomState)
                         local yawR = rngMicro:NextNumber(-(typ.yaw or 0), typ.yaw or 0)
                         local pitchR = rngMicro:NextNumber(-(typ.pitch or 0), typ.pitch or 0)
                         local rollR = rngMicro:NextNumber(-(typ.roll or 0), typ.roll or 0)
-                        decoCF = decoCF * CFrame.Angles(math.rad(pitchR), math.rad(yawR), math.rad(rollR))
+                        decoCF = decoCF * CFrame.Angles(math.rad(pitchR), math.rad(rollR), math.rad(yawR))
                         local scale = rngMicro:NextNumber(typ.scaleMin or 1, typ.scaleMax or 1)
                         local spec
                         if typ.kind == "asset" and typ.assetId then
