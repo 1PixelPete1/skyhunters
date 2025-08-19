@@ -303,6 +303,8 @@ function GrowthVisualizer.Render(container, loomState)
     if not config then return end
 
     local v = getVisual(loomState.loomUid)
+    -- fresh segments table each render to avoid state carry-over
+    v.segments = {}
     local segments = v.segments
 
     local overrides = loomState.overrides or {}
@@ -312,17 +314,8 @@ function GrowthVisualizer.Render(container, loomState)
     local profile = overrides.profile or (config.profileDefaults or {kind = "curved"})
     profile = GrowthProfiles.clampProfile(profile)
     -- ensure per-render state starts clean so deterministic RNG streams
-    local state = {
-        seed = loomState.baseSeed or 0,
-        t = 0,
-        sCount = 0,
-        _curved = nil,
-        _sig = nil,
-        _zz = nil,
-        _ch = nil,
-        dir = nil,
-    }
-    v._profileState = state
+    -- fresh per-render state; GrowthProfiles manages counters internally
+    local state = { seed = loomState.baseSeed or 0 }
 
     -- RNG streams
     local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
@@ -355,8 +348,7 @@ function GrowthVisualizer.Render(container, loomState)
     segCount = math.max(1, math.floor(segCount))
     profile.maxSegments = segCount
 
-    -- TRIM cached segments if shrinking
-    while #segments > segCount do segments[#segments] = nil end
+    -- segments table is fresh; ensure capacity
 
     -- continuity and clamps
     local rotRules = overrides.rotationRules or {}
@@ -511,7 +503,49 @@ function GrowthVisualizer.Render(container, loomState)
                 currentCF = stepCF * CFrame.new(0, length/2, 0)
             end
         end
-        renderSegments(scene, cfg, segOut)
+
+        if matOverrides.mode == "Model" and scene.ResolveModel and config.models then
+            local lists = config.models.byDepth or {}
+            local function spawnPart(seg)
+                local shape = cfg.partType or Enum.PartType.Ball
+                local size
+                if shape == Enum.PartType.Ball then
+                    size = Vector3.new(seg.thickness, seg.thickness, seg.thickness)
+                else
+                    size = Vector3.new(seg.thickness, seg.length, seg.thickness)
+                end
+                scene.Spawn({
+                    class = "Part",
+                    shape = shape,
+                    size = size,
+                    cframe = seg.cframe,
+                    material = cfg.material or Enum.Material.SmoothPlastic,
+                    color = cfg.color,
+                    anchored = true,
+                    canCollide = false,
+                    name = "Segment",
+                })
+            end
+            for i, seg in ipairs(segOut) do
+                local list = lists[0]
+                if i == #segOut and lists.terminal then
+                    list = lists.terminal
+                end
+                local inst
+                if list and #list > 0 then
+                    local r = SeedUtil.rng(loomState.baseSeed or 0, "model", 0, i)
+                    local idx = r:NextInteger(1, #list)
+                    inst = scene.ResolveModel(list, { select = function(L) return L[idx] end })
+                end
+                if inst then
+                    scene.Spawn({ instance = inst, cframe = seg.cframe })
+                else
+                    spawnPart(seg)
+                end
+            end
+        else
+            renderSegments(scene, cfg, segOut)
+        end
 
         local decorations = overrides.decorations or {}
         if decorations.enabled then
