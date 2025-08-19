@@ -56,6 +56,9 @@ end
 local GrowthVisualizer = {}
 GrowthVisualizer._PLUGIN_VERSION = _PLUGIN_VERSION
 
+local debugInfo = {}
+GrowthVisualizer._debug = debugInfo
+
 -- visual state keyed by loomUid
 -- each entry: {segments = { {yaw,pitch,roll,lengthScale,thicknessScale,fill}, ...}}
 
@@ -183,6 +186,20 @@ function GrowthVisualizer.Render(container, loomState)
     local microJitter = tonumber(path.microJitterDeg) or 2
     local seedAffects = overrides.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true}
 
+    for k in pairs(debugInfo) do debugInfo[k] = nil end
+    if overrides.debug then
+        debugInfo.style = style
+        debugInfo.ampDeg = ampDeg
+        debugInfo.freq = freq
+        debugInfo.curvature = curvature
+        debugInfo.zigzagSwap = zigzagSwap
+        debugInfo.sigmoidK = sigmoidK
+        debugInfo.sigmoidMid = sigmoidMid
+        debugInfo.chaoticR = chaoticR
+        debugInfo.microJitter = microJitter
+        debugInfo.seedAffects = seedAffects
+    end
+
     local segCount = overrides.segmentCount or config.growthDefaults.segmentCount
     local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
     if seedAffects.segmentCount and not overrides.segmentCount then
@@ -200,6 +217,10 @@ function GrowthVisualizer.Render(container, loomState)
         microJitter = microJitter * rngMacro:NextNumber(0.7, 1.3)
     end
 
+    while #segments > segCount do
+        segments[#segments] = nil
+    end
+
     local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
     local nx, ny, nz = SeedUtil.noiseOffsets(loomState.baseSeed or 0, "path")
 
@@ -207,6 +228,15 @@ function GrowthVisualizer.Render(container, loomState)
     local matOverrides = overrides.materialization or {mode = "Model"}
     local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
     local tie = config.growthDefaults.relativeScaleTie or 0
+
+    local defaultCont = rotRules.continuity or "accumulate"
+    if overrides.debug then
+        debugInfo.segCount = segCount
+        debugInfo.continuity = defaultCont
+        debugInfo.yawClampDeg = rotRules.yawClampDeg
+        debugInfo.pitchClampDeg = rotRules.pitchClampDeg
+        debugInfo.faceForwardBias = rotRules.faceForwardBias
+    end
 
     local function styleAngles(styleName: string, i: number, N: number)
         local t = (i - 1) / math.max(1, N - 1)
@@ -246,6 +276,10 @@ function GrowthVisualizer.Render(container, loomState)
             basePitch = (ampDeg * 0.35) * env
         end
 
+        if overrides.debug then
+            debugInfo.baseAngles = debugInfo.baseAngles or {}
+            debugInfo.baseAngles[i] = {baseYaw = baseYaw, basePitch = basePitch}
+        end
         local jy = rngMicro:NextNumber(-microJitter, microJitter)
         local jp = rngMicro:NextNumber(-microJitter, microJitter)
         return baseYaw + jy, basePitch + jp, 0
@@ -284,9 +318,22 @@ function GrowthVisualizer.Render(container, loomState)
         local thJ = rngMicro:NextNumber(-jitter.thickness, jitter.thickness)
         seg.lengthScale = 1 + lenJ
         seg.thicknessScale = 1 + lenJ * tie + thJ * (1 - tie)
+        if overrides.debug then
+            debugInfo.segments = debugInfo.segments or {}
+            local segDebug = debugInfo.segments[i] or {}
+            segDebug.yaw = yaw
+            segDebug.pitch = pitch
+            segDebug.roll = roll
+            segDebug.lengthScale = seg.lengthScale
+            segDebug.thicknessScale = seg.thicknessScale
+            debugInfo.segments[i] = segDebug
+        end
     end
 
     local fills = computeSegmentFill(segCount, loomState.g or 0)
+    if overrides.debug then
+        debugInfo.fills = fills
+    end
     for i = 1, segCount do
         segments[i].fill = fills[i]
     end
@@ -354,6 +401,20 @@ function GrowthVisualizer.Render(container, loomState)
                     if rngMicro:NextNumber() < extra then placeOne() end
                 end
             end
+        end
+    end
+
+    if overrides.debug then
+        print("[GrowthVisualizer Debug]")
+        print("Style:", debugInfo.style, "Segments:", debugInfo.segCount)
+        print("Continuity:", debugInfo.continuity, "Yaw Clamp:", debugInfo.yawClampDeg, "Pitch Clamp:", debugInfo.pitchClampDeg)
+        for i = 1, debugInfo.segCount or 0 do
+            local seg = debugInfo.segments and debugInfo.segments[i] or {}
+            local base = debugInfo.baseAngles and debugInfo.baseAngles[i] or {}
+            print(string.format(
+                "Seg %02d | BaseYaw %.2f BasePitch %.2f | Yaw %.2f Pitch %.2f Roll %.2f | LenS %.2f ThickS %.2f",
+                i, base.baseYaw or 0, base.basePitch or 0, seg.yaw or 0, seg.pitch or 0, seg.roll or 0, seg.lengthScale or 1, seg.thicknessScale or 1
+            ))
         end
     end
 end
