@@ -925,8 +925,13 @@ local function renderAssignments()
     local names = {}
     for n in pairs(st.savedProfiles) do table.insert(names, n) end
     table.sort(names)
-    if #names == 0 then table.insert(names, "") end
-    dropdown(secAssign, popupHost, "Trunk Profile", names, 1, function(opt)
+    if #names == 0 then names = {"trunk"} end
+    -- ensure trunkProfile always points at a real name
+    if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
+        st.branchAssignments.trunkProfile = names[1]
+    end
+    local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
+    dropdown(secAssign, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
         LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
     end)
@@ -1058,7 +1063,12 @@ local function renderModels()
     local depths = {}
     for k in pairs(st.modelsByDepth) do table.insert(depths, k) end
     table.insert(depths, "terminal")
-    table.sort(depths, function(a,b) return tostring(a)<tostring(b) end)
+    local function depthLess(a, b)
+        if a == "terminal" then return false end
+        if b == "terminal" then return true end
+        return (tonumber(a) or math.huge) < (tonumber(b) or math.huge)
+    end
+    table.sort(depths, depthLess)
     for _, depth in ipairs(depths) do
         local list = st.modelsByDepth[depth] or {}
         local df = Instance.new("Frame")
@@ -1104,8 +1114,13 @@ local function renderModels()
             end)
         end
         makeBtn(df, "Add", function()
+            local ref = st.modelLibrary[1]
+            if ref == nil then
+                warn("[LoomDesigner] Model library is empty. Use 'Add by Name' or 'Add AssetId' first.")
+                return
+            end
             st.modelsByDepth[depth] = list
-            table.insert(list, st.modelLibrary[1])
+            table.insert(list, ref)
             renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         end).Size = UDim2.new(0,60,0,24)
     end
@@ -1166,7 +1181,12 @@ local function renderDecorations()
         end
         makeBtn(modelsFrame, "Add Model", function()
             deco.models = deco.models or {}
-            table.insert(deco.models, st.modelLibrary[1])
+            local ref = st.modelLibrary[1]
+            if ref == nil then
+                warn("[LoomDesigner] Model library is empty. Use 'Add by Name' or 'Add AssetId' first.")
+                return
+            end
+            table.insert(deco.models, ref)
             renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         end).Size = UDim2.new(0,100,0,24)
 

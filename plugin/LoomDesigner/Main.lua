@@ -202,6 +202,11 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
+        if state.branchAssignments and (not state.branchAssignments.trunkProfile or state.branchAssignments.trunkProfile == "") then
+                local firstName
+                for n in pairs(state.savedProfiles or {}) do firstName = firstName or n end
+                state.branchAssignments.trunkProfile = firstName or "trunk"
+        end
         local cfgId = resolveConfigId(LoomConfigs, state.configId)
         if not cfgId then return end
         state.configId = cfgId
