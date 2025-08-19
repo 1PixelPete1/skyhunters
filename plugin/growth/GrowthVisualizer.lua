@@ -6,7 +6,10 @@
 local LoomConfigs
 local GrowthProfiles
 do
-    local ok, RS = pcall(game.GetService, game, "ReplicatedStorage")
+    local ok, RS = false, nil
+    if game and game.GetService then
+        ok, RS = pcall(game.GetService, game, "ReplicatedStorage")
+    end
     if ok and RS then
         LoomConfigs = LoomConfigs or (RS:FindFirstChild("looms") and RS.looms:FindFirstChild("LoomConfigs") and require(RS.looms.LoomConfigs))
         GrowthProfiles = GrowthProfiles or (RS:FindFirstChild("growth") and RS.growth:FindFirstChild("GrowthProfiles") and require(RS.growth.GrowthProfiles))
@@ -39,14 +42,20 @@ end
 
 local SeedUtil
 do
-    local root = script:FindFirstAncestor("LoomDesigner")
-    if not root and script.Parent and script.Parent.Parent then
-        root = script.Parent.Parent:FindFirstChild("LoomDesigner")
+    local root
+    if script and script.FindFirstAncestor then
+        root = script:FindFirstAncestor("LoomDesigner")
+        if not root and script.Parent and script.Parent.Parent then
+            root = script.Parent.Parent:FindFirstChild("LoomDesigner")
+        end
     end
     if root and root:FindFirstChild("SeedUtil") then
         SeedUtil = require(root.SeedUtil)
     else
-        local ok2, RS = pcall(game.GetService, game, "ReplicatedStorage")
+        local ok2, RS = false, nil
+        if game and game.GetService then
+            ok2, RS = pcall(game.GetService, game, "ReplicatedStorage")
+        end
         if ok2 and RS and RS:FindFirstChild("looms") and RS.looms:FindFirstChild("SeedUtil") then
             SeedUtil = require(RS.looms.SeedUtil)
         end
@@ -74,6 +83,16 @@ local function clamp(v, mn, mx)
     if v < mn then return mn end
     if v > mx then return mx end
     return v
+end
+
+local function isfinite(x)
+    return x == x and x > -math.huge and x < math.huge
+end
+
+local function safeRad(x)
+    if not isfinite(x) then return 0 end
+    if x ~= x then return 0 end
+    return math.rad(x)
 end
 
 local function evalScaleProfile(i, N, prof)
@@ -224,7 +243,7 @@ function GrowthVisualizer.Render(container, loomState)
     local cfg = config.growthDefaults or {}
 
     -- resolve profile and clamp
-    local profile = overrides.profile or config.profileDefaults or {kind = "curved"}
+    local profile = overrides.profile or (config.profileDefaults or {kind = "curved"})
     profile = GrowthProfiles.clampProfile(profile)
     local state = v._profileState or {}
     v._profileState = state
@@ -252,10 +271,12 @@ function GrowthVisualizer.Render(container, loomState)
 
     -- continuity and clamps
     local rotRules = overrides.rotationRules or {}
-    local cont = rotRules.continuity or (profile.continuity or "accumulate")
-    if profile.kind == "zigzag" or profile.kind == "noise" or profile.kind == "chaotic" then
-        cont = "absolute"
-    end
+    local autoContByKind = {
+      zigzag="absolute", noise="absolute", chaotic="absolute",
+      straight="accumulate", curved="accumulate", sigmoid="accumulate", spiral="accumulate", random="absolute",
+    }
+    local cont = (rotRules.continuity)
+          or autoContByKind[profile.kind or "curved"] or "accumulate"
     local yClamp = rotRules.yawClampDeg
     local pClamp = rotRules.pitchClampDeg
     if not yClamp or not pClamp then
@@ -332,7 +353,12 @@ function GrowthVisualizer.Render(container, loomState)
 
         local prof = overrides.scaleProfile
         local baseS = evalScaleProfile(i, segCount, prof)
-        local enableScaleJitter = prof and prof.enableJitter == true
+        local enableScaleJitter = (overrides.enableScaleJitter ~= false)
+        if prof and prof.enableJitter == false then
+            enableScaleJitter = false
+        elseif prof and prof.enableJitter == true then
+            enableScaleJitter = true
+        end
         local lenJ = enableScaleJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
         local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
         seg.lengthScale    = baseS * (1 + lenJ)
@@ -342,6 +368,19 @@ function GrowthVisualizer.Render(container, loomState)
             segDebug.yawFinal = yaw
             segDebug.pitchFinal = pitch
             segDebug.rollFinal = roll
+        end
+    end
+
+    if overrides.debug then
+        if state._curved then debugInfo.curved = state._curved end
+        if state._sig then debugInfo.sigmoid = state._sig end
+        print(('[growth] kind=%s cont=%s seed=%s'):format(tostring(profile.kind), cont, tostring(loomState.baseSeed)))
+        if debugInfo.curved then
+            print(('[growth] curved.phase=%.3f dir=%d'):format(debugInfo.curved.phase, debugInfo.curved.dir))
+        end
+        if debugInfo.sigmoid then
+            local s = debugInfo.sigmoid
+            print(('[growth] sig.k=%.3f mid=%.3f dir=%d'):format(s.k, s.mid, s.dir))
         end
     end
 
@@ -373,9 +412,11 @@ function GrowthVisualizer.Render(container, loomState)
         local baseThickness = cfg.baseThickness or 1
         for i, seg in ipairs(segments) do
             if seg.fill > 0 then
-                local rot = CFrame.Angles(math.rad(seg.pitch), math.rad(seg.roll), math.rad(seg.yaw))
-                local length = baseLength * seg.lengthScale
-                local thickness = baseThickness * seg.thicknessScale
+                local rot = CFrame.Angles(safeRad(seg.pitch), safeRad(seg.roll), safeRad(seg.yaw))
+                local length = baseLength * (seg.lengthScale or 1)
+                if not isfinite(length) or length <= 0 then length = baseLength end
+                local thickness = baseThickness * (seg.thicknessScale or 1)
+                if not isfinite(thickness) or thickness <= 0 then thickness = baseThickness end
                 local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
                 segOut[#segOut+1] = {cframe = stepCF, length = length, thickness = thickness}
                 currentCF = stepCF * CFrame.new(0, length/2, 0)
