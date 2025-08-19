@@ -163,6 +163,21 @@ local function rebuildLibraries()
         end
 end
 
+local function applyAuthoring()
+        local cfg = LoomConfigs[state.configId] or {id = state.configId}
+        cfg.profiles = deepCopy(state.savedProfiles)
+        cfg.branchAssignments = deepCopy(state.branchAssignments)
+        cfg.models = cfg.models or {}
+        cfg.models.byDepth = deepCopy(state.modelsByDepth)
+        if state.overrides.decorations.enabled then
+                cfg.models.decorations = deepCopy(state.overrides.decorations.types)
+        else
+                cfg.models.decorations = nil
+        end
+        LoomConfigs[state.configId] = cfg
+        return cfg
+end
+
 function LoomDesigner.ImportAuthoring()
         local cfg = LoomConfigs[state.configId]
         if not cfg then return end
@@ -179,17 +194,11 @@ function LoomDesigner.ImportAuthoring()
 end
 
 function LoomDesigner.ExportAuthoring()
-        local cfg = LoomConfigs[state.configId] or {id = state.configId}
-        cfg.profiles = deepCopy(state.savedProfiles)
-        cfg.branchAssignments = deepCopy(state.branchAssignments)
-        cfg.models = cfg.models or {}
-        cfg.models.byDepth = deepCopy(state.modelsByDepth)
-        if state.overrides.decorations.enabled then
-                cfg.models.decorations = deepCopy(state.overrides.decorations.types)
-        end
-        LoomConfigs[state.configId] = cfg
+        local cfg = applyAuthoring()
         LoomDesigner.ExportConfig(cfg)
 end
+
+LoomDesigner.ApplyAuthoring = applyAuthoring
 
 function LoomDesigner.Reseed()
         return LoomDesigner.RandomizeSeed()
@@ -214,6 +223,9 @@ end
 
 function LoomDesigner.RebuildPreview(_container)
         if not state.configId then return end
+
+        -- ensure in-memory config reflects current authoring state
+        applyAuthoring()
 
         -- robust configId fallback
         if not LoomConfigs[state.configId] then
