@@ -3,6 +3,7 @@
 -- Server and client share this logic to keep traversal deterministic.
 
 local GrowthProfiles = {}
+local SeedUtil = require(script.Parent.SeedUtil)
 
 local function clamp(num, min, max)
     if num < min then return min end
@@ -17,8 +18,8 @@ local function clampExpArg(x)
     return x
 end
 
-local function seededSign(rng)
-    return (rng:NextInteger(0, 1) == 0) and -1 or 1
+local function seededSign(master: number, key: string)
+    return SeedUtil.seededSign(master, key)
 end
 
 local function rotStraight(_prof, _rng, _state)
@@ -30,7 +31,7 @@ local function rotCurved(prof, rng, state)
     if not state._curved then
         state._curved = {
             phase = rng:NextNumber(0, 2*math.pi),
-            dir   = seededSign(rng),
+            dir   = seededSign(state.seed or 0, "curved_dir"),
         }
     end
     state.t = (state.t or 0) + 1
@@ -52,7 +53,7 @@ end
 
 local function rotZigzag(prof, rng, state)
     if not state._zz then
-        state._zz = { sign = seededSign(rng), left = 0 }
+        state._zz = { sign = seededSign(state.seed or 0, "zigzag_init"), left = 0 }
     end
     local runLen = math.max(1, prof.zigzagEvery or 1)
     if state._zz.left <= 0 then
@@ -79,7 +80,7 @@ local function rotSigmoid(prof, rng, state)
         local kBase  = prof.sigmoidK or 6
         local k      = kBase * rng:NextNumber(0.8, 1.25)     -- slope variance
         local mid    = (prof.sigmoidMid or 0.5) + rng:NextNumber(-0.1, 0.1)
-        state._sig   = { k = k, mid = clamp(mid, 0.15, 0.85), dir = seededSign(rng) }
+        state._sig   = { k = k, mid = clamp(mid, 0.15, 0.85), dir = seededSign(state.seed or 0, "sigmoid_dir") }
     end
     state.sCount = (state.sCount or 0) + 1
     local i, N = state.sCount, prof.maxSegments or 24
@@ -123,7 +124,7 @@ function GrowthProfiles.rotDelta(profile, rngProfile, state)
         sigmoid = rotSigmoid,
         chaotic = rotChaotic,
         spiral = function(prof, rng, state)
-            state.dir = state.dir or (rng:NextNumber() < 0.5 and -1 or 1)
+            state.dir = state.dir or seededSign(state.seed or 0, "spiral_dir")
             local dir = state.dir
             local step = prof.yawStep or prof.amplitudeDeg or 10
             local yawVar = prof.yawVar or 0
