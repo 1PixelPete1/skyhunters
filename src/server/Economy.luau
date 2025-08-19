@@ -1,148 +1,125 @@
-local ok, Config = pcall(function()
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-end)
-if not ok then
+--!strict
+
+local Config
+if script and script.Parent then
+    Config = require(script.Parent.Parent.Parent.shared.Config)
+else
     Config = require("Config")
-end
-
-local okAether, Aether = pcall(function()
-    if script and script.Parent then
-        return require(script.Parent:WaitForChild("Aether"))
-    else
-        return require("Aether")
-    end
-end)
-if not okAether then
-    Aether = require("Aether")
-end
-
-local MAX_DELTA = 1e9
-local RATE_WINDOW = 5
-local RATE_MAX = 10
-
-local rateLimits = {}
-local lastAetherSell = {}
-
-local function clamp(value, min, max)
-    if value < min then
-        return min
-    end
-    if value > max then
-        return max
-    end
-    return value
 end
 
 local Economy = {}
 
-function Economy.ApplyCrumbsDelta(player, delta, reason)
-    if not Config.ReasonWhitelist[reason] then
-        return false
+local function now()
+    if type(time) == "function" then
+        return time()
     end
-    if math.abs(delta) > MAX_DELTA then
-        return false
-    end
-    local now = os.clock()
-    local bucket = rateLimits[player] or {}
-    local newBucket = {}
-    for _, t in ipairs(bucket) do
-        if now - t < RATE_WINDOW then
-            table.insert(newBucket, t)
+    return os.clock()
+end
+
+local function ensure(player)
+    player.crumbs = player.crumbs or 0
+    player.inventory = player.inventory or {}
+    player.upgrades = player.upgrades or {}
+    player.aether = player.aether or { current = 0, target = 20, decayRate = 0.08, purityBase = 0.55 }
+    player.timestamps = player.timestamps or {}
+end
+
+local function withinRateLimit(player)
+    local cfg = Config.Economy
+    local window = cfg.CRUMBS_RATE_LIMIT_WINDOW_SEC
+    local nowTs = now()
+    local ts = player.timestamps
+    local j, n = 1, #ts
+    for i = 1, n do
+        if nowTs - ts[i] <= window then
+            ts[j] = ts[i]
+            j = j + 1
         end
     end
-    if #newBucket >= RATE_MAX then
-        rateLimits[player] = newBucket
+    for k = j, n do
+        ts[k] = nil
+    end
+    if #ts >= cfg.CRUMBS_RATE_LIMIT_WINDOW_N then
         return false
     end
-    table.insert(newBucket, now)
-    rateLimits[player] = newBucket
+    ts[#ts + 1] = nowTs
+    return true
+end
 
-    player.crumbs = (player.crumbs or 0) + delta
-    print("ApplyCrumbsDelta", player.id or "unknown", delta, reason)
+function Economy.ApplyCrumbsDelta(player, delta, reason)
+    ensure(player)
+    local cfg = Config.Economy
+    if not cfg.REASONS[reason] then
+        return false
+    end
+    if not withinRateLimit(player) then
+        return false
+    end
+    player.crumbs = player.crumbs + delta
     return true
 end
 
 function Economy.SellAether(player)
-    local aether = player.aether or {}
-    local current = aether.current or 0
-    if current <= 0 then
-        return 0
-    end
-    local now = os.clock()
-    local last = lastAetherSell[player]
-    if last and now - last < 0.5 then
-        return 0
-    end
-    local stats = Aether.GetEffectiveStats(player)
-    local purity = clamp(stats.purity, 0.10, 1.00)
-    local gain = math.floor(current * purity * Config.SELL_MULT)
+    ensure(player)
+    local cfg = Config.Economy
+    local a = player.aether
+    local gain = math.floor((a.current or 0) * (a.purityBase or 0.55) * cfg.AETHER_PER_UNIT_PRICE)
+    a.current = 0
     if gain <= 0 then
         return 0
     end
-    local success = Economy.ApplyCrumbsDelta(player, gain, "sell_aether")
-    if success then
-        aether.current = 0
-        aether.lastSettleTs = time()
-        lastAetherSell[player] = now
+    if Economy.ApplyCrumbsDelta(player, gain, "sell_aether") then
         return gain
     end
     return 0
 end
 
-function Economy.SellItem(player, itemId, qty)
-    if qty <= 0 then
+function Economy.SellItem(player, itemId, count)
+    ensure(player)
+    local cfg = Config.Economy
+    count = math.max(0, math.floor(count or 0))
+    if count == 0 then
         return 0
     end
-    local item = Config.ItemById[itemId]
-    if not item then
+    local itemCfg = cfg.Items[itemId]
+    if not itemCfg then
         return 0
     end
-    local inv = player.inventory or {}
+    local inv = player.inventory
     local have = inv[itemId] or 0
-    if have < qty then
+    if have < count then
         return 0
     end
-    local gain = item.sell_value * qty
-    inv[itemId] = have - qty
-    local success = Economy.ApplyCrumbsDelta(player, gain, "sell_item")
-    if not success then
+    local gain = itemCfg.price * count
+    inv[itemId] = have - count
+    if Economy.ApplyCrumbsDelta(player, gain, "sell_item") then
+        return gain
+    else
         inv[itemId] = have
         return 0
     end
-    return gain
 end
 
 function Economy.PurchaseUpgrade(player, upgradeId)
-    local upgrade = Config.UpgradeById[upgradeId]
-    if not upgrade then
-        return false
-    end
-    local prereq = upgrade.prereq
-    if prereq and not player.upgrades[prereq] then
+    ensure(player)
+    local cfg = Config.Economy
+    local up = cfg.Upgrades[upgradeId]
+    if not up then
         return false
     end
     if player.upgrades[upgradeId] then
         return false
     end
-    local cost = upgrade.cost
-    if player.crumbs < cost then
+    if player.crumbs < up.cost then
         return false
     end
-    local ok = Economy.ApplyCrumbsDelta(player, -cost, "purchase")
-    if not ok then
+    if not Economy.ApplyCrumbsDelta(player, -up.cost, "grant") then
         return false
-    end
-    local aether = player.aether
-    if upgrade.affects == "target" then
-        aether.target = (aether.target or 0) + upgrade.value
-    elseif upgrade.affects == "purityBase" then
-        aether.purityBase = (aether.purityBase or 0) + upgrade.value
-    elseif upgrade.affects == "decayRate" then
-        aether.decayRate = (aether.decayRate or 0) + upgrade.value
     end
     player.upgrades[upgradeId] = true
+    player.aether.purityBase = (player.aether.purityBase or 0.55) + (up.purityDelta or 0)
     return true
 end
 
 return Economy
+
