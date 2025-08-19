@@ -51,6 +51,7 @@ do
             SeedUtil = require(RS.looms.SeedUtil)
         end
     end
+
 end
 if not SeedUtil then
     local okS, mod = pcall(require, "LoomDesigner/SeedUtil")
@@ -226,17 +227,21 @@ function GrowthVisualizer.Render(container, loomState)
     local segments = v.segments
 
     local overrides = loomState.overrides or {}
+    local cfg = config.growthDefaults or {}
     local path = overrides.path or {}
-    local style = path.style or "curved"
-    local ampDeg = tonumber(path.amplitudeDeg) or 10
-    local freq = tonumber(path.frequency) or 0.35
-    local curvature = tonumber(path.curvature) or 0.35
-    local zigzagSwap = tonumber(path.zigzagEvery) or 1
-    local sigmoidK = tonumber(path.sigmoidK) or 6
-    local sigmoidMid = tonumber(path.sigmoidMid) or 0.5
-    local chaoticR = tonumber(path.chaoticR) or 3.9
-    local microJitter = tonumber(path.microJitterDeg) or 2
-    local seedAffects = overrides.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true, twist=true}
+    local style = path.style or cfg.style or "curved"
+    local ampDeg = tonumber(path.amplitudeDeg) or cfg.amplitudeDeg or 10
+    local freq = tonumber(path.frequency) or cfg.frequency or 0.35
+    local curvature = tonumber(path.curvature) or cfg.curvature or 0.35
+    local zigzagEvery = tonumber(path.zigzagEvery) or cfg.zigzagEvery or 1
+    local sigmoidK = tonumber(path.sigmoidK) or cfg.sigmoidK or 6
+    local sigmoidMid = tonumber(path.sigmoidMid) or cfg.sigmoidMid or 0.5
+    local chaoticR = tonumber(path.chaoticR) or cfg.chaoticR or 3.9
+    local microJitter = tonumber(path.microJitterDeg) or cfg.microJitterDeg or 2
+    local seedAffects = overrides.seedAffects or cfg.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true, twist=true}
+    local enableMicroJitter = (overrides.enableMicroJitter ~= false)
+    local enableTwist = (overrides.enableTwist ~= false)
+    local enableScaleJitter = (overrides.enableScaleJitter ~= false)
 
     local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
 
@@ -274,9 +279,9 @@ function GrowthVisualizer.Render(container, loomState)
     local nx, ny, nz = SeedUtil.noiseOffsets(loomState.baseSeed or 0, "path")
 
     local rotRules = overrides.rotationRules or {}
-    local matOverrides = overrides.materialization or {mode = "Model"}
-    local jitter = config.growthDefaults.segmentScaleJitter or { length = 0, thickness = 0 }
-    local tie = config.growthDefaults.relativeScaleTie or 0
+    local matOverrides = overrides.materialization or cfg.materialization or {mode = "Model"}
+    local jitter = overrides.scaleJitter or cfg.segmentScaleJitter or { length = 0, thickness = 0 }
+    local tie = cfg.relativeScaleTie or 0
 
     local function styleAngles(styleName, i, N)
         local t = (i - 1) / math.max(1, N - 1)
@@ -290,8 +295,8 @@ function GrowthVisualizer.Render(container, loomState)
             baseYaw = sweep * env
             basePitch = (ampDeg * 0.35) * env
         elseif styleName == "zigzag" then
-            local group = math.max(1, zigzagSwap)
-            local sign = ((math.floor((i - 1) / group) % 2) == 0) and 1 or -1
+            local group = math.max(1, zigzagEvery or 1)
+            local sign  = ((math.floor((i - 1) / group) % 2) == 0) and 1 or -1
             baseYaw = sign * ampDeg
             basePitch = 0
         elseif styleName == "noise" then
@@ -317,8 +322,8 @@ function GrowthVisualizer.Render(container, loomState)
             basePitch = (ampDeg * 0.35) * env
         end
 
-        local jy = rngMicro:NextNumber(-microJitter, microJitter)
-        local jp = rngMicro:NextNumber(-microJitter, microJitter)
+        local jy = enableMicroJitter and rngMicro:NextNumber(-microJitter, microJitter) or 0
+        local jp = enableMicroJitter and rngMicro:NextNumber(-microJitter, microJitter) or 0
         local dy = baseYaw + jy
         local dp = basePitch + jp
 
@@ -330,10 +335,19 @@ function GrowthVisualizer.Render(container, loomState)
         dy = dy * tailDamp
         dp = dp * tailDamp
 
-        return dy, dp, 0
+        return dy, dp
     end
 
     local yaw, pitch, roll = 0, 0, 0
+    local defaultCont = (style == "zigzag" or style == "noise" or style == "chaotic") and "absolute" or "accumulate"
+    local cont = rotRules.continuity or defaultCont
+    local yClamp = rotRules.yawClampDeg
+    local pClamp = rotRules.pitchClampDeg
+    if not yClamp or not pClamp then
+        local d = styleClampDefaults[style] or {}
+        yClamp = yClamp or d.yaw
+        pClamp = pClamp or d.pitch
+    end
     while #segments > segCount do
         segments[#segments] = nil
     end
@@ -343,31 +357,20 @@ function GrowthVisualizer.Render(container, loomState)
             seg = { yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0 }
             segments[i] = seg
         end
-        local dy, dp, dr = styleAngles(style, i, segCount)
-        local extraRoll = tonumber(rotRules.extraRollPerSegDeg) or 0
-        local rollRange = tonumber(rotRules.randomRollRangeDeg) or 0
-        local twistEnabled = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
-        if twistEnabled then
-            dr = (dr or 0) + extraRoll + rngMicro:NextNumber(-rollRange, rollRange)
-        else
-            dr = (dr or 0) + extraRoll
+        local dy, dp = styleAngles(style, i, segCount)
+        local dr = 0
+        if enableTwist then
+            dr = (tonumber(rotRules.extraRollPerSegDeg) or 0)
+            local rr = tonumber(rotRules.randomRollRangeDeg) or 0
+            local twistRandomOn = (not overrides.seedAffects) or (overrides.seedAffects.twist ~= false)
+            if twistRandomOn and rr > 0 then
+                dr += rngMicro:NextNumber(-rr, rr)
+            end
         end
-        local defaultCont =
-            (style == "zigzag" or style == "noise" or style == "chaotic") and "absolute" or "accumulate"
-        local cont = rotRules.continuity or defaultCont
         if cont == "accumulate" then
-            yaw = yaw + dy
-            pitch = pitch + dp
-            roll = roll + dr
+            yaw += dy; pitch += dp; roll += dr
         else
             yaw, pitch, roll = dy, dp, dr
-        end
-        local yClamp = rotRules.yawClampDeg
-        local pClamp = rotRules.pitchClampDeg
-        if not yClamp or not pClamp then
-            local d = styleClampDefaults[style] or {}
-            yClamp = yClamp or d.yaw
-            pClamp = pClamp or d.pitch
         end
         if yClamp then yaw = clamp(yaw, -yClamp, yClamp) end
         if pClamp then pitch = clamp(pitch, -pClamp, pClamp) end
@@ -380,7 +383,7 @@ function GrowthVisualizer.Render(container, loomState)
 
         local prof = overrides.scaleProfile
         local baseS = evalScaleProfile(i, segCount, prof)
-        local applyJitter = (prof == nil) or (prof.enableJitter ~= false)
+        local applyJitter = enableScaleJitter and ((prof and prof.enableJitter) ~= false)
         local lenJ = applyJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
         local thJ = applyJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
         seg.lengthScale = baseS * (1 + lenJ)
@@ -457,6 +460,18 @@ function GrowthVisualizer.Render(container, loomState)
             end
         end
     end
+
+    GrowthVisualizer._debug = {
+        style = style,
+        segCount = segCount,
+        continuity = cont,
+        yawClamp = yClamp,
+        pitchClamp = pClamp,
+        enableMicroJitter = enableMicroJitter,
+        enableTwist = enableTwist,
+        enableScaleJitter = enableScaleJitter,
+        scaleProfile = overrides.scaleProfile,
+    }
 end
 
 function GrowthVisualizer.Release(container, loomUid)
