@@ -14,6 +14,10 @@ local LoomConfigs = RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
     or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
 LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
 
+local LoomConfigUtil = RequireUtil.fromReplicatedStorage({"looms","LoomConfigUtil"})
+    or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigUtil"})
+LoomConfigUtil = RequireUtil.must(LoomConfigUtil, "looms/LoomConfigUtil")
+
 local VisualScene = RequireUtil.fromRelative(script.Parent, {"VisualScene"})
 VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 
@@ -22,7 +26,41 @@ ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
 local LoomDesigner = {}
 
-local firstConfigId; for id in pairs(LoomConfigs) do firstConfigId = id break end
+local function firstConfigKey(configs)
+        for k, v in pairs(configs) do
+                if type(v) == "table" then return k end
+        end
+        return nil
+end
+
+local function resolveConfigId(configs, wantedId)
+        if type(configs) ~= "table" then
+                warn("[LoomDesigner] LoomConfigs is not a table; check module load path")
+                return nil
+        end
+        if wantedId and type(configs[wantedId]) == "table" then
+                return wantedId
+        end
+        local fallback = firstConfigKey(configs)
+        if not fallback then
+                warn("[LoomDesigner] No valid config tables found in LoomConfigs")
+                return nil
+        end
+        if wantedId and type(configs[wantedId]) == "function" then
+                warn(("[LoomDesigner] '%s' is a function, not a config. Falling back to '%s'")
+                        :format(tostring(wantedId), tostring(fallback)))
+        elseif wantedId and configs[wantedId] == nil then
+                warn(("[LoomDesigner] Unknown configId '%s'. Falling back to '%s'")
+                        :format(tostring(wantedId), tostring(fallback)))
+        end
+        return fallback
+end
+
+local function isConfigTable(x)
+        return type(x) == "table" and (x.id ~= nil or x.uiName ~= nil or next(x) ~= nil)
+end
+
+local firstConfigId = firstConfigKey(LoomConfigs)
 
 -- current working state used by the designer
 local state = {
@@ -164,18 +202,31 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
-        local cfg = LoomConfigs[state.configId] or {id = state.configId}
-        cfg.profiles = deepCopy(state.savedProfiles)
-        cfg.branchAssignments = deepCopy(state.branchAssignments)
-        cfg.models = cfg.models or {}
-        cfg.models.byDepth = deepCopy(state.modelsByDepth)
-        if state.overrides.decorations.enabled then
-                cfg.models.decorations = deepCopy(state.overrides.decorations.types)
-        else
-                cfg.models.decorations = nil
+        local cfgId = resolveConfigId(LoomConfigs, state.configId)
+        if not cfgId then return end
+        state.configId = cfgId
+
+        local base = LoomConfigs[cfgId]
+        if type(base) ~= "table" then
+                warn("[LoomDesigner] Resolved config is not a table; creating new")
+                base = { id = cfgId }
         end
-        LoomConfigs[state.configId] = cfg
-        return cfg
+
+        local authored = {
+                profiles = LoomConfigUtil.deepCopy(state.savedProfiles),
+                branchAssignments = LoomConfigUtil.deepCopy(state.branchAssignments),
+                models = {
+                        byDepth = LoomConfigUtil.deepCopy(state.modelsByDepth),
+                        decorations = (state.overrides and state.overrides.decorations and state.overrides.decorations.enabled)
+                                and LoomConfigUtil.deepCopy(state.overrides.decorations.types)
+                                or (base.models and LoomConfigUtil.deepCopy(base.models.decorations)) or nil,
+                },
+        }
+
+        local merged = LoomConfigUtil.mergeConfig(base, authored)
+
+        LoomConfigs[cfgId] = merged
+        return merged
 end
 
 function LoomDesigner.ImportAuthoring()

@@ -231,13 +231,26 @@ local secIO        = makeSection(scroll, "Export / Import")
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-local configIds = {}
-for id, _ in pairs(LoomConfigs) do table.insert(configIds, id) end
-table.sort(configIds)
+local LoomConfigUtil = require(game.ReplicatedStorage.looms.LoomConfigUtil)
+
+local function listConfigIds()
+    local ids = {}
+    for k, v in pairs(LoomConfigs) do
+        if type(v) == "table" then table.insert(ids, k) end
+    end
+    table.sort(ids)
+    return ids
+end
+
+local configIds = listConfigIds()
 
 dropdown(secConfig, popupHost, "Config", configIds, 1, function(id)
-LoomDesigner.SetConfigId(id)
-LoomDesigner.RebuildPreview(nil)
+    if type(LoomConfigs[id]) ~= "table" then
+        warn("[LoomDesigner] Ignoring non-table config key: " .. tostring(id))
+    else
+        LoomDesigner.SetConfigId(id)
+        LoomDesigner.RebuildPreview(nil)
+    end
 end)
 
 local seedLabel
@@ -771,7 +784,7 @@ local function duplicateProfile()
     local base = selectedProfile .. "Copy"
     local i = 1
     while st.savedProfiles[base..i] do i += 1 end
-    local src = LoomConfigs._deepCopy(st.savedProfiles[selectedProfile])
+    local src = LoomConfigUtil.deepCopy(st.savedProfiles[selectedProfile])
     LoomDesigner.CreateProfile(base..i, src)
     selectedProfile = base..i
     renderProfiles()
