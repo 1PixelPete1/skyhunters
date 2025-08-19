@@ -14,29 +14,35 @@ local function rotStraight(_prof, _rng, _state)
     return {yaw = 0, pitch = 0, roll = 0}
 end
 
-local function rotCurved(prof, _rng, state)
+local function rotCurved(prof, rng, state)
     state.t = (state.t or 0) + 1
     local i, N = state.t, prof.maxSegments or 24
     local t = (i-1) / math.max(1, N-1)
-    local sweep = math.sin((t * math.pi) * (prof.frequency or 1)) * (prof.amplitudeDeg or 10)
+    state.phase = state.phase or rng:NextNumber(0, 2 * math.pi)
+    state.dir = state.dir or (rng:NextNumber() < 0.5 and -1 or 1)
+    local phase = state.phase
+    local dir = state.dir
+    local amp = prof.amplitudeDeg or 10
+    local sweep = math.sin(t * math.pi * (prof.frequency or 1) + phase) * amp
     local env = (1 - (2*t-1)^2) ^ (prof.curvature or 0.35)
     return {
-        yaw = sweep * env,
-        pitch = (prof.amplitudeDeg or 10) * 0.35 * env,
-        roll = (prof.rollBias or 0),
+        yaw = dir * sweep * env,
+        pitch = dir * (amp * 0.35) * env,
+        roll = 0,
     }
 end
 
-local function rotZigzag(prof, _rng, state)
-    state.zCount = (state.zCount or 0) + 1
+local function rotZigzag(prof, rng, state)
+    state.count = (state.count or 0) + 1
     local runLen = prof.zigzagEvery or 1
-    if state.zCount > runLen then
-        state.zCount = 1
-        state.zSign = -(state.zSign or 1)
+    state.sign = state.sign or (rng:NextNumber() < 0.5 and -1 or 1)
+    if state.count > runLen then
+        state.count = 1
+        state.sign = -state.sign
     end
-    local sign = state.zSign or 1
+    local step = prof.zigzagStep or prof.amplitudeDeg or 10
     return {
-        yaw = sign * (prof.zigzagStep or prof.amplitudeDeg or 10),
+        yaw = state.sign * step,
         pitch = prof.pitchBias or 0,
         roll = prof.rollBias or 0,
     }
@@ -44,27 +50,25 @@ end
 
 local function rotNoise(prof, rng, _state)
     local amp = prof.noiseAmp or (prof.amplitudeDeg or 10)
-    local yaw = rng:NextNumber(-amp, amp)
-    local pitch = rng:NextNumber(-0.6 * amp, 0.6 * amp)
     return {
-        yaw = yaw,
-        pitch = pitch,
-        roll = prof.rollBias or 0,
+        yaw = rng:NextNumber(-amp, amp),
+        pitch = rng:NextNumber(-0.6 * amp, 0.6 * amp),
+        roll = 0,
     }
 end
 
-local function rotSigmoid(prof, _rng, state)
-    state.sCount = (state.sCount or 0) + 1
-    local i, N = state.sCount, prof.maxSegments or 24
+local function rotSigmoid(prof, rng, state)
+    state.count = (state.count or 0) + 1
+    local i, N = state.count, prof.maxSegments or 24
     local t = (i-1) / math.max(1, N-1)
-    local k = prof.sigmoidK or 6
-    local mid = prof.sigmoidMid or 0.5
-    local s = 1 / (1 + math.exp(-k * (t - mid)))
+    state.k = state.k or (prof.sigmoidK or 6) + rng:NextNumber(-1, 1)
+    state.mid = state.mid or (prof.sigmoidMid or 0.5) + rng:NextNumber(-0.1, 0.1)
+    local s = 1 / (1 + math.exp(-state.k * (t - state.mid)))
     local amp = prof.amplitudeDeg or 10
     return {
         yaw = (s - 0.5) * 2 * amp,
         pitch = (0.5 - math.abs(s - 0.5)) * 2 * (amp * 0.4),
-        roll = prof.rollBias or 0,
+        roll = 0,
     }
 end
 
@@ -76,8 +80,8 @@ local function rotChaotic(prof, rng, state)
     local amp = prof.amplitudeDeg or 10
     return {
         yaw = (x - 0.5) * 2 * amp,
-        pitch = (0.5 - math.abs(x - 0.5)) * 2 * (amp * 0.4),
-        roll = prof.rollBias or 0,
+        pitch = 0,
+        roll = 0,
     }
 end
 
@@ -91,19 +95,23 @@ function GrowthProfiles.rotDelta(profile, rngProfile, state)
         noise = rotNoise,
         sigmoid = rotSigmoid,
         chaotic = rotChaotic,
-        spiral = function(prof, rng, _st)
+        spiral = function(prof, rng, state)
+            state.dir = state.dir or (rng:NextNumber() < 0.5 and -1 or 1)
+            local dir = state.dir
+            local step = prof.yawStep or prof.amplitudeDeg or 10
+            local yawVar = prof.yawVar or 0
             return {
-                yaw = (prof.yawStep or 0) + rng:NextNumber(-(prof.yawVar or 0), prof.yawVar or 0),
+                yaw = dir * step + rng:NextNumber(-yawVar, yawVar),
                 pitch = (prof.pitchBias or 0) + rng:NextNumber(-(prof.pitchVar or 0), prof.pitchVar or 0),
                 roll = (prof.rollBias or 0) + rng:NextNumber(-(prof.rollVar or 0), prof.rollVar or 0),
             }
         end,
         random = function(prof, rng, _st)
-            local chaos = prof.randomChaos or 0
+            local amp = prof.amplitudeDeg or 180
             return {
-                yaw = rng:NextNumber(-chaos, chaos),
-                pitch = (prof.pitchBias or 0) + rng:NextNumber(-(prof.pitchVar or 0), prof.pitchVar or 0),
-                roll = (prof.rollBias or 0) + rng:NextNumber(-(prof.rollVar or 0), prof.rollVar or 0),
+                yaw = rng:NextNumber(-amp, amp),
+                pitch = rng:NextNumber(-amp, amp),
+                roll = 0,
             }
         end,
     }

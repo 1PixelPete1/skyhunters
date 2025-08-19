@@ -252,10 +252,10 @@ function GrowthVisualizer.Render(container, loomState)
 
     -- continuity and clamps
     local rotRules = overrides.rotationRules or {}
-    local defaultCont =
-        (profile.kind == "zigzag" or profile.kind == "random" or profile.kind == "noise" or profile.kind == "chaotic") and "absolute"
-        or (profile.continuity or "accumulate")
-    local cont = rotRules.continuity or defaultCont
+    local cont = rotRules.continuity or (profile.continuity or "accumulate")
+    if profile.kind == "zigzag" or profile.kind == "noise" or profile.kind == "chaotic" then
+        cont = "absolute"
+    end
     local yClamp = rotRules.yawClampDeg
     local pClamp = rotRules.pitchClampDeg
     if not yClamp or not pClamp then
@@ -273,21 +273,10 @@ function GrowthVisualizer.Render(container, loomState)
 
     for k in pairs(debugInfo) do debugInfo[k] = nil end
     if overrides.debug then
+        debugInfo.seed = loomState.baseSeed or 0
         debugInfo.style = profile.kind
-        debugInfo.ampDeg = profile.ampDeg
-        debugInfo.freq = profile.frequency
-        debugInfo.curvature = profile.curvature
-        debugInfo.zigzagSwap = profile.zigzagSwap
-        debugInfo.sigmoidK = profile.sigmoidK
-        debugInfo.sigmoidMid = profile.sigmoidMid
-        debugInfo.chaoticR = profile.chaoticR
-        debugInfo.microJitter = microJitter
-        debugInfo.seedAffects = seedAffects
         debugInfo.segCount = segCount
         debugInfo.continuity = cont
-        debugInfo.yawClampDeg = yClamp
-        debugInfo.pitchClampDeg = pClamp
-        debugInfo.faceForwardBias = rotRules.faceForwardBias
     end
 
     -- twist controls
@@ -315,8 +304,8 @@ function GrowthVisualizer.Render(container, loomState)
         local delta = GrowthProfiles.rotDelta(profile, rngProfile, state)
         local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
         if overrides.debug then
-            debugInfo.baseAngles = debugInfo.baseAngles or {}
-            debugInfo.baseAngles[i] = {baseYaw = dy, basePitch = dp}
+            debugInfo.segments = debugInfo.segments or {}
+            debugInfo.segments[i] = {i = i, baseYaw = dy, basePitch = dp, baseRoll = dr}
         end
 
         if enableMicroJitter then
@@ -349,14 +338,10 @@ function GrowthVisualizer.Render(container, loomState)
         seg.lengthScale    = baseS * (1 + lenJ)
         seg.thicknessScale = baseS * (1 + thJ)
         if overrides.debug then
-            debugInfo.segments = debugInfo.segments or {}
-            local segDebug = debugInfo.segments[i] or {}
-            segDebug.yaw = yaw
-            segDebug.pitch = pitch
-            segDebug.roll = roll
-            segDebug.lengthScale = seg.lengthScale
-            segDebug.thicknessScale = seg.thicknessScale
-            debugInfo.segments[i] = segDebug
+            local segDebug = debugInfo.segments[i]
+            segDebug.yawFinal = yaw
+            segDebug.pitchFinal = pitch
+            segDebug.rollFinal = roll
         end
     end
 
@@ -444,15 +429,15 @@ function GrowthVisualizer.Render(container, loomState)
     end
 
     if overrides.debug then
+        debugInfo.phase = state.phase
+        debugInfo.dir = state.dir
         print("[GrowthVisualizer Debug]")
-        print("Style:", debugInfo.style, "Segments:", debugInfo.segCount)
-        print("Continuity:", debugInfo.continuity, "Yaw Clamp:", debugInfo.yawClampDeg, "Pitch Clamp:", debugInfo.pitchClampDeg)
-        for i = 1, debugInfo.segCount or 0 do
-            local seg = debugInfo.segments and debugInfo.segments[i] or {}
-            local base = debugInfo.baseAngles and debugInfo.baseAngles[i] or {}
+        print("Seed:", debugInfo.seed, "Style:", debugInfo.style, "Dir:", debugInfo.dir, "Phase:", debugInfo.phase)
+        print("Continuity:", debugInfo.continuity, "Segments:", debugInfo.segCount)
+        for _, seg in ipairs(debugInfo.segments or {}) do
             print(string.format(
-                "Seg %02d | BaseYaw %.2f BasePitch %.2f | Yaw %.2f Pitch %.2f Roll %.2f | LenS %.2f ThickS %.2f",
-                i, base.baseYaw or 0, base.basePitch or 0, seg.yaw or 0, seg.pitch or 0, seg.roll or 0, seg.lengthScale or 1, seg.thicknessScale or 1
+                "Seg %02d | BaseYaw %.2f BasePitch %.2f BaseRoll %.2f | Yaw %.2f Pitch %.2f Roll %.2f",
+                seg.i or 0, seg.baseYaw or 0, seg.basePitch or 0, seg.baseRoll or 0, seg.yawFinal or 0, seg.pitchFinal or 0, seg.rollFinal or 0
             ))
         end
     end
