@@ -178,4 +178,16 @@ local configs = {
     },
 }
 
+-- Utility for plugin authoring: shallow function to clone tables
+local function deepCopy(v)
+    if type(v) ~= "table" then return v end
+    local c = {}
+    for k, val in pairs(v) do
+        c[k] = deepCopy(val)
+    end
+    return c
+end
+
+configs._deepCopy = deepCopy
+
 return configs

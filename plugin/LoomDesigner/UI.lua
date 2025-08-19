@@ -213,15 +213,21 @@ end)
 updateSpawnLabel()
 
 -- === Sections ===
-local secConfig = makeSection(scroll, "Branch Config")
-local secSeed   = makeSection(scroll, "Seed / Randomness")
-local secGrowth = makeSection(scroll, "Growth Progression")
-local secSeg    = makeSection(scroll, "Segment Overrides")
-local secProfile   = makeSection(scroll, "Profile")
-local secGeo    = makeSection(scroll, "Segment Geometry")
-local secScale  = makeSection(scroll, "Size Profile")
-local secRot    = makeSection(scroll, "Rotation Rules")
-local secDeco   = makeSection(scroll, "Decorations")
+local secConfig   = makeSection(scroll, "Branch Config")
+local secSeed     = makeSection(scroll, "Seed / Randomness")
+local secGrowth   = makeSection(scroll, "Growth Progression")
+local secSeg      = makeSection(scroll, "Segment Overrides")
+local secProfile  = makeSection(scroll, "Profile")
+local secGeo      = makeSection(scroll, "Segment Geometry")
+local secScale    = makeSection(scroll, "Size Profile")
+local secRot      = makeSection(scroll, "Rotation Rules")
+local secDeco     = makeSection(scroll, "Decorations")
+-- Stage D authoring panels
+local secProfilesLib = makeSection(scroll, "Profiles (Authoring)")
+local secAssign    = makeSection(scroll, "Assignments (Authoring)")
+local secModels    = makeSection(scroll, "Models (Authoring)")
+local secDecoAuth  = makeSection(scroll, "Decorations (Authoring)")
+local secIO        = makeSection(scroll, "Export / Import")
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -250,13 +256,13 @@ seedLabel.Text = "Current Seed: " .. tostring(LoomDesigner.GetSeed())
 seedLabel.Parent = secSeed
 
 local randBtn = Instance.new("TextButton")
-randBtn.Text = "Reroll"
+randBtn.Text = "Reseed"
 randBtn.Size = UDim2.new(0,180,0,26)
 randBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
 randBtn.TextColor3 = Color3.new(1,1,1)
 randBtn.Parent = secSeed
 randBtn.MouseButton1Click:Connect(function()
-local newSeed = LoomDesigner.RandomizeSeed()
+    local newSeed = LoomDesigner.Reseed()
 seedBox.Text = tostring(newSeed)
 seedLabel.Text = "Current Seed: " .. tostring(newSeed)
 LoomDesigner.RebuildPreview(nil)
@@ -701,9 +707,66 @@ LoomDesigner.RebuildPreview(nil)
 end)
 
 labeledTextBox(secRot, "FaceForward Bias", "", function(txt)
-local n = tonumber(txt)
-LoomDesigner.SetOverrides({rotationRules = {faceForwardBias = n}})
-LoomDesigner.RebuildPreview(nil)
+    local n = tonumber(txt)
+    LoomDesigner.SetOverrides({rotationRules = {faceForwardBias = n}})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+-- === Authoring Panels ======================================================
+local newProfileBtn = Instance.new("TextButton")
+newProfileBtn.Text = "New Profile"
+newProfileBtn.Size = UDim2.new(0,180,0,26)
+newProfileBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+newProfileBtn.TextColor3 = Color3.new(1,1,1)
+newProfileBtn.Parent = secProfilesLib
+newProfileBtn.MouseButton1Click:Connect(function()
+    local st = LoomDesigner.GetState()
+    local i = 1
+    while st.savedProfiles["profile"..i] do i += 1 end
+    LoomDesigner.CreateProfile("profile"..i)
+end)
+
+local assignLabel = Instance.new("TextLabel")
+assignLabel.Text = "Assignments UI not implemented"
+assignLabel.Size = UDim2.new(1,0,0,20)
+assignLabel.TextColor3 = Color3.fromRGB(200,200,200)
+assignLabel.BackgroundTransparency = 1
+assignLabel.Parent = secAssign
+
+local modelsLabel = Instance.new("TextLabel")
+modelsLabel.Text = "Models UI not implemented"
+modelsLabel.Size = UDim2.new(1,0,0,20)
+modelsLabel.TextColor3 = Color3.fromRGB(200,200,200)
+modelsLabel.BackgroundTransparency = 1
+modelsLabel.Parent = secModels
+
+local decoLabel = Instance.new("TextLabel")
+decoLabel.Text = "Decorations UI not implemented"
+decoLabel.Size = UDim2.new(1,0,0,20)
+decoLabel.TextColor3 = Color3.fromRGB(200,200,200)
+decoLabel.BackgroundTransparency = 1
+decoLabel.Parent = secDecoAuth
+
+-- Export / Import controls --------------------------------------------------
+local expBtn = Instance.new("TextButton")
+expBtn.Text = "Export Config"
+expBtn.Size = UDim2.new(0,180,0,26)
+expBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+expBtn.TextColor3 = Color3.new(1,1,1)
+expBtn.Parent = secIO
+expBtn.MouseButton1Click:Connect(function()
+    LoomDesigner.ExportAuthoring()
+end)
+
+local impBtn = Instance.new("TextButton")
+impBtn.Text = "Import Config"
+impBtn.Size = UDim2.new(0,180,0,26)
+impBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+impBtn.TextColor3 = Color3.new(1,1,1)
+impBtn.Parent = secIO
+impBtn.MouseButton1Click:Connect(function()
+    LoomDesigner.ImportAuthoring()
+    LoomDesigner.RebuildPreview(nil)
 end)
 end
 

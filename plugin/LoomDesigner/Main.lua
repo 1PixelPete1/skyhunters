@@ -32,7 +32,15 @@ local state = {
         overrides = {
                 materialization = { mode = "Model" },
                 rotationRules = {},
+                decorations = { enabled = false, types = {} },
         },
+
+        -- Authoring state (Stage D)
+        savedProfiles = {},
+        branchAssignments = { trunkProfile = "", perDepth = {}, spacingN = {}, maxPerDepth = {} },
+        modelLibrary = {},
+        modelsByDepth = {},
+        decoLibrary = {},
 }
 
 local function hashToInt(s)
@@ -75,6 +83,10 @@ function LoomDesigner.GetSeed()
         return state.baseSeed
 end
 
+function LoomDesigner.GetState()
+        return state
+end
+
 function LoomDesigner.SetGrowthPercent(g)
 	state.g = g
 end
@@ -89,6 +101,15 @@ local function deepMerge(dst, src)
         end
 end
 
+local function deepCopy(v)
+        if type(v) ~= "table" then return v end
+        local copy = {}
+        for k, val in pairs(v) do
+                copy[k] = deepCopy(val)
+        end
+        return copy
+end
+
 function LoomDesigner.SetOverrides(overrides)
         deepMerge(state.overrides, overrides)
 end
@@ -100,6 +121,78 @@ function LoomDesigner.ClearOverride(pathList)
                 if type(t) ~= "table" then return end
         end
         t[pathList[#pathList]] = nil
+end
+
+-- simple profile helpers ----------------------------------------------------
+function LoomDesigner.CreateProfile(name: string, profile)
+        state.savedProfiles[name] = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+end
+
+function LoomDesigner.DeleteProfile(name: string)
+        state.savedProfiles[name] = nil
+end
+
+function LoomDesigner.RenameProfile(oldName: string, newName: string)
+        if state.savedProfiles[oldName] then
+                state.savedProfiles[newName] = state.savedProfiles[oldName]
+                state.savedProfiles[oldName] = nil
+        end
+end
+
+-- export/import -------------------------------------------------------------
+local function rebuildLibraries()
+        state.modelLibrary = {}
+        for _, list in pairs(state.modelsByDepth) do
+                for _, ref in ipairs(list) do
+                        if not table.find(state.modelLibrary, ref) then
+                                table.insert(state.modelLibrary, ref)
+                        end
+                end
+        end
+        state.decoLibrary = {}
+        if state.overrides.decorations.enabled then
+                for _, deco in ipairs(state.overrides.decorations.types) do
+                        if deco.models then
+                                for _, ref in ipairs(deco.models) do
+                                        if not table.find(state.decoLibrary, ref) then
+                                                table.insert(state.decoLibrary, ref)
+                                        end
+                                end
+                        end
+                end
+        end
+end
+
+function LoomDesigner.ImportAuthoring()
+        local cfg = LoomConfigs[state.configId]
+        if not cfg then return end
+        state.savedProfiles = deepCopy(cfg.profiles or {})
+        state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile="", perDepth={}, spacingN={}, maxPerDepth={}})
+        local models = cfg.models or {}
+        state.modelsByDepth = deepCopy(models.byDepth or {})
+        if models.decorations then
+                state.overrides.decorations = { enabled = true, types = deepCopy(models.decorations) }
+        else
+                state.overrides.decorations = { enabled = false, types = {} }
+        end
+        rebuildLibraries()
+end
+
+function LoomDesigner.ExportAuthoring()
+        local cfg = LoomConfigs[state.configId] or {id = state.configId}
+        cfg.profiles = deepCopy(state.savedProfiles)
+        cfg.branchAssignments = deepCopy(state.branchAssignments)
+        cfg.models = cfg.models or {}
+        cfg.models.byDepth = deepCopy(state.modelsByDepth)
+        if state.overrides.decorations.enabled then
+                cfg.models.decorations = deepCopy(state.overrides.decorations.types)
+        end
+        LoomConfigs[state.configId] = cfg
+        LoomDesigner.ExportConfig(cfg)
+end
+
+function LoomDesigner.Reseed()
+        return LoomDesigner.RandomizeSeed()
 end
 
 local function ensurePreviewParent()
@@ -141,6 +234,7 @@ function LoomDesigner.RebuildPreview(_container)
         model.Parent = parent
         VisualScene.SetPreviewModel(model)
 
+        GrowthVisualizer.Release(nil, 0)
         local ok, err = pcall(function()
                 GrowthVisualizer.Render(nil, {
                         loomUid = 0,
