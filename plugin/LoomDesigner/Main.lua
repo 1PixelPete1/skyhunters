@@ -22,9 +22,11 @@ ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
 local LoomDesigner = {}
 
+local firstConfigId; for id in pairs(LoomConfigs) do firstConfigId = id break end
+
 -- current working state used by the designer
 local state = {
-        configId = "oak_branch", -- default config, replace with one from LoomConfigs
+        configId = firstConfigId,
         baseSeed = 12345,
         g = 50, -- growth percent
         overrides = {
