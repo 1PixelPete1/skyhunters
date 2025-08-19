@@ -311,9 +311,18 @@ function GrowthVisualizer.Render(container, loomState)
     -- resolve profile and clamp
     local profile = overrides.profile or (config.profileDefaults or {kind = "curved"})
     profile = GrowthProfiles.clampProfile(profile)
-    local state = v._profileState or {}
+    -- ensure per-render state starts clean so deterministic RNG streams
+    local state = {
+        seed = loomState.baseSeed or 0,
+        t = 0,
+        sCount = 0,
+        _curved = nil,
+        _sig = nil,
+        _zz = nil,
+        _ch = nil,
+        dir = nil,
+    }
     v._profileState = state
-    state.seed = loomState.baseSeed or 0
 
     -- RNG streams
     local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
