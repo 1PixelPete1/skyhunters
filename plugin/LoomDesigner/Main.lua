@@ -50,8 +50,9 @@ local function normalizeSeed(seed)
 end
 
 function LoomDesigner.Start(plugin)
-	print("LoomDesigner plugin started", plugin)
-	return state
+        print("LoomDesigner plugin started", plugin)
+        GrowthVisualizer.SetEditorMode(true)
+        return state
 end
 
 function LoomDesigner.SetConfigId(id)
@@ -90,13 +91,13 @@ function LoomDesigner.SetOverrides(overrides)
         deepMerge(state.overrides, overrides)
 end
 
-function LoomDesigner.ClearOverride(path)
+function LoomDesigner.ClearOverride(pathList)
         local t = state.overrides
-        for i = 1, #path - 1 do
-                t = t[path[i]]
+        for i = 1, #pathList - 1 do
+                t = t[pathList[i]]
                 if type(t) ~= "table" then return end
         end
-        t[path[#path]] = nil
+        t[pathList[#pathList]] = nil
 end
 
 local function ensurePreviewParent()
