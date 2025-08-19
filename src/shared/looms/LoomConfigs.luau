@@ -178,7 +178,7 @@ local configs = {
     },
 }
 
--- Utility for plugin authoring: shallow function to clone tables
+-- Utility for plugin authoring: deep copy and safe merge helpers
 local function deepCopy(v)
     if type(v) ~= "table" then return v end
     local c = {}
@@ -188,6 +188,24 @@ local function deepCopy(v)
     return c
 end
 
+local function safeMerge(dst, src)
+    if type(dst) ~= "table" or type(src) ~= "table" then return dst end
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            local t = dst[k]
+            if type(t) == "table" then
+                safeMerge(t, v)
+            else
+                dst[k] = deepCopy(v)
+            end
+        else
+            dst[k] = v
+        end
+    end
+    return dst
+end
+
 configs._deepCopy = deepCopy
+configs._safeMerge = safeMerge
 
 return configs

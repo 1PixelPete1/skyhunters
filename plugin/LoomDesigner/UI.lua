@@ -265,7 +265,6 @@ randBtn.MouseButton1Click:Connect(function()
     local newSeed = LoomDesigner.Reseed()
 seedBox.Text = tostring(newSeed)
 seedLabel.Text = "Current Seed: " .. tostring(newSeed)
-LoomDesigner.RebuildPreview(nil)
 end)
 
 checkbox(secSeed, "Seed affects segmentCount", true, function(val)
@@ -713,39 +712,518 @@ labeledTextBox(secRot, "FaceForward Bias", "", function(txt)
 end)
 
 -- === Authoring Panels ======================================================
-local newProfileBtn = Instance.new("TextButton")
-newProfileBtn.Text = "New Profile"
-newProfileBtn.Size = UDim2.new(0,180,0,26)
-newProfileBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-newProfileBtn.TextColor3 = Color3.new(1,1,1)
-newProfileBtn.Parent = secProfilesLib
-newProfileBtn.MouseButton1Click:Connect(function()
+-- Profiles list and editor --------------------------------------------------
+local profileList = Instance.new("Frame")
+profileList.BackgroundTransparency = 1
+profileList.Size = UDim2.new(1,0,0,0)
+profileList.AutomaticSize = Enum.AutomaticSize.Y
+profileList.Parent = secProfilesLib
+local profileLayout = Instance.new("UIListLayout")
+profileLayout.SortOrder = Enum.SortOrder.LayoutOrder
+profileLayout.Parent = profileList
+
+local selectedProfile: string? = nil
+
+local function renderProfileEditor() end
+local function renderProfiles() end
+local function commitAndRebuild() end
+
+local buttonsRow = Instance.new("Frame")
+buttonsRow.Size = UDim2.new(1,0,0,26)
+buttonsRow.BackgroundTransparency = 1
+buttonsRow.Parent = secProfilesLib
+
+local function makeBtn(parent, text, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,80,1,0)
+    b.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Text = text
+    b.Parent = parent
+    b.MouseButton1Click:Connect(cb)
+    return b
+end
+
+local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
+    if selectedProfile and txt ~= "" then
+        LoomDesigner.RenameProfile(selectedProfile, txt)
+        selectedProfile = txt
+        renderProfiles()
+        commitAndRebuild()
+    end
+    renameBox.Parent.Visible = false
+end)
+renameBox.Parent.Visible = false
+
+local function newProfile()
     local st = LoomDesigner.GetState()
     local i = 1
     while st.savedProfiles["profile"..i] do i += 1 end
     LoomDesigner.CreateProfile("profile"..i)
-end)
+    selectedProfile = "profile"..i
+    renderProfiles()
+    commitAndRebuild()
+end
 
-local assignLabel = Instance.new("TextLabel")
-assignLabel.Text = "Assignments UI not implemented"
-assignLabel.Size = UDim2.new(1,0,0,20)
-assignLabel.TextColor3 = Color3.fromRGB(200,200,200)
-assignLabel.BackgroundTransparency = 1
-assignLabel.Parent = secAssign
+local function duplicateProfile()
+    if not selectedProfile then return end
+    local st = LoomDesigner.GetState()
+    local base = selectedProfile .. "Copy"
+    local i = 1
+    while st.savedProfiles[base..i] do i += 1 end
+    local src = LoomConfigs._deepCopy(st.savedProfiles[selectedProfile])
+    LoomDesigner.CreateProfile(base..i, src)
+    selectedProfile = base..i
+    renderProfiles()
+    commitAndRebuild()
+end
 
-local modelsLabel = Instance.new("TextLabel")
-modelsLabel.Text = "Models UI not implemented"
-modelsLabel.Size = UDim2.new(1,0,0,20)
-modelsLabel.TextColor3 = Color3.fromRGB(200,200,200)
-modelsLabel.BackgroundTransparency = 1
-modelsLabel.Parent = secModels
+local function renameProfile()
+    if not selectedProfile then return end
+    renameBox.Text = selectedProfile
+    renameBox.Parent.Visible = true
+end
 
-local decoLabel = Instance.new("TextLabel")
-decoLabel.Text = "Decorations UI not implemented"
-decoLabel.Size = UDim2.new(1,0,0,20)
-decoLabel.TextColor3 = Color3.fromRGB(200,200,200)
-decoLabel.BackgroundTransparency = 1
-decoLabel.Parent = secDecoAuth
+local function deleteProfile()
+    if not selectedProfile then return end
+    LoomDesigner.DeleteProfile(selectedProfile)
+    selectedProfile = nil
+    renderProfiles()
+    commitAndRebuild()
+end
+
+makeBtn(buttonsRow, "New", newProfile)
+makeBtn(buttonsRow, "Duplicate", duplicateProfile)
+makeBtn(buttonsRow, "Rename", renameProfile)
+makeBtn(buttonsRow, "Delete", deleteProfile)
+
+local profileEditor = Instance.new("Frame")
+profileEditor.BackgroundTransparency = 1
+profileEditor.Size = UDim2.new(1,0,0,0)
+profileEditor.AutomaticSize = Enum.AutomaticSize.Y
+profileEditor.Parent = secProfilesLib
+
+-- render functions ---------------------------------------------------------
+function commitAndRebuild()
+    LoomDesigner.ApplyAuthoring()
+    LoomDesigner.RebuildPreview(nil)
+end
+
+function renderProfileEditor()
+    for _, c in ipairs(profileEditor:GetChildren()) do c:Destroy() end
+    if not selectedProfile then return end
+    local st = LoomDesigner.GetState()
+    local profile = st.savedProfiles[selectedProfile]
+    if not profile then return end
+
+    local kinds = {"straight","curved","zigzag","sigmoid","chaotic"}
+    dropdown(profileEditor, popupHost, "Kind", kinds, table.find(kinds, profile.kind) or 1, function(opt)
+        profile.kind = opt
+        commitAndRebuild()
+        renderProfileEditor()
+    end)
+
+    local function numBox(label, field)
+        labeledTextBox(profileEditor, label, tostring(profile[field] or ""), function(txt)
+            local n = tonumber(txt)
+            profile[field] = n
+            commitAndRebuild()
+        end)
+    end
+
+    numBox("Amplitude", "amplitudeDeg")
+    numBox("Frequency", "frequency")
+    numBox("Curvature", "curvature")
+    numBox("Roll Bias", "rollBias")
+    numBox("Child Inherit", "childInherit")
+    if profile.kind == "zigzag" then numBox("Zigzag Every", "zigzagEvery") end
+    if profile.kind == "sigmoid" then numBox("Sigmoid K", "sigmoidK"); numBox("Sigmoid Mid", "sigmoidMid") end
+    if profile.kind == "chaotic" then numBox("Chaotic R", "chaoticR") end
+
+    local modes = {"uniform","triangular","normal","biased"}
+    dropdown(profileEditor, popupHost, "SegMode", modes, table.find(modes, profile.segmentCountMode) or 1, function(opt)
+        profile.segmentCountMode = opt
+        commitAndRebuild()
+        renderProfileEditor()
+    end)
+
+    local errLabel = Instance.new("TextLabel")
+    errLabel.BackgroundTransparency = 1
+    errLabel.TextColor3 = Color3.fromRGB(255,120,120)
+    errLabel.TextXAlignment = Enum.TextXAlignment.Left
+    errLabel.Size = UDim2.new(1,0,0,20)
+    errLabel.Parent = profileEditor
+
+    local function validate()
+        errLabel.Text = ""
+        if profile.segmentCountMin and profile.segmentCountMax and profile.segmentCountMin > profile.segmentCountMax then
+            errLabel.Text = "min>max"
+        end
+        if profile.segmentCountMode == "normal" and profile.segmentCountSd and profile.segmentCountSd < 0 then
+            errLabel.Text = "sd<0"
+        end
+        if profile.segmentCountMode == "biased" and profile.segmentCountBias and profile.segmentCountBias <= 0 then
+            errLabel.Text = "bias<=0"
+        end
+    end
+
+    local function segNum(label, field)
+        labeledTextBox(profileEditor, label, tostring(profile[field] or ""), function(txt)
+            local n = tonumber(txt)
+            profile[field] = n
+            validate()
+            commitAndRebuild()
+        end)
+    end
+
+    segNum("Segment Count", "segmentCount")
+    segNum("SegCount Min", "segmentCountMin")
+    segNum("SegCount Max", "segmentCountMax")
+    if profile.segmentCountMode == "triangular" then segNum("Mode N", "segmentCountModeN") end
+    if profile.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
+    if profile.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
+    validate()
+end
+function renderProfiles()
+    for _, c in ipairs(profileList:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    local st = LoomDesigner.GetState()
+    for name, _ in pairs(st.savedProfiles) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0,180,0,24)
+        btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Text = name .. ((name==selectedProfile) and " *" or "")
+        btn.Parent = profileList
+        btn.MouseButton1Click:Connect(function()
+            selectedProfile = name
+            renderProfiles()
+            renderProfileEditor()
+        end)
+    end
+    renderProfileEditor()
+end
+
+renderProfiles()
+
+-- Assignments ---------------------------------------------------------------
+local function renderAssignments()
+    for _, c in ipairs(secAssign:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    local st = LoomDesigner.GetState()
+    local names = {}
+    for n in pairs(st.savedProfiles) do table.insert(names, n) end
+    table.sort(names)
+    if #names == 0 then table.insert(names, "") end
+    dropdown(secAssign, popupHost, "Trunk Profile", names, 1, function(opt)
+        st.branchAssignments.trunkProfile = opt
+        LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+    end)
+
+    for depth = 0, 10 do
+        local rules = st.branchAssignments.perDepth[depth]
+        if rules and #rules > 0 then
+            local depthFrame = Instance.new("Frame")
+            depthFrame.BackgroundTransparency = 1
+            depthFrame.Size = UDim2.new(1,0,0,0)
+            depthFrame.AutomaticSize = Enum.AutomaticSize.Y
+            depthFrame.Parent = secAssign
+            local header = Instance.new("TextLabel")
+            header.Text = "Depth "..depth
+            header.BackgroundTransparency = 1
+            header.TextColor3 = Color3.fromRGB(200,200,200)
+            header.Size = UDim2.new(1,0,0,20)
+            header.TextXAlignment = Enum.TextXAlignment.Left
+            header.Parent = depthFrame
+
+            for i, rule in ipairs(rules) do
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1,0,0,26)
+                row.BackgroundTransparency = 1
+                row.Parent = depthFrame
+                dropdown(row, popupHost, "", names, table.find(names, rule.name) or 1, function(opt)
+                    rule.name = opt
+                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                end)
+                labeledTextBox(row, "Chance", tostring(rule.chance or 1), function(txt)
+                    rule.chance = tonumber(txt) or 1
+                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                end)
+                local del = Instance.new("TextButton")
+                del.Text = "X"
+                del.Size = UDim2.new(0,24,0,24)
+                del.Position = UDim2.new(1,-24,0,0)
+                del.BackgroundColor3 = Color3.fromRGB(80,40,40)
+                del.TextColor3 = Color3.new(1,1,1)
+                del.Parent = row
+                del.MouseButton1Click:Connect(function()
+                    table.remove(rules, i)
+                    renderAssignments()
+                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                end)
+            end
+
+            makeBtn(depthFrame, "Add Rule", function()
+                st.branchAssignments.perDepth[depth] = st.branchAssignments.perDepth[depth] or {}
+                table.insert(st.branchAssignments.perDepth[depth], {name = names[1], chance = 1})
+                renderAssignments(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end).Size = UDim2.new(0,100,0,24)
+
+            labeledTextBox(depthFrame, "spacingN", tostring(st.branchAssignments.spacingN[depth] or ""), function(txt)
+                st.branchAssignments.spacingN[depth] = tonumber(txt)
+                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+            labeledTextBox(depthFrame, "maxPerDepth", tostring(st.branchAssignments.maxPerDepth[depth] or ""), function(txt)
+                st.branchAssignments.maxPerDepth[depth] = tonumber(txt)
+                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+        end
+    end
+
+    makeBtn(secAssign, "Add Depth", function()
+        local d = 0
+        for k in pairs(st.branchAssignments.perDepth) do if k>=d then d = k+1 end end
+        st.branchAssignments.perDepth[d] = { {name = names[1], chance = 1} }
+        renderAssignments(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+    end).Size = UDim2.new(0,100,0,24)
+end
+
+renderAssignments()
+
+-- Models -------------------------------------------------------------------
+local function renderModels()
+    for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    local st = LoomDesigner.GetState()
+
+    local libLabel = Instance.new("TextLabel")
+    libLabel.Text = "Library"
+    libLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    libLabel.BackgroundTransparency = 1
+    libLabel.Size = UDim2.new(1,0,0,20)
+    libLabel.TextXAlignment = Enum.TextXAlignment.Left
+    libLabel.Parent = secModels
+
+    labeledTextBox(secModels, "Add by Name", "", function(txt)
+        if txt ~= "" then table.insert(st.modelLibrary, txt); renderModels() end
+    end)
+    labeledTextBox(secModels, "Add AssetId", "", function(txt)
+        local n = tonumber(txt)
+        if n then table.insert(st.modelLibrary, n); renderModels() end
+    end)
+
+    for i, ref in ipairs(st.modelLibrary) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1,0,0,24)
+        row.BackgroundTransparency = 1
+        row.Parent = secModels
+        local lab = Instance.new("TextLabel")
+        lab.Text = tostring(ref)
+        lab.BackgroundTransparency = 1
+        lab.TextColor3 = Color3.fromRGB(200,200,200)
+        lab.Size = UDim2.new(1,-30,1,0)
+        lab.TextXAlignment = Enum.TextXAlignment.Left
+        lab.Parent = row
+        local del = Instance.new("TextButton")
+        del.Text = "X"
+        del.Size = UDim2.new(0,24,1,0)
+        del.Position = UDim2.new(1,-24,0,0)
+        del.BackgroundColor3 = Color3.fromRGB(80,40,40)
+        del.TextColor3 = Color3.new(1,1,1)
+        del.Parent = row
+        del.MouseButton1Click:Connect(function()
+            table.remove(st.modelLibrary, i)
+            renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+    end
+
+    local mapLabel = Instance.new("TextLabel")
+    mapLabel.Text = "Mapping"
+    mapLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    mapLabel.BackgroundTransparency = 1
+    mapLabel.Size = UDim2.new(1,0,0,20)
+    mapLabel.TextXAlignment = Enum.TextXAlignment.Left
+    mapLabel.Parent = secModels
+
+    local depths = {}
+    for k in pairs(st.modelsByDepth) do table.insert(depths, k) end
+    table.insert(depths, "terminal")
+    table.sort(depths, function(a,b) return tostring(a)<tostring(b) end)
+    for _, depth in ipairs(depths) do
+        local list = st.modelsByDepth[depth] or {}
+        local df = Instance.new("Frame")
+        df.BackgroundTransparency = 1
+        df.Size = UDim2.new(1,0,0,0)
+        df.AutomaticSize = Enum.AutomaticSize.Y
+        df.Parent = secModels
+        local header = Instance.new("TextLabel")
+        header.Text = depth=="terminal" and "Terminal" or ("Depth "..depth)
+        header.BackgroundTransparency = 1
+        header.TextColor3 = Color3.fromRGB(200,200,200)
+        header.Size = UDim2.new(1,0,0,20)
+        header.TextXAlignment = Enum.TextXAlignment.Left
+        header.Parent = df
+        for i, ref in ipairs(list) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,26)
+            row.BackgroundTransparency = 1
+            row.Parent = df
+            dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
+                list[i] = opt
+                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+            local up = makeBtn(row, "^", function()
+                if i>1 then list[i],list[i-1]=list[i-1],list[i]; renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil) end
+            end)
+            up.Size = UDim2.new(0,24,0,24); up.Position = UDim2.new(1,-48,0,0)
+            local down = makeBtn(row, "v", function()
+                if i<#list then list[i],list[i+1]=list[i+1],list[i]; renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil) end
+            end)
+            down.Size = UDim2.new(0,24,0,24); down.Position = UDim2.new(1,-24,0,0)
+            local del = Instance.new("TextButton")
+            del.Text = "X"
+            del.Size = UDim2.new(0,24,0,24)
+            del.Position = UDim2.new(1,-72,0,0)
+            del.BackgroundColor3 = Color3.fromRGB(80,40,40)
+            del.TextColor3 = Color3.new(1,1,1)
+            del.Parent = row
+            del.MouseButton1Click:Connect(function()
+                table.remove(list, i)
+                st.modelsByDepth[depth] = list
+                renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+        end
+        makeBtn(df, "Add", function()
+            st.modelsByDepth[depth] = list
+            table.insert(list, st.modelLibrary[1])
+            renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end).Size = UDim2.new(0,60,0,24)
+    end
+end
+
+renderModels()
+
+-- Decorations ---------------------------------------------------------------
+local function renderDecorations()
+    for _, c in ipairs(secDecoAuth:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    local st = LoomDesigner.GetState()
+    checkbox(secDecoAuth, "Enable", st.overrides.decorations.enabled, function(val)
+        st.overrides.decorations.enabled = val
+        LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+    end)
+
+    local function decoEditor(deco, idx)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1,0,0,0)
+        frame.BackgroundTransparency = 1
+        frame.AutomaticSize = Enum.AutomaticSize.Y
+        frame.Parent = secDecoAuth
+
+        local header = Instance.new("TextLabel")
+        header.Text = "Decoration "..idx
+        header.BackgroundTransparency = 1
+        header.TextColor3 = Color3.fromRGB(200,200,200)
+        header.Size = UDim2.new(1,0,0,20)
+        header.TextXAlignment = Enum.TextXAlignment.Left
+        header.Parent = frame
+
+        local modelsFrame = Instance.new("Frame")
+        modelsFrame.Size = UDim2.new(1,0,0,0)
+        modelsFrame.AutomaticSize = Enum.AutomaticSize.Y
+        modelsFrame.BackgroundTransparency = 1
+        modelsFrame.Parent = frame
+        for i, ref in ipairs(deco.models or {}) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,26)
+            row.BackgroundTransparency = 1
+            row.Parent = modelsFrame
+            dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
+                deco.models[i] = opt
+                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+            local del = Instance.new("TextButton")
+            del.Text = "X"
+            del.Size = UDim2.new(0,24,0,24)
+            del.Position = UDim2.new(1,-24,0,0)
+            del.BackgroundColor3 = Color3.fromRGB(80,40,40)
+            del.TextColor3 = Color3.new(1,1,1)
+            del.Parent = row
+            del.MouseButton1Click:Connect(function()
+                table.remove(deco.models, i)
+                renderDecorations()
+                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end)
+        end
+        makeBtn(modelsFrame, "Add Model", function()
+            deco.models = deco.models or {}
+            table.insert(deco.models, st.modelLibrary[1])
+            renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end).Size = UDim2.new(0,100,0,24)
+
+        dropdown(frame, popupHost, "Placement", {"tip","junction","along","radial","spiral"}, 1, function(opt)
+            deco.placement = opt
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        dropdown(frame, popupHost, "Rotation", {"upright","inherit"}, 1, function(opt)
+            deco.rotation = opt
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "Density", tostring(deco.density or 1), function(txt)
+            deco.density = tonumber(txt) or 1
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        checkbox(frame, "Per Length", deco.perLength or false, function(val)
+            deco.perLength = val
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "minDepth", tostring(deco.minDepth or 0), function(txt)
+            deco.minDepth = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "maxDepth", tostring(deco.maxDepth or 0), function(txt)
+            deco.maxDepth = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "maxPerChain", tostring(deco.maxPerChain or ""), function(txt)
+            deco.maxPerChain = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "yaw", tostring(deco.yaw or 0), function(txt)
+            deco.yaw = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "pitch", tostring(deco.pitch or 0), function(txt)
+            deco.pitch = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "roll", tostring(deco.roll or 0), function(txt)
+            deco.roll = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "scaleMin", tostring(deco.scaleMin or 1), function(txt)
+            deco.scaleMin = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        labeledTextBox(frame, "scaleMax", tostring(deco.scaleMax or 1), function(txt)
+            deco.scaleMax = tonumber(txt)
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+
+        local delBtn = makeBtn(frame, "Delete", function()
+            table.remove(st.overrides.decorations.types, idx)
+            renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end)
+        delBtn.Size = UDim2.new(0,80,0,24)
+    end
+
+    for i, deco in ipairs(st.overrides.decorations.types) do
+        decoEditor(deco, i)
+    end
+
+    makeBtn(secDecoAuth, "Add Decoration", function()
+        table.insert(st.overrides.decorations.types, {models = {st.modelLibrary[1] or nil}, placement="tip", rotation="upright", density=1, minDepth=0, maxDepth=0, scaleMin=1, scaleMax=1})
+        renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+    end).Size = UDim2.new(0,120,0,24)
+end
+
+renderDecorations()
 
 -- Export / Import controls --------------------------------------------------
 local expBtn = Instance.new("TextButton")
