@@ -76,15 +76,6 @@ local function clamp(v, mn, mx)
     return v
 end
 
-local styleClampDefaults = {
-    straight = {yaw = 4,  pitch = 3},
-    curved   = {yaw = 22, pitch = 10},
-    zigzag   = {yaw = 28, pitch = 6},
-    noise    = {yaw = 16, pitch = 16},
-    chaotic  = {yaw = 34, pitch = 18},
-    sigmoid  = {yaw = 18, pitch = 8},
-}
-
 local function evalScaleProfile(i, N, prof)
     prof = prof or {mode = "constant", value = 1.0}
     local t = (i - 1) / math.max(1, N - 1)
@@ -228,145 +219,85 @@ function GrowthVisualizer.Render(container, loomState)
 
     local overrides = loomState.overrides or {}
     local cfg = config.growthDefaults or {}
-    local path = overrides.path or {}
-    local style = path.style or cfg.style or "curved"
-    local ampDeg = tonumber(path.amplitudeDeg) or cfg.amplitudeDeg or 10
-    local freq = tonumber(path.frequency) or cfg.frequency or 0.35
-    local curvature = tonumber(path.curvature) or cfg.curvature or 0.35
-    local zigzagEvery = tonumber(path.zigzagEvery) or cfg.zigzagEvery or 1
-    local sigmoidK = tonumber(path.sigmoidK) or cfg.sigmoidK or 6
-    local sigmoidMid = tonumber(path.sigmoidMid) or cfg.sigmoidMid or 0.5
-    local chaoticR = tonumber(path.chaoticR) or cfg.chaoticR or 3.9
-    local microJitter = tonumber(path.microJitterDeg) or cfg.microJitterDeg or 2
-    local seedAffects = overrides.seedAffects or cfg.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true, twist=true}
-    local enableMicroJitter = (overrides.enableMicroJitter ~= false)
-    local enableTwist = (overrides.enableTwist ~= false)
-    local enableScaleJitter = (overrides.enableScaleJitter ~= false)
 
-    local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
+    -- resolve profile and clamp
+    local profile = overrides.profile or config.profileDefaults or {kind = "curved"}
+    profile = GrowthProfiles.clampProfile(profile)
+    local state = v._profileState or {}
+    v._profileState = state
 
+    -- RNG streams
+    local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
+    local rngProfile = SeedUtil.rng(loomState.baseSeed or 0, "profile")
+
+    -- segment count
     local uiMin = tonumber(overrides.segmentCountMin)
     local uiMax = tonumber(overrides.segmentCountMax)
-    local cfgMin = config.growthDefaults and config.growthDefaults.segmentCountMin
-    local cfgMax = config.growthDefaults and config.growthDefaults.segmentCountMax
-    local cfgDefault = config.growthDefaults.segmentCount or 12
-
-    local mn = uiMin or cfgMin or cfgDefault
-    local mx = uiMax or cfgMax or (cfgDefault + 8)
+    local mn = uiMin or cfg.segmentCountMin or (cfg.segmentCount or 12)
+    local mx = uiMax or cfg.segmentCountMax or ((cfg.segmentCount or 12) + 8)
     if mx < mn then mn, mx = mx, mn end
-
     local segCount = tonumber(overrides.segmentCount)
-    if segCount then
-        segCount = math.max(1, math.floor(segCount))
-    else
-        if seedAffects.segmentCount then
-            segCount = rngMacro:NextInteger(mn, mx)
-        else
-            segCount = cfgDefault
-        end
+    if not segCount then
+        local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
+        segCount = rngMacro:NextInteger(mn, mx)
     end
-    if seedAffects.curvature and path.curvature == nil then
-        curvature = curvature * rngMacro:NextNumber(0.8, 1.2)
-    end
-    if seedAffects.frequency and path.frequency == nil then
-        freq = freq * rngMacro:NextNumber(0.7, 1.3)
-    end
-    if seedAffects.jitter and path.microJitterDeg == nil then
-        microJitter = microJitter * rngMacro:NextNumber(0.7, 1.3)
-    end
+    segCount = math.max(1, math.floor(segCount))
 
-    local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
-    local nx, ny, nz = SeedUtil.noiseOffsets(loomState.baseSeed or 0, "path")
+    -- TRIM cached segments if shrinking
+    while #segments > segCount do segments[#segments] = nil end
 
+    -- continuity and clamps
     local rotRules = overrides.rotationRules or {}
-    local matOverrides = overrides.materialization or cfg.materialization or {mode = "Model"}
-    local jitter = overrides.scaleJitter or cfg.segmentScaleJitter or { length = 0, thickness = 0 }
-    local tie = cfg.relativeScaleTie or 0
-
-    local function styleAngles(styleName, i, N)
-        local t = (i - 1) / math.max(1, N - 1)
-        local baseYaw, basePitch = 0, 0
-
-        if styleName == "straight" then
-            -- minimal base
-        elseif styleName == "curved" then
-            local sweep = math.sin((t * math.pi) * freq) * ampDeg
-            local env = (1 - (2*t - 1)^2) ^ curvature
-            baseYaw = sweep * env
-            basePitch = (ampDeg * 0.35) * env
-        elseif styleName == "zigzag" then
-            local group = math.max(1, zigzagEvery or 1)
-            local sign  = ((math.floor((i - 1) / group) % 2) == 0) and 1 or -1
-            baseYaw = sign * ampDeg
-            basePitch = 0
-        elseif styleName == "noise" then
-            local n1 = math.noise(nx + t * (10 * freq), ny, nz)
-            local n2 = math.noise(nx, ny + t * (10 * freq), nz)
-            baseYaw = n1 * ampDeg
-            basePitch = n2 * ampDeg * 0.6
-        elseif styleName == "sigmoid" then
-            local s = 1 / (1 + math.exp(-sigmoidK * (t - sigmoidMid)))
-            baseYaw = (s - 0.5) * 2 * ampDeg
-            basePitch = (0.5 - math.abs(s - 0.5)) * 2 * (ampDeg * 0.4)
-        elseif styleName == "chaotic" then
-            GrowthVisualizer._chaos = GrowthVisualizer._chaos or {}
-            if not GrowthVisualizer._chaos.start then GrowthVisualizer._chaos.start = rngMacro:NextNumber(0.2, 0.8) end
-            local x = GrowthVisualizer._chaos.start
-            for _=1,i do x = chaoticR * x * (1 - x) end
-            baseYaw = (x - 0.5) * 2 * ampDeg
-            basePitch = (0.5 - math.abs(x - 0.5)) * 2 * (ampDeg * 0.4)
-        else
-            local sweep = math.sin((t * math.pi) * freq) * ampDeg
-            local env = (1 - (2*t - 1)^2) ^ curvature
-            baseYaw = sweep * env
-            basePitch = (ampDeg * 0.35) * env
-        end
-
-        local jy = enableMicroJitter and rngMicro:NextNumber(-microJitter, microJitter) or 0
-        local jp = enableMicroJitter and rngMicro:NextNumber(-microJitter, microJitter) or 0
-        local dy = baseYaw + jy
-        local dp = basePitch + jp
-
-        local tailDamp = 1.0
-        if styleName == "straight" or styleName == "curved" then
-            local u = math.max(0, (i / math.max(1, N)) - 0.7) / 0.3
-            tailDamp = 1.0 - math.min(1, u * u)
-        end
-        dy = dy * tailDamp
-        dp = dp * tailDamp
-
-        return dy, dp
-    end
-
-    local yaw, pitch, roll = 0, 0, 0
-    local defaultCont = (style == "zigzag" or style == "noise" or style == "chaotic") and "absolute" or "accumulate"
+    local defaultCont =
+        (profile.kind == "zigzag" or profile.kind == "random" or profile.kind == "noise" or profile.kind == "chaotic") and "absolute"
+        or (profile.continuity or "accumulate")
     local cont = rotRules.continuity or defaultCont
     local yClamp = rotRules.yawClampDeg
     local pClamp = rotRules.pitchClampDeg
     if not yClamp or not pClamp then
-        local d = styleClampDefaults[style] or {}
-        yClamp = yClamp or d.yaw
-        pClamp = pClamp or d.pitch
+        local d = {
+            straight={y=4,p=3}, curved={y=22,p=10}, zigzag={y=28,p=6},
+            noise={y=16,p=16}, random={y=16,p=16}, chaotic={y=34,p=18}, sigmoid={y=18,p=8},
+        }[profile.kind or "curved"] or {}
+        yClamp = yClamp or d.y; pClamp = pClamp or d.p
     end
-    while #segments > segCount do
-        segments[#segments] = nil
-    end
+
+    -- heading jitter
+    local enableMicroJitter = overrides.enableMicroJitter == true
+    local microJitter = tonumber(overrides.microJitterDeg) or 0
+
+    -- twist controls
+    local twistStrength = tonumber(overrides.twistStrengthDegPerSeg) or 0
+    local twistRngRange = tonumber(overrides.twistRngRangeDeg) or 0
+    local twistRngOn = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
+
+    -- size jitter config
+    local jitter = cfg.segmentScaleJitter or {length = 0, thickness = 0}
+
+    local yaw, pitch, roll = 0, 0, 0
     for i = 1, segCount do
         local seg = segments[i]
         if not seg then
-            seg = { yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0 }
+            seg = {yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0}
             segments[i] = seg
         end
-        local dy, dp = styleAngles(style, i, segCount)
-        local dr = 0
-        if enableTwist then
-            dr = (tonumber(rotRules.extraRollPerSegDeg) or 0)
-            local rr = tonumber(rotRules.randomRollRangeDeg) or 0
-            local twistRandomOn = (not overrides.seedAffects) or (overrides.seedAffects.twist ~= false)
-            if twistRandomOn and rr > 0 then
-                dr += rngMicro:NextNumber(-rr, rr)
-            end
+
+        -- per-segment deltas (degrees)
+        local delta = GrowthProfiles.rotDelta(profile, rngProfile, state)
+        local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
+
+        if enableMicroJitter then
+            local j = microJitter
+            local jy = rngMicro:NextNumber(-j, j)
+            local jp = rngMicro:NextNumber(-j, j)
+            dy += jy; dp += jp
         end
+
+        if twistStrength ~= 0 or (twistRngOn and twistRngRange > 0) then
+            local rnd = twistRngOn and rngMicro:NextNumber(-twistRngRange, twistRngRange) or 0
+            dr += twistStrength + rnd
+        end
+
         if cont == "accumulate" then
             yaw += dy; pitch += dp; roll += dr
         else
@@ -374,27 +305,32 @@ function GrowthVisualizer.Render(container, loomState)
         end
         if yClamp then yaw = clamp(yaw, -yClamp, yClamp) end
         if pClamp then pitch = clamp(pitch, -pClamp, pClamp) end
-        if rotRules.faceForwardBias then
-            yaw = yaw * (1 - rotRules.faceForwardBias)
-            pitch = pitch * (1 - rotRules.faceForwardBias)
-        end
 
         seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
 
         local prof = overrides.scaleProfile
         local baseS = evalScaleProfile(i, segCount, prof)
-        local applyJitter = enableScaleJitter and ((prof and prof.enableJitter) ~= false)
-        local lenJ = applyJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
-        local thJ = applyJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
-        seg.lengthScale = baseS * (1 + lenJ)
-        seg.thicknessScale = baseS * (1 + lenJ * tie + thJ * (1 - tie))
+        local enableScaleJitter = prof and prof.enableJitter == true
+        local lenJ = enableScaleJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
+        local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
+        seg.lengthScale    = baseS * (1 + lenJ)
+        seg.thicknessScale = baseS * (1 + thJ)
     end
 
-    local fills = computeSegmentFill(segCount, loomState.g or 0)
+    -- fills
+    local designFull = (GrowthVisualizer._editorMode == true) or (overrides.designFull == true)
+    local fills
+    if designFull then
+        fills = {}
+        for i=1, segCount do fills[i] = 1 end
+    else
+        fills = computeSegmentFill(segCount, loomState.g or 0)
+    end
     for i = 1, segCount do
         segments[i].fill = fills[i]
     end
 
+    local matOverrides = overrides.materialization or cfg.materialization or {mode = "Model"}
     local scene = loomState.scene
     if scene and scene.Clear then scene.Clear() end
 
@@ -462,15 +398,14 @@ function GrowthVisualizer.Render(container, loomState)
     end
 
     GrowthVisualizer._debug = {
-        style = style,
+        kind = profile.kind,
         segCount = segCount,
-        continuity = cont,
+        cont = cont,
         yawClamp = yClamp,
         pitchClamp = pClamp,
-        enableMicroJitter = enableMicroJitter,
-        enableTwist = enableTwist,
-        enableScaleJitter = enableScaleJitter,
-        scaleProfile = overrides.scaleProfile,
+        twistStrength = twistStrength,
+        twistRngRange = twistRngRange,
+        sizeProfile = overrides.scaleProfile,
     }
 end
 

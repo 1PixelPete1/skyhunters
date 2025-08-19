@@ -292,6 +292,11 @@ LoomDesigner.RebuildPreview(nil)
 end
 end)
 
+checkbox(secGrowth, "Render Full", true, function(val)
+    LoomDesigner.SetOverrides({designFull = val})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
 labeledTextBox(secSeg, "Segment Count Override", "", function(txt)
 local n = tonumber(txt)
 local o = {}
@@ -322,7 +327,8 @@ local function setPath(field, value)
 end
 
 dropdown(secPath, popupHost, "Style", {"straight","curved","zigzag","noise","sigmoid","chaotic"}, 2, function(opt)
-    setPath("style", opt)
+    LoomDesigner.SetOverrides({profile = {kind = opt}})
+    LoomDesigner.RebuildPreview(nil)
 end)
 
 labeledTextBox(secPath, "Amplitude Deg", "10", function(txt)
@@ -360,15 +366,6 @@ local n = tonumber(txt)
 if n then setPath("chaoticR", n) end
 end)
 
-labeledTextBox(secPath, "Micro Jitter Deg", "2", function(txt)
-    local n = tonumber(txt)
-    if n then setPath("microJitterDeg", n) end
-end)
-
-checkbox(secPath, "Enable Heading Jitter", true, function(val)
-    LoomDesigner.SetOverrides({enableMicroJitter = val})
-    LoomDesigner.RebuildPreview(nil)
-end)
 
 -- === Segment Geometry ===
 dropdown(secGeo, popupHost, "Mode", {"Model", "Part"}, 1, function(opt)
@@ -442,7 +439,7 @@ end
 end)
 
 -- === Size Profile ===
-local currentProfile = {mode = "constant", value = 1, enableJitter = true}
+local currentProfile = {mode = "constant", value = 1, enableJitter = false}
 local valueBox, startBox, finishBox, baseBox, ampBox, powerBox
 
 local function commitProfile()
@@ -461,11 +458,6 @@ local function updateProfileVis()
     if ampBox then ampBox.Parent.Visible = bell end
     if powerBox then powerBox.Parent.Visible = bell end
 end
-
-checkbox(secScale, "Enable Size Jitter", true, function(val)
-    LoomDesigner.SetOverrides({enableScaleJitter = val})
-    LoomDesigner.RebuildPreview(nil)
-end)
 
 dropdown(secScale, popupHost, "Mode", {"constant","linear_down","linear_up","bell","inverse_bell"}, 1, function(opt)
     currentProfile.mode = opt
@@ -503,7 +495,7 @@ powerBox = labeledTextBox(secScale, "Power", "2", function(txt)
     if n then currentProfile.power = n; commitProfile() end
 end)
 
-checkbox(secScale, "Profile Jitter", true, function(val)
+checkbox(secScale, "Enable Size Jitter", false, function(val)
     currentProfile.enableJitter = val
     commitProfile()
 end)
@@ -610,26 +602,32 @@ LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = n}})
 LoomDesigner.RebuildPreview(nil)
 end)
 
-checkbox(secRot, "Enable Twist", true, function(val)
-    LoomDesigner.SetOverrides({enableTwist = val})
-    LoomDesigner.RebuildPreview(nil)
-end)
-
 labeledTextBox(secRot, "Pitch Clamp Deg", "", function(txt)
 local n = tonumber(txt)
 LoomDesigner.SetOverrides({rotationRules = {pitchClampDeg = n}})
 LoomDesigner.RebuildPreview(nil)
 end)
 
-labeledTextBox(secRot, "Extra Roll/Seg", "", function(txt)
+labeledTextBox(secRot, "Twist Strength Deg/Seg", "", function(txt)
 local n = tonumber(txt)
-LoomDesigner.SetOverrides({rotationRules = {extraRollPerSegDeg = n}})
+LoomDesigner.SetOverrides({twistStrengthDegPerSeg = n})
 LoomDesigner.RebuildPreview(nil)
 end)
 
-labeledTextBox(secRot, "Random Roll Range", "", function(txt)
+labeledTextBox(secRot, "Twist RNG \194\177 (deg)", "", function(txt)
 local n = tonumber(txt)
-LoomDesigner.SetOverrides({rotationRules = {randomRollRangeDeg = n}})
+LoomDesigner.SetOverrides({twistRngRangeDeg = n})
+LoomDesigner.RebuildPreview(nil)
+end)
+
+checkbox(secRot, "Enable Heading Jitter", false, function(val)
+    LoomDesigner.SetOverrides({enableMicroJitter = val})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
+labeledTextBox(secRot, "Heading Jitter \194\177 (deg)", "", function(txt)
+local n = tonumber(txt)
+LoomDesigner.SetOverrides({microJitterDeg = n})
 LoomDesigner.RebuildPreview(nil)
 end)
 
