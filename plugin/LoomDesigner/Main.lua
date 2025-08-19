@@ -75,6 +75,8 @@ local state = {
 
         -- Authoring state (Stage D)
         savedProfiles = {},
+        profileDrafts = {},
+        activeProfileName = nil,
         branchAssignments = { trunkProfile = "", perDepth = {}, spacingN = {}, maxPerDepth = {} },
         modelLibrary = {},
         modelsByDepth = {},
@@ -148,6 +150,38 @@ local function deepCopy(v)
         return copy
 end
 
+local _commitTimer: thread? = nil
+
+local function ensureTrunk(st)
+        if not st.branchAssignments then
+                st.branchAssignments = { trunkProfile = "trunk", perDepth = {}, spacingN = {}, maxPerDepth = {} }
+        end
+        local names = st.savedProfiles or {}
+        local first
+        for n in pairs(names) do first = first or n end
+        if (not st.branchAssignments.trunkProfile) or st.branchAssignments.trunkProfile == "" then
+                st.branchAssignments.trunkProfile = first or "trunk"
+        elseif first and not names[st.branchAssignments.trunkProfile] then
+                st.branchAssignments.trunkProfile = first
+        end
+end
+
+function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
+        local st = LoomDesigner.GetState()
+        st.savedProfiles = st.savedProfiles or {}
+        if draftName and draftName ~= "" and draftTable then
+                st.savedProfiles[draftName] = LoomConfigUtil.deepCopy(draftTable)
+        end
+        ensureTrunk(st)
+
+        if _commitTimer then task.cancel(_commitTimer) end
+        _commitTimer = task.delay(0.1, function()
+                LoomDesigner.ApplyAuthoring()
+                LoomDesigner.RebuildPreview(nil)
+                _commitTimer = nil
+        end)
+end
+
 function LoomDesigner.SetOverrides(overrides)
         deepMerge(state.overrides, overrides)
 end
@@ -168,12 +202,26 @@ end
 
 function LoomDesigner.DeleteProfile(name: string)
         state.savedProfiles[name] = nil
+        if state.profileDrafts then state.profileDrafts[name] = nil end
+        if state.activeProfileName == name then state.activeProfileName = nil end
+        ensureTrunk(state)
 end
 
 function LoomDesigner.RenameProfile(oldName: string, newName: string)
         if state.savedProfiles[oldName] then
                 state.savedProfiles[newName] = state.savedProfiles[oldName]
                 state.savedProfiles[oldName] = nil
+                if state.branchAssignments.trunkProfile == oldName then
+                        state.branchAssignments.trunkProfile = newName
+                end
+                if state.profileDrafts and state.profileDrafts[oldName] then
+                        state.profileDrafts[newName] = state.profileDrafts[oldName]
+                        state.profileDrafts[oldName] = nil
+                end
+                if state.activeProfileName == oldName then
+                        state.activeProfileName = newName
+                end
+                LoomDesigner.CommitProfileEdit(newName, state.profileDrafts and state.profileDrafts[newName] or state.savedProfiles[newName])
         end
 end
 
@@ -218,14 +266,15 @@ local function applyAuthoring()
         end
 
         local authored = {
-                profiles = LoomConfigUtil.deepCopy(state.savedProfiles),
-                branchAssignments = LoomConfigUtil.deepCopy(state.branchAssignments),
+                profiles = state.savedProfiles,
+                branchAssignments = state.branchAssignments,
                 models = {
-                        byDepth = LoomConfigUtil.deepCopy(state.modelsByDepth),
+                        byDepth = state.modelsByDepth,
                         decorations = (state.overrides and state.overrides.decorations and state.overrides.decorations.enabled)
-                                and LoomConfigUtil.deepCopy(state.overrides.decorations.types)
+                                and state.overrides.decorations.types
                                 or (base.models and LoomConfigUtil.deepCopy(base.models.decorations)) or nil,
                 },
+                overrides = state.overrides,
         }
 
         local merged = LoomConfigUtil.mergeConfig(base, authored)

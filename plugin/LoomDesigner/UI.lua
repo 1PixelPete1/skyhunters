@@ -110,14 +110,14 @@ btn.Parent = row
 local open = false
 local popup: Frame? = nil
 
-local function closePopup()
-open = false
-if popup then popup:Destroy(); popup = nil end
-end
+    local function closePopup()
+    open = false
+    if popup then popup:Destroy(); popup = nil end
+    end
 
-btn.MouseButton1Click:Connect(function()
-if open then closePopup(); return end
-open = true
+    btn.MouseButton1Click:Connect(function()
+        if open then closePopup(); return end
+        open = true
 
 popup = Instance.new("Frame")
 popup.BackgroundColor3 = Color3.fromRGB(36,36,36)
@@ -167,6 +167,42 @@ end
 end
 end
 end)
+end
+
+local function bindNumberField(parent: Instance, label: string, get: ()->number?, setDraft: (number)->(), commit: ()->())
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1,0,0,24)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local lab = Instance.new("TextLabel")
+    lab.Text = label
+    lab.BackgroundTransparency = 1
+    lab.TextColor3 = Color3.fromRGB(200,200,200)
+    lab.Size = UDim2.new(0,120,1,0)
+    lab.TextXAlignment = Enum.TextXAlignment.Left
+    lab.Parent = row
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1,-130,1,0)
+    box.Position = UDim2.new(0,130,0,0)
+    box.Text = tostring(get() or "")
+    box.Parent = row
+
+    local tkn
+    local function push()
+        local v = tonumber(box.Text)
+        if v ~= nil then setDraft(v); commit() end
+    end
+
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        if tkn then task.cancel(tkn) end
+        tkn = task.delay(0.12, push)
+    end)
+    box.FocusLost:Connect(function(_)
+        if tkn then task.cancel(tkn); tkn = nil end
+        push()
+    end)
 end
 
 function UI.Build(widget: PluginGui, plugin: Plugin, where)
@@ -759,7 +795,15 @@ end
 
 local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
     if selectedProfile and txt ~= "" then
+        local st = LoomDesigner.GetState()
         LoomDesigner.RenameProfile(selectedProfile, txt)
+        if st.profileDrafts[selectedProfile] then
+            st.profileDrafts[txt] = st.profileDrafts[selectedProfile]
+            st.profileDrafts[selectedProfile] = nil
+        end
+        if st.activeProfileName == selectedProfile then
+            st.activeProfileName = txt
+        end
         selectedProfile = txt
         renderProfiles()
         commitAndRebuild()
@@ -772,8 +816,11 @@ local function newProfile()
     local st = LoomDesigner.GetState()
     local i = 1
     while st.savedProfiles["profile"..i] do i += 1 end
-    LoomDesigner.CreateProfile("profile"..i)
-    selectedProfile = "profile"..i
+    local name = "profile"..i
+    LoomDesigner.CreateProfile(name)
+    st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
+    st.activeProfileName = name
+    selectedProfile = name
     renderProfiles()
     commitAndRebuild()
 end
@@ -785,8 +832,11 @@ local function duplicateProfile()
     local i = 1
     while st.savedProfiles[base..i] do i += 1 end
     local src = LoomConfigUtil.deepCopy(st.savedProfiles[selectedProfile])
-    LoomDesigner.CreateProfile(base..i, src)
-    selectedProfile = base..i
+    local name = base..i
+    LoomDesigner.CreateProfile(name, LoomConfigUtil.deepCopy(src))
+    st.profileDrafts[name] = LoomConfigUtil.deepCopy(src)
+    st.activeProfileName = name
+    selectedProfile = name
     renderProfiles()
     commitAndRebuild()
 end
@@ -799,7 +849,12 @@ end
 
 local function deleteProfile()
     if not selectedProfile then return end
+    local st = LoomDesigner.GetState()
     LoomDesigner.DeleteProfile(selectedProfile)
+    st.profileDrafts[selectedProfile] = nil
+    if st.activeProfileName == selectedProfile then
+        st.activeProfileName = nil
+    end
     selectedProfile = nil
     renderProfiles()
     commitAndRebuild()
@@ -818,30 +873,40 @@ profileEditor.Parent = secProfilesLib
 
 -- render functions ---------------------------------------------------------
 function commitAndRebuild()
-    LoomDesigner.ApplyAuthoring()
-    LoomDesigner.RebuildPreview(nil)
+    local st = LoomDesigner.GetState()
+    local active = st.activeProfileName
+    local draft = active and st.profileDrafts and st.profileDrafts[active]
+    LoomDesigner.CommitProfileEdit(active, draft)
 end
 
 function renderProfileEditor()
     for _, c in ipairs(profileEditor:GetChildren()) do c:Destroy() end
     if not selectedProfile then return end
     local st = LoomDesigner.GetState()
-    local profile = st.savedProfiles[selectedProfile]
-    if not profile then return end
+    st.activeProfileName = selectedProfile
+    st.profileDrafts = st.profileDrafts or {}
+    local draft = st.profileDrafts[selectedProfile]
+    if not draft then
+        draft = LoomConfigUtil.deepCopy(st.savedProfiles[selectedProfile] or {})
+        st.profileDrafts[selectedProfile] = draft
+    end
+
+    local function commit()
+        LoomDesigner.CommitProfileEdit(selectedProfile, draft)
+    end
 
     local kinds = {"straight","curved","zigzag","sigmoid","chaotic"}
-    dropdown(profileEditor, popupHost, "Kind", kinds, table.find(kinds, profile.kind) or 1, function(opt)
-        profile.kind = opt
-        commitAndRebuild()
+    dropdown(profileEditor, popupHost, "Kind", kinds, table.find(kinds, draft.kind) or 1, function(opt)
+        draft.kind = opt
+        commit()
         renderProfileEditor()
     end)
 
     local function numBox(label, field)
-        labeledTextBox(profileEditor, label, tostring(profile[field] or ""), function(txt)
-            local n = tonumber(txt)
-            profile[field] = n
-            commitAndRebuild()
-        end)
+        bindNumberField(profileEditor, label,
+            function() return draft[field] end,
+            function(v) draft[field] = v end,
+            commit)
     end
 
     numBox("Amplitude", "amplitudeDeg")
@@ -849,14 +914,14 @@ function renderProfileEditor()
     numBox("Curvature", "curvature")
     numBox("Roll Bias", "rollBias")
     numBox("Child Inherit", "childInherit")
-    if profile.kind == "zigzag" then numBox("Zigzag Every", "zigzagEvery") end
-    if profile.kind == "sigmoid" then numBox("Sigmoid K", "sigmoidK"); numBox("Sigmoid Mid", "sigmoidMid") end
-    if profile.kind == "chaotic" then numBox("Chaotic R", "chaoticR") end
+    if draft.kind == "zigzag" then numBox("Zigzag Every", "zigzagEvery") end
+    if draft.kind == "sigmoid" then numBox("Sigmoid K", "sigmoidK"); numBox("Sigmoid Mid", "sigmoidMid") end
+    if draft.kind == "chaotic" then numBox("Chaotic R", "chaoticR") end
 
     local modes = {"uniform","triangular","normal","biased"}
-    dropdown(profileEditor, popupHost, "SegMode", modes, table.find(modes, profile.segmentCountMode) or 1, function(opt)
-        profile.segmentCountMode = opt
-        commitAndRebuild()
+    dropdown(profileEditor, popupHost, "SegMode", modes, table.find(modes, draft.segmentCountMode) or 1, function(opt)
+        draft.segmentCountMode = opt
+        commit()
         renderProfileEditor()
     end)
 
@@ -869,32 +934,30 @@ function renderProfileEditor()
 
     local function validate()
         errLabel.Text = ""
-        if profile.segmentCountMin and profile.segmentCountMax and profile.segmentCountMin > profile.segmentCountMax then
+        if draft.segmentCountMin and draft.segmentCountMax and draft.segmentCountMin > draft.segmentCountMax then
             errLabel.Text = "min>max"
         end
-        if profile.segmentCountMode == "normal" and profile.segmentCountSd and profile.segmentCountSd < 0 then
+        if draft.segmentCountMode == "normal" and draft.segmentCountSd and draft.segmentCountSd < 0 then
             errLabel.Text = "sd<0"
         end
-        if profile.segmentCountMode == "biased" and profile.segmentCountBias and profile.segmentCountBias <= 0 then
+        if draft.segmentCountMode == "biased" and draft.segmentCountBias and draft.segmentCountBias <= 0 then
             errLabel.Text = "bias<=0"
         end
     end
 
     local function segNum(label, field)
-        labeledTextBox(profileEditor, label, tostring(profile[field] or ""), function(txt)
-            local n = tonumber(txt)
-            profile[field] = n
-            validate()
-            commitAndRebuild()
-        end)
+        bindNumberField(profileEditor, label,
+            function() return draft[field] end,
+            function(v) draft[field] = v; validate() end,
+            commit)
     end
 
     segNum("Segment Count", "segmentCount")
     segNum("SegCount Min", "segmentCountMin")
     segNum("SegCount Max", "segmentCountMax")
-    if profile.segmentCountMode == "triangular" then segNum("Mode N", "segmentCountModeN") end
-    if profile.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
-    if profile.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
+    if draft.segmentCountMode == "triangular" then segNum("Mode N", "segmentCountModeN") end
+    if draft.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
+    if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
     validate()
 end
 function renderProfiles()
@@ -909,6 +972,9 @@ function renderProfiles()
         btn.Parent = profileList
         btn.MouseButton1Click:Connect(function()
             selectedProfile = name
+            st.activeProfileName = name
+            st.profileDrafts = st.profileDrafts or {}
+            st.profileDrafts[name] = st.profileDrafts[name] or LoomConfigUtil.deepCopy(st.savedProfiles[name])
             renderProfiles()
             renderProfileEditor()
         end)
