@@ -183,12 +183,27 @@ function GrowthVisualizer.Render(container, loomState)
     local microJitter = tonumber(path.microJitterDeg) or 2
     local seedAffects = overrides.seedAffects or {segmentCount=true, curvature=true, frequency=true, jitter=true}
 
-    local segCount = overrides.segmentCount or config.growthDefaults.segmentCount
     local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
-    if seedAffects.segmentCount and not overrides.segmentCount then
-        local mn = (config.growthDefaults and config.growthDefaults.segmentCountMin) or config.growthDefaults.segmentCount or 8
-        local mx = (config.growthDefaults and config.growthDefaults.segmentCountMax) or ((config.growthDefaults and config.growthDefaults.segmentCount) or 16) + 8
-        segCount = rngMacro:NextInteger(mn, mx)
+
+    local uiMin = tonumber(overrides.segmentCountMin)
+    local uiMax = tonumber(overrides.segmentCountMax)
+    local cfgMin = config.growthDefaults and config.growthDefaults.segmentCountMin
+    local cfgMax = config.growthDefaults and config.growthDefaults.segmentCountMax
+    local cfgDefault = config.growthDefaults.segmentCount or 12
+
+    local mn = uiMin or cfgMin or cfgDefault
+    local mx = uiMax or cfgMax or (cfgDefault + 8)
+    if mx < mn then mn, mx = mx, mn end
+
+    local segCount = tonumber(overrides.segmentCount)
+    if segCount then
+        segCount = math.max(1, math.floor(segCount))
+    else
+        if seedAffects.segmentCount then
+            segCount = rngMacro:NextInteger(mn, mx)
+        else
+            segCount = cfgDefault
+        end
     end
     if seedAffects.curvature and path.curvature == nil then
         curvature = curvature * rngMacro:NextNumber(0.8, 1.2)
@@ -248,10 +263,24 @@ function GrowthVisualizer.Render(container, loomState)
 
         local jy = rngMicro:NextNumber(-microJitter, microJitter)
         local jp = rngMicro:NextNumber(-microJitter, microJitter)
-        return baseYaw + jy, basePitch + jp, 0
+        local dy = baseYaw + jy
+        local dp = basePitch + jp
+
+        local tailDamp = 1.0
+        if styleName == "straight" or styleName == "curved" then
+            local u = math.max(0, (i / math.max(1, N)) - 0.7) / 0.3
+            tailDamp = 1.0 - math.min(1, u * u)
+        end
+        dy *= tailDamp
+        dp *= tailDamp
+
+        return dy, dp, 0
     end
 
     local yaw, pitch, roll = 0, 0, 0
+    while #segments > segCount do
+        segments[#segments] = nil
+    end
     for i = 1, segCount do
         local seg = segments[i]
         if not seg then
@@ -259,7 +288,9 @@ function GrowthVisualizer.Render(container, loomState)
             segments[i] = seg
         end
         local dy, dp, dr = styleAngles(style, i, segCount)
-        local cont = rotRules.continuity or "accumulate"
+        local defaultCont =
+            (style == "zigzag" or style == "noise" or style == "chaotic") and "absolute" or "accumulate"
+        local cont = rotRules.continuity or defaultCont
         if cont == "accumulate" then
             yaw += dy
             pitch += dp
