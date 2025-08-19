@@ -263,6 +263,154 @@ local function sampleSegCountBiased(rng, minN, maxN, bias)
     return x
 end
 
+local function weightedPick(rng, items)
+    local total = 0
+    for _, item in ipairs(items or {}) do
+        total += item.chance or 0
+    end
+    if total <= 0 then return nil end
+    local roll = rng:NextNumber(0, total)
+    local acc = 0
+    for _, item in ipairs(items) do
+        acc += item.chance or 0
+        if roll < acc then
+            return item
+        end
+    end
+    return nil
+end
+
+local function chooseSegCount(profile, rng)
+    if profile.segmentCount then
+        local mn = profile.segmentCountMin or profile.segmentCount
+        local mx = profile.segmentCountMax or profile.segmentCount
+        local val = clamp(profile.segmentCount, mn, mx)
+        return math.max(1, math.floor(val))
+    end
+    local mn = profile.segmentCountMin or (profile.segmentCount or 12)
+    local mx = profile.segmentCountMax or (profile.segmentCount or 12)
+    if mx < mn then mn, mx = mx, mn end
+    local mode = profile.segmentCountMode or "uniform"
+    local val
+    if mode == "triangular" then
+        local modeN = profile.segmentCountModeN or math.floor((mn + mx) / 2)
+        val = sampleSegCountTri(rng, mn, mx, modeN)
+    elseif mode == "normal" then
+        local meanN = profile.segmentCountMean or math.floor((mn + mx) / 2)
+        local sd = profile.segmentCountSd or ((mx - mn) / 6)
+        val = sampleSegCountNormal(rng, mn, mx, meanN, sd)
+    elseif mode == "biased" then
+        local bias = profile.segmentCountBias or 1
+        val = sampleSegCountBiased(rng, mn, mx, bias)
+    else
+        val = rng:NextInteger(mn, mx)
+    end
+    return math.max(1, math.floor(val))
+end
+
+local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cfg, overrides)
+    local rngMacro = SeedUtil.rng(baseSeed, "macro", chainId)
+    local rngProfile = SeedUtil.rng(baseSeed, "profile", chainId)
+    local rngMicro = SeedUtil.rng(baseSeed, "micro", chainId)
+
+    local segCount = chooseSegCount(profile, rngMacro)
+    profile.maxSegments = segCount
+    local state = { seed = baseSeed }
+
+    local rotRules = overrides.rotationRules or {}
+    local autoContByKind = {
+        zigzag = "absolute", noise = "absolute", chaotic = "absolute",
+        straight = "accumulate", curved = "accumulate", sigmoid = "accumulate", spiral = "accumulate", random = "absolute",
+    }
+    local cont = rotRules.continuity or autoContByKind[profile.kind or "curved"] or "accumulate"
+    local yClamp = rotRules.yawClampDeg
+    local pClamp = rotRules.pitchClampDeg
+    if not yClamp or not pClamp then
+        local d = ({
+            straight={y=4,p=3}, curved={y=22,p=10}, zigzag={y=28,p=6},
+            noise={y=16,p=16}, random={y=16,p=16}, chaotic={y=34,p=18}, sigmoid={y=18,p=8},
+        })[profile.kind or "curved"] or {}
+        yClamp = yClamp or d.y; pClamp = pClamp or d.p
+    end
+
+    local enableMicroJitter = overrides.enableMicroJitter == true
+    local microJitter = tonumber(overrides.microJitterDeg) or 0
+
+    local twistStrength = tonumber(overrides.twistStrengthDegPerSeg) or 0
+    local twistRngRange = tonumber(overrides.twistRngRangeDeg) or 0
+    local twistRngOn = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
+    local enableTwist = overrides.enableTwist ~= false
+    if not enableTwist then
+        twistStrength = 0
+        twistRngRange = 0
+    end
+
+    local jitter = cfg.segmentScaleJitter or {length = 0, thickness = 0}
+    local profScale = overrides.scaleProfile
+
+    local partCfg = (overrides.materialization and overrides.materialization.part)
+        or (cfg.materialization and cfg.materialization.part) or {}
+    local baseLength = partCfg.baseLength or 2
+    local baseThickness = partCfg.baseThickness or 1
+
+    local yaw, pitch, roll = 0, 0, 0
+    local currentCF = startCF
+    local segRefs = {}
+    for i = 1, segCount do
+        local delta = GrowthProfiles.rotDelta(profile, rngProfile, state)
+        local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
+        if enableMicroJitter then
+            local j = microJitter
+            dy += rngMicro:NextNumber(-j, j)
+            dp += rngMicro:NextNumber(-j, j)
+        end
+        if twistStrength ~= 0 or (twistRngOn and twistRngRange > 0) then
+            local rnd = twistRngOn and rngMicro:NextNumber(-twistRngRange, twistRngRange) or 0
+            dr = dr + twistStrength + rnd
+        end
+        if cont == "accumulate" then
+            yaw += dy; pitch += dp; roll += dr
+        else
+            yaw, pitch, roll = dy, dp, dr
+        end
+        if yClamp then yaw = clamp(yaw, -yClamp, yClamp) end
+        if pClamp then pitch = clamp(pitch, -pClamp, pClamp) end
+
+        local baseS = evalScaleProfile(i, segCount, profScale)
+        local enableScaleJitter = (overrides.enableScaleJitter ~= false)
+        if profScale then
+            if profScale.enableJitter == false then
+                enableScaleJitter = false
+            elseif profScale.enableJitter == true then
+                enableScaleJitter = true
+            end
+        end
+        local lenJ = enableScaleJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
+        local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
+        local length = baseLength * baseS * (1 + lenJ)
+        local thickness = baseThickness * baseS * (1 + thJ)
+        if not isfinite(length) or length <= 0 then length = baseLength end
+        if not isfinite(thickness) or thickness <= 0 then thickness = baseThickness end
+
+        local rot = CFrame.Angles(safeRad(pitch), safeRad(roll), safeRad(yaw))
+        local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
+        local seg = {
+            cframe = stepCF,
+            length = length,
+            thickness = thickness,
+            depth = depth,
+            chainId = chainId,
+            index = i,
+            fill = 0,
+        }
+        segOut[#segOut + 1] = seg
+        segRefs[i] = seg
+        currentCF = stepCF * CFrame.new(0, length/2, 0)
+    end
+
+    return { segRefs = segRefs, segCount = segCount }
+end
+
 local function getVisual(loomUid)
     local v = visuals[loomUid]
     if not v then
@@ -386,219 +534,98 @@ function GrowthVisualizer.Render(container, loomState)
     if not config then return end
 
     local v = getVisual(loomState.loomUid)
-    -- fresh segments table each render to avoid state carry-over
     v.segments = {}
-    local segments = v.segments
+    local segOut = v.segments
 
     local overrides = loomState.overrides or {}
     local cfg = config.growthDefaults or {}
 
-    -- resolve profile and clamp
-    local profile = overrides.profile or (config.profileDefaults or {kind = "curved"})
-    profile = GrowthProfiles.clampProfile(profile)
-    -- ensure per-render state starts clean so deterministic RNG streams
-    -- fresh per-render state; GrowthProfiles manages counters internally
-    local state = { seed = loomState.baseSeed or 0 }
-
-    -- RNG streams
-    local rngMicro = SeedUtil.rng(loomState.baseSeed or 0, "micro")
-    local rngProfile = SeedUtil.rng(loomState.baseSeed or 0, "profile")
-
-    -- segment count
-    local uiMin = tonumber(overrides.segmentCountMin)
-    local uiMax = tonumber(overrides.segmentCountMax)
-    local mn = uiMin or cfg.segmentCountMin or (cfg.segmentCount or 12)
-    local mx = uiMax or cfg.segmentCountMax or ((cfg.segmentCount or 12) + 8)
-    if mx < mn then mn, mx = mx, mn end
-    local segCount = tonumber(overrides.segmentCount)
-    if not segCount then
-        local rngMacro = SeedUtil.rng(loomState.baseSeed or 0, "macro")
-        local mode = overrides.segmentCountMode or "uniform"
-        if mode == "triangular" then
-            local modeN = tonumber(overrides.segmentCountModeN) or math.floor((mn + mx) / 2)
-            segCount = sampleSegCountTri(rngMacro, mn, mx, modeN)
-        elseif mode == "normal" then
-            local meanN = tonumber(overrides.segmentCountMean) or math.floor((mn + mx) / 2)
-            local sd = tonumber(overrides.segmentCountSd) or ((mx - mn) / 6)
-            segCount = sampleSegCountNormal(rngMacro, mn, mx, meanN, sd)
-        elseif mode == "biased" then
-            local bias = tonumber(overrides.segmentCountBias) or 1
-            segCount = sampleSegCountBiased(rngMacro, mn, mx, bias)
-        else
-            segCount = rngMacro:NextInteger(mn, mx)
-        end
-    end
-    segCount = math.max(1, math.floor(segCount))
-    profile.maxSegments = segCount
-
-    -- segments table is fresh; ensure capacity
-
-    -- continuity and clamps
-    local rotRules = overrides.rotationRules or {}
-    local autoContByKind = {
-      zigzag="absolute", noise="absolute", chaotic="absolute",
-      straight="accumulate", curved="accumulate", sigmoid="accumulate", spiral="accumulate", random="absolute",
-    }
-    local cont = (rotRules.continuity)
-          or autoContByKind[profile.kind or "curved"] or "accumulate"
-    local yClamp = rotRules.yawClampDeg
-    local pClamp = rotRules.pitchClampDeg
-    if not yClamp or not pClamp then
-        local d = ({
-            straight={y=4,p=3}, curved={y=22,p=10}, zigzag={y=28,p=6},
-            noise={y=16,p=16}, random={y=16,p=16}, chaotic={y=34,p=18}, sigmoid={y=18,p=8},
-        })[profile.kind or "curved"] or {}
-        yClamp = yClamp or d.y; pClamp = pClamp or d.p
+    local profiles = config.profiles
+    local branchAssignments = config.branchAssignments
+    if not profiles or not branchAssignments then
+        profiles = profiles or {}
+        profiles.trunk = profiles.trunk or (config.profileDefaults or {kind = "curved"})
+        branchAssignments = branchAssignments or {trunkProfile = "trunk"}
     end
 
-    -- heading jitter
-    local enableMicroJitter = overrides.enableMicroJitter == true
-    local microJitter = tonumber(overrides.microJitterDeg) or 0
-    local seedAffects = overrides.seedAffects
-
-    for k in pairs(debugInfo) do debugInfo[k] = nil end
-    if overrides.debug then
-        debugInfo.seed = loomState.baseSeed or 0
-        debugInfo.style = profile.kind
-        debugInfo.segCount = segCount
-        debugInfo.continuity = cont
+    local trunkName = branchAssignments.trunkProfile or "trunk"
+    if not profiles[trunkName] then
+        profiles.trunk = profiles.trunk or (config.profileDefaults or {kind="curved"})
+        trunkName = "trunk"
     end
 
-    -- twist controls
-    local twistStrength = tonumber(overrides.twistStrengthDegPerSeg) or 0
-    local twistRngRange = tonumber(overrides.twistRngRangeDeg) or 0
-    local twistRngOn = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
-    local enableTwist = overrides.enableTwist ~= false
-    if not enableTwist then
-        twistStrength = 0
-        twistRngRange = 0
-    end
+    local chains = { {id = 1, depth = 0, profileName = trunkName, startCF = CFrame.new()} }
+    local chainMap = { [1] = chains[1] }
+    local nextId = 1
+    local baseSeed = loomState.baseSeed or 0
 
-    -- size jitter config
-    local jitter = cfg.segmentScaleJitter or {length = 0, thickness = 0}
+    local perDepth = branchAssignments.perDepth or {}
+    local spacingN = branchAssignments.spacingN or {}
+    local maxPerDepth = branchAssignments.maxPerDepth or {}
 
-    local yaw, pitch, roll = 0, 0, 0
-    for i = 1, segCount do
-        local seg = segments[i]
-        if not seg then
-            seg = {yaw = 0, pitch = 0, roll = 0, lengthScale = 1, thicknessScale = 1, fill = 0}
-            segments[i] = seg
-        end
-
-        -- per-segment deltas (degrees)
-        local delta = GrowthProfiles.rotDelta(profile, rngProfile, state)
-        local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
-        if overrides.debug then
-            debugInfo.segments = debugInfo.segments or {}
-            debugInfo.segments[i] = {i = i, baseYaw = dy, basePitch = dp, baseRoll = dr}
-        end
-
-        if enableMicroJitter then
-            local j = microJitter
-            local jy = rngMicro:NextNumber(-j, j)
-            local jp = rngMicro:NextNumber(-j, j)
-            dy = dy + jy; dp = dp + jp
-        end
-
-        if twistStrength ~= 0 or (twistRngOn and twistRngRange > 0) then
-            local rnd = twistRngOn and rngMicro:NextNumber(-twistRngRange, twistRngRange) or 0
-            dr = dr + twistStrength + rnd
-        end
-
-        if cont == "accumulate" then
-            yaw = yaw + dy; pitch = pitch + dp; roll = roll + dr
-        else
-            yaw, pitch, roll = dy, dp, dr
-        end
-        if yClamp then yaw = clamp(yaw, -yClamp, yClamp) end
-        if pClamp then pitch = clamp(pitch, -pClamp, pClamp) end
-
-        seg.yaw, seg.pitch, seg.roll = yaw, pitch, roll
-
-        local prof = overrides.scaleProfile
-        local baseS = evalScaleProfile(i, segCount, prof)
-        local enableScaleJitter = (overrides.enableScaleJitter ~= false)
-        if prof and prof.enableJitter == false then
-            enableScaleJitter = false
-        elseif prof and prof.enableJitter == true then
-            enableScaleJitter = true
-        end
-        local lenJ = enableScaleJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
-        local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
-        seg.lengthScale    = baseS * (1 + lenJ)
-        seg.thicknessScale = baseS * (1 + thJ)
-        if overrides.debug then
-            local segDebug = debugInfo.segments[i]
-            segDebug.yawFinal = yaw
-            segDebug.pitchFinal = pitch
-            segDebug.rollFinal = roll
-        end
-    end
-
-    if overrides.debug then
-        if state._curved then debugInfo.curved = state._curved end
-        if state._sig then debugInfo.sigmoid = state._sig end
-        print(('[growth] kind=%s cont=%s seed=%s'):format(tostring(profile.kind), cont, tostring(loomState.baseSeed)))
-        if debugInfo.curved then
-            print(('[growth] curved.phase=%.3f dir=%d'):format(debugInfo.curved.phase, debugInfo.curved.dir))
-        end
-        if debugInfo.sigmoid then
-            local s = debugInfo.sigmoid
-            print(('[growth] sig.k=%.3f mid=%.3f dir=%d'):format(s.k, s.mid, s.dir))
-        end
-    end
-
-    -- fills
     local designFull = (GrowthVisualizer._editorMode == true) or (overrides.designFull == true)
-    local fills
-    if designFull then
-        fills = {}
-        for i=1, segCount do fills[i] = 1 end
-    else
-        fills = computeSegmentFill(segCount, loomState.g or 0)
-    end
-    if overrides.debug then
-        debugInfo.fills = fills
-    end
-    for i = 1, segCount do
-        segments[i].fill = fills[i]
+
+    for cIndex = 1, #chains do
+        local chain = chains[cIndex]
+        local prof = profiles[chain.profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
+        prof = GrowthProfiles.clampProfile(prof)
+        local res = buildChain(segOut, chain.id, chain.depth, baseSeed, chain.startCF, prof, cfg, overrides)
+        chain.segCount = res.segCount
+        chainMap[chain.id] = chain
+        local segRefs = res.segRefs
+        local segCount = res.segCount
+
+        local fills
+        if designFull then
+            fills = {}
+            for i = 1, segCount do fills[i] = 1 end
+        else
+            fills = computeSegmentFill(segCount, loomState.g or 0)
+        end
+        for i = 1, segCount do
+            segRefs[i].fill = fills[i]
+        end
+
+        local depth = chain.depth
+        local rules = perDepth[depth]
+        if rules and depth < (cfg.branchDepthMax or 0) then
+            local rngBranch = SeedUtil.rng(baseSeed, "branch", chain.id)
+            local minGap = spacingN[depth] or cfg.forkSpacingN or 0
+            local forkLimit = maxPerDepth[depth] or cfg.forkLimitPerDepth or 2
+            local lastForkAt = -minGap
+            local spawned = 0
+            for idx = 1, segCount do
+                if idx - lastForkAt < minGap then
+                    continue
+                end
+                local pick = weightedPick(rngBranch, rules)
+                if pick and rngBranch:NextNumber() <= (pick.chance or 0) then
+                    local seg = segRefs[idx]
+                    local startHere = seg.cframe * CFrame.new(0, seg.length/2, 0)
+                    nextId += 1
+                    local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
+                    chains[#chains + 1] = newChain
+                    chainMap[nextId] = newChain
+                    spawned += 1
+                    lastForkAt = idx
+                    if spawned >= forkLimit then
+                        break
+                    end
+                end
+            end
+        end
     end
 
     local matOverrides = overrides.materialization or cfg.materialization or {mode = "Model"}
     local scene = loomState.scene
     if scene and scene.Clear then scene.Clear() end
 
-    local segOut = {}
     if scene and scene.Spawn then
-        local cfg = matOverrides.part or {}
-        local currentCF = CFrame.new(0,0,0)
-        local baseLength = cfg.baseLength or 2
-        local baseThickness = cfg.baseThickness or 1
-        for i, seg in ipairs(segments) do
-            if seg.fill > 0 then
-                local rot = CFrame.Angles(safeRad(seg.pitch), safeRad(seg.roll), safeRad(seg.yaw))
-                local length = baseLength * (seg.lengthScale or 1)
-                if not isfinite(length) or length <= 0 then length = baseLength end
-                local thickness = baseThickness * (seg.thicknessScale or 1)
-                if not isfinite(thickness) or thickness <= 0 then thickness = baseThickness end
-                local stepCF = currentCF * rot * CFrame.new(0, length/2, 0)
-                segOut[#segOut+1] = {
-                    cframe = stepCF,
-                    length = length,
-                    thickness = thickness,
-                    fill = seg.fill,
-                    index = i,
-                    chainId = 0,
-                    depth = 0,
-                }
-                currentCF = stepCF * CFrame.new(0, length/2, 0)
-            end
-        end
-
+        local partCfg = matOverrides.part or {}
         if matOverrides.mode == "Model" and scene.ResolveModel and config.models then
             local lists = config.models.byDepth or {}
             local function spawnPart(seg)
-                local shape = cfg.partType or Enum.PartType.Ball
+                local shape = partCfg.partType or Enum.PartType.Ball
                 local size
                 if shape == Enum.PartType.Ball then
                     size = Vector3.new(seg.thickness, seg.thickness, seg.thickness)
@@ -610,21 +637,22 @@ function GrowthVisualizer.Render(container, loomState)
                     shape = shape,
                     size = size,
                     cframe = seg.cframe,
-                    material = cfg.material or Enum.Material.SmoothPlastic,
-                    color = cfg.color,
+                    material = partCfg.material or Enum.Material.SmoothPlastic,
+                    color = partCfg.color,
                     anchored = true,
                     canCollide = false,
                     name = "Segment",
                 })
             end
-            for i, seg in ipairs(segOut) do
-                local list = lists[0]
-                if i == #segOut and lists.terminal then
+            for _, seg in ipairs(segOut) do
+                local list = lists[seg.depth]
+                local chainInfo = chainMap[seg.chainId]
+                if chainInfo and seg.index == chainInfo.segCount and lists.terminal then
                     list = lists.terminal
                 end
                 local inst
                 if list and #list > 0 then
-                    local r = SeedUtil.rng(loomState.baseSeed or 0, "model", 0, i)
+                    local r = SeedUtil.rng(baseSeed, "model", seg.chainId, seg.index)
                     local idx = r:NextInteger(1, #list)
                     inst = scene.ResolveModel(list, { select = function(L) return L[idx] end })
                 end
@@ -635,24 +663,10 @@ function GrowthVisualizer.Render(container, loomState)
                 end
             end
         else
-            renderSegments(scene, cfg, segOut)
+            renderSegments(scene, partCfg, segOut)
         end
 
-        placeDecorations(scene, loomState.baseSeed or 0, segOut, config, overrides, cfg)
-    end
-
-    if overrides.debug then
-        debugInfo.phase = state.phase
-        debugInfo.dir = state.dir
-        print("[GrowthVisualizer Debug]")
-        print("Seed:", debugInfo.seed, "Style:", debugInfo.style, "Dir:", debugInfo.dir, "Phase:", debugInfo.phase)
-        print("Continuity:", debugInfo.continuity, "Segments:", debugInfo.segCount)
-        for _, seg in ipairs(debugInfo.segments or {}) do
-            print(string.format(
-                "Seg %02d | BaseYaw %.2f BasePitch %.2f BaseRoll %.2f | Yaw %.2f Pitch %.2f Roll %.2f",
-                seg.i or 0, seg.baseYaw or 0, seg.basePitch or 0, seg.baseRoll or 0, seg.yawFinal or 0, seg.pitchFinal or 0, seg.rollFinal or 0
-            ))
-        end
+        placeDecorations(scene, baseSeed, segOut, config, overrides, partCfg)
     end
 end
 

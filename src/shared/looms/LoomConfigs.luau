@@ -124,6 +124,58 @@ local configs = {
             serverAuthoritative = true,
         },
     },
+
+    branch_demo = {
+        id = "branch_demo",
+        uiName = "Branch Demo",
+        growthDefaults = {
+            branchDepthMax = 2,
+            segmentScaleJitter = { length = 0.1, thickness = 0.1 },
+        },
+        profiles = {
+            trunk = {
+                kind = "curved",
+                amplitudeDeg = 28,
+                frequency = 1,
+                curvature = 1,
+                childInherit = 0.8,
+                segmentCountMode = "normal",
+                segmentCountMean = 24,
+                segmentCountSd = 2,
+                segmentCountMin = 20,
+                segmentCountMax = 28,
+            },
+            branchA = {
+                kind = "zigzag",
+                amplitudeDeg = 14,
+                zigzagEvery = 1,
+                childInherit = 0.7,
+                segmentCountMode = "triangular",
+                segmentCountModeN = 10,
+                segmentCountMin = 8,
+                segmentCountMax = 14,
+            },
+            branchB = {
+                kind = "sigmoid",
+                amplitudeDeg = 16,
+                sigmoidK = 7,
+                childInherit = 0.6,
+                segmentCountMode = "biased",
+                segmentCountBias = 1.25,
+                segmentCountMin = 8,
+                segmentCountMax = 16,
+            },
+        },
+        branchAssignments = {
+            trunkProfile = "trunk",
+            perDepth = {
+                [0] = { {name="branchA", chance=0.6}, {name="branchB", chance=0.4} },
+                [1] = { {name="branchA", chance=1.0} },
+            },
+            spacingN    = { [0] = 3, [1] = 2 },
+            maxPerDepth = { [0] = 2, [1] = 2, [2] = 3 },
+        },
+    },
 }
 
 return configs
