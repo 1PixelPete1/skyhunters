@@ -279,7 +279,7 @@ checkbox(secSeed, "Seed affects jitter", true, function(val)
     LoomDesigner.RebuildPreview(nil)
 end)
 
-checkbox(secSeed, "Seed affects twist", true, function(val)
+checkbox(secSeed, "Seed affects Twist", true, function(val)
     LoomDesigner.SetOverrides({seedAffects = {twist = val}})
     LoomDesigner.RebuildPreview(nil)
 end)
@@ -361,8 +361,13 @@ if n then setPath("chaoticR", n) end
 end)
 
 labeledTextBox(secPath, "Micro Jitter Deg", "2", function(txt)
-local n = tonumber(txt)
-if n then setPath("microJitterDeg", n) end
+    local n = tonumber(txt)
+    if n then setPath("microJitterDeg", n) end
+end)
+
+checkbox(secPath, "Enable Heading Jitter", true, function(val)
+    LoomDesigner.SetOverrides({enableMicroJitter = val})
+    LoomDesigner.RebuildPreview(nil)
 end)
 
 -- === Segment Geometry ===
@@ -457,6 +462,11 @@ local function updateProfileVis()
     if powerBox then powerBox.Parent.Visible = bell end
 end
 
+checkbox(secScale, "Enable Size Jitter", true, function(val)
+    LoomDesigner.SetOverrides({enableScaleJitter = val})
+    LoomDesigner.RebuildPreview(nil)
+end)
+
 dropdown(secScale, popupHost, "Mode", {"constant","linear_down","linear_up","bell","inverse_bell"}, 1, function(opt)
     currentProfile.mode = opt
     commitProfile()
@@ -493,7 +503,7 @@ powerBox = labeledTextBox(secScale, "Power", "2", function(txt)
     if n then currentProfile.power = n; commitProfile() end
 end)
 
-checkbox(secScale, "Enable Size Jitter", true, function(val)
+checkbox(secScale, "Profile Jitter", true, function(val)
     currentProfile.enableJitter = val
     commitProfile()
 end)
@@ -584,15 +594,13 @@ end)
 
 -- === Rotation Rules ===
 dropdown(secRot, popupHost, "Continuity", {"Auto", "Accumulate", "Absolute"}, 1, function(opt)
-    local val
     if opt == "Accumulate" then
-        val = "accumulate"
+        LoomDesigner.SetOverrides({rotationRules = {continuity = "accumulate"}})
     elseif opt == "Absolute" then
-        val = "absolute"
+        LoomDesigner.SetOverrides({rotationRules = {continuity = "absolute"}})
     else
-        val = false
+        LoomDesigner.ClearOverride({"rotationRules","continuity"})
     end
-    LoomDesigner.SetOverrides({rotationRules = {continuity = val}})
     LoomDesigner.RebuildPreview(nil)
 end)
 
@@ -600,6 +608,11 @@ labeledTextBox(secRot, "Yaw Clamp Deg", "", function(txt)
 local n = tonumber(txt)
 LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = n}})
 LoomDesigner.RebuildPreview(nil)
+end)
+
+checkbox(secRot, "Enable Twist", true, function(val)
+    LoomDesigner.SetOverrides({enableTwist = val})
+    LoomDesigner.RebuildPreview(nil)
 end)
 
 labeledTextBox(secRot, "Pitch Clamp Deg", "", function(txt)

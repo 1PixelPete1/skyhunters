@@ -61,4 +61,24 @@ assert(segsC[1].yaw * segsC[2].yaw > 0 and segsC[2].yaw * segsC[3].yaw < 0, "zig
 local segsD = render(4, {segmentCount = 5, scaleProfile = {mode = "linear_down", start = 1, finish = 0.5, enableJitter = false}})
 assert(segsD[1].lengthScale > segsD[5].lengthScale, "size profile failed")
 
+-- Heading jitter toggle
+local segsE = render(5, {segmentCount = 3, path = {style = "straight", microJitterDeg = 5}, enableMicroJitter = false})
+for _, seg in ipairs(segsE) do
+    assert(seg.yaw == 0 and seg.pitch == 0, "heading jitter toggle failed")
+end
+
+-- Twist toggle
+local segsF = render(6, {segmentCount = 3, enableTwist = false, rotationRules = {extraRollPerSegDeg = 20, randomRollRangeDeg = 50}})
+for _, seg in ipairs(segsF) do
+    assert(seg.roll == 0, "twist disabled failed")
+end
+local segsG = render(7, {segmentCount = 3, enableTwist = true, rotationRules = {extraRollPerSegDeg = 10, randomRollRangeDeg = 0}})
+assert(segsG[1].roll == 10, "twist enabled failed")
+
+-- Scale jitter toggle
+local segsH = render(8, {segmentCount = 3, enableScaleJitter = false})
+for _, seg in ipairs(segsH) do
+    assert(seg.lengthScale == 1 and seg.thicknessScale == 1, "scale jitter toggle failed")
+end
+
 print("growth_visualizer_spec.lua ok")

@@ -78,13 +78,8 @@ end
 
 local function deepMerge(dst, src)
         for k, v in pairs(src) do
-                if type(v) == "table" then
-                        local sub = dst[k]
-                        if type(sub) ~= "table" then
-                                sub = {}
-                                dst[k] = sub
-                        end
-                        deepMerge(sub, v)
+                if type(v) == "table" and type(dst[k]) == "table" then
+                        deepMerge(dst[k], v)
                 else
                         dst[k] = v
                 end
@@ -93,6 +88,15 @@ end
 
 function LoomDesigner.SetOverrides(overrides)
         deepMerge(state.overrides, overrides)
+end
+
+function LoomDesigner.ClearOverride(path)
+        local t = state.overrides
+        for i = 1, #path - 1 do
+                t = t[path[i]]
+                if type(t) ~= "table" then return end
+        end
+        t[path[#path]] = nil
 end
 
 local function ensurePreviewParent()
