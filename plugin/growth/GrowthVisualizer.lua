@@ -245,6 +245,7 @@ function GrowthVisualizer.Render(container, loomState)
         segCount = rngMacro:NextInteger(mn, mx)
     end
     segCount = math.max(1, math.floor(segCount))
+    profile.maxSegments = segCount
 
     -- TRIM cached segments if shrinking
     while #segments > segCount do segments[#segments] = nil end
@@ -258,10 +259,10 @@ function GrowthVisualizer.Render(container, loomState)
     local yClamp = rotRules.yawClampDeg
     local pClamp = rotRules.pitchClampDeg
     if not yClamp or not pClamp then
-        local d = {
+        local d = ({
             straight={y=4,p=3}, curved={y=22,p=10}, zigzag={y=28,p=6},
             noise={y=16,p=16}, random={y=16,p=16}, chaotic={y=34,p=18}, sigmoid={y=18,p=8},
-        }[profile.kind or "curved"] or {}
+        })[profile.kind or "curved"] or {}
         yClamp = yClamp or d.y; pClamp = pClamp or d.p
     end
 
@@ -293,6 +294,11 @@ function GrowthVisualizer.Render(container, loomState)
     local twistStrength = tonumber(overrides.twistStrengthDegPerSeg) or 0
     local twistRngRange = tonumber(overrides.twistRngRangeDeg) or 0
     local twistRngOn = (overrides.seedAffects and overrides.seedAffects.twist) ~= false
+    local enableTwist = overrides.enableTwist ~= false
+    if not enableTwist then
+        twistStrength = 0
+        twistRngRange = 0
+    end
 
     -- size jitter config
     local jitter = cfg.segmentScaleJitter or {length = 0, thickness = 0}
@@ -317,16 +323,16 @@ function GrowthVisualizer.Render(container, loomState)
             local j = microJitter
             local jy = rngMicro:NextNumber(-j, j)
             local jp = rngMicro:NextNumber(-j, j)
-            dy += jy; dp += jp
+            dy = dy + jy; dp = dp + jp
         end
 
         if twistStrength ~= 0 or (twistRngOn and twistRngRange > 0) then
             local rnd = twistRngOn and rngMicro:NextNumber(-twistRngRange, twistRngRange) or 0
-            dr += twistStrength + rnd
+            dr = dr + twistStrength + rnd
         end
 
         if cont == "accumulate" then
-            yaw += dy; pitch += dp; roll += dr
+            yaw = yaw + dy; pitch = pitch + dp; roll = roll + dr
         else
             yaw, pitch, roll = dy, dp, dr
         end

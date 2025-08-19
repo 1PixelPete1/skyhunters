@@ -54,7 +54,7 @@ local segsB = render(2, {segmentCountMin = 2, segmentCountMax = 2})
 assert(#segsB == 2, "segment min/max failed")
 
 -- Zigzag cadence
-local segsC = render(3, {segmentCount = 5, path = {style = "zigzag", amplitudeDeg = 10, zigzagEvery = 2}})
+local segsC = render(3, {segmentCount = 5, profile = {kind = "zigzag", amplitudeDeg = 10, zigzagEvery = 2}})
 assert(segsC[1].yaw * segsC[2].yaw > 0 and segsC[2].yaw * segsC[3].yaw < 0, "zigzag cadence failed")
 
 -- Size profile linear_down
@@ -62,17 +62,17 @@ local segsD = render(4, {segmentCount = 5, scaleProfile = {mode = "linear_down",
 assert(segsD[1].lengthScale > segsD[5].lengthScale, "size profile failed")
 
 -- Heading jitter toggle
-local segsE = render(5, {segmentCount = 3, path = {style = "straight", microJitterDeg = 5}, enableMicroJitter = false})
+local segsE = render(5, {segmentCount = 3, profile = {kind = "straight"}, microJitterDeg = 5, enableMicroJitter = false})
 for _, seg in ipairs(segsE) do
     assert(seg.yaw == 0 and seg.pitch == 0, "heading jitter toggle failed")
 end
 
 -- Twist toggle
-local segsF = render(6, {segmentCount = 3, enableTwist = false, rotationRules = {extraRollPerSegDeg = 20, randomRollRangeDeg = 50}})
+local segsF = render(6, {segmentCount = 3, enableTwist = false, twistStrengthDegPerSeg = 20, twistRngRangeDeg = 50})
 for _, seg in ipairs(segsF) do
     assert(seg.roll == 0, "twist disabled failed")
 end
-local segsG = render(7, {segmentCount = 3, enableTwist = true, rotationRules = {extraRollPerSegDeg = 10, randomRollRangeDeg = 0}})
+local segsG = render(7, {segmentCount = 3, enableTwist = true, twistStrengthDegPerSeg = 10, twistRngRangeDeg = 0})
 assert(segsG[1].roll == 10, "twist enabled failed")
 
 -- Scale jitter toggle

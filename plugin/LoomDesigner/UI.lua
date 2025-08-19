@@ -217,7 +217,7 @@ local secConfig = makeSection(scroll, "Branch Config")
 local secSeed   = makeSection(scroll, "Seed / Randomness")
 local secGrowth = makeSection(scroll, "Growth Progression")
 local secSeg    = makeSection(scroll, "Segment Overrides")
-local secPath   = makeSection(scroll, "Path Style")
+local secProfile   = makeSection(scroll, "Profile")
 local secGeo    = makeSection(scroll, "Segment Geometry")
 local secScale  = makeSection(scroll, "Size Profile")
 local secRot    = makeSection(scroll, "Rotation Rules")
@@ -321,50 +321,119 @@ if n then
 end
 end)
 
-local function setPath(field, value)
-    LoomDesigner.SetOverrides({path = {[field] = value}})
+local currentProfileKind = "curved"
+local ampBox, freqBox, curvBox, zigEveryBox, noiseAmpBox, sigKBox, sigMidBox, chaoticRBox
+local yawStepBox, yawVarBox, pitchBiasBox, pitchVarBox, rollBiasBox, rollVarBox, randomChaosBox
+
+local function setProfile(field, value)
+    LoomDesigner.SetOverrides({profile = {[field] = value}})
     LoomDesigner.RebuildPreview(nil)
 end
 
-dropdown(secPath, popupHost, "Style", {"straight","curved","zigzag","noise","sigmoid","chaotic"}, 2, function(opt)
+local function updateProfileVis()
+    local k = currentProfileKind
+    if ampBox then ampBox.Parent.Visible = (k == "curved" or k == "zigzag" or k == "sigmoid" or k == "chaotic") end
+    if freqBox then freqBox.Parent.Visible = (k == "curved") end
+    if curvBox then curvBox.Parent.Visible = (k == "curved") end
+    if zigEveryBox then zigEveryBox.Parent.Visible = (k == "zigzag") end
+    if noiseAmpBox then noiseAmpBox.Parent.Visible = (k == "noise") end
+    if sigKBox then sigKBox.Parent.Visible = (k == "sigmoid") end
+    if sigMidBox then sigMidBox.Parent.Visible = (k == "sigmoid") end
+    if chaoticRBox then chaoticRBox.Parent.Visible = (k == "chaotic") end
+    local spiral = (k == "spiral")
+    if yawStepBox then yawStepBox.Parent.Visible = spiral end
+    if yawVarBox then yawVarBox.Parent.Visible = spiral end
+    local prPitch = (spiral or k == "random")
+    if pitchBiasBox then pitchBiasBox.Parent.Visible = prPitch end
+    if pitchVarBox then pitchVarBox.Parent.Visible = prPitch end
+    if rollBiasBox then rollBiasBox.Parent.Visible = prPitch end
+    if rollVarBox then rollVarBox.Parent.Visible = prPitch end
+    if randomChaosBox then randomChaosBox.Parent.Visible = (k == "random") end
+end
+
+dropdown(secProfile, popupHost, "Profile Kind", {"straight","curved","zigzag","noise","sigmoid","chaotic","spiral","random"}, 2, function(opt)
+    currentProfileKind = opt
     LoomDesigner.SetOverrides({profile = {kind = opt}})
     LoomDesigner.RebuildPreview(nil)
+    updateProfileVis()
 end)
 
-labeledTextBox(secPath, "Amplitude Deg", "10", function(txt)
+ampBox = labeledTextBox(secProfile, "Amplitude Deg", "10", function(txt)
 local n = tonumber(txt)
-if n then setPath("amplitudeDeg", n) end
+if n then setProfile("amplitudeDeg", n) end
 end)
 
-labeledTextBox(secPath, "Frequency", "0.35", function(txt)
+freqBox = labeledTextBox(secProfile, "Frequency", "1", function(txt)
 local n = tonumber(txt)
-if n then setPath("frequency", n) end
+if n then setProfile("frequency", n) end
 end)
 
-labeledTextBox(secPath, "Curvature", "0.35", function(txt)
+curvBox = labeledTextBox(secProfile, "Curvature", "1", function(txt)
 local n = tonumber(txt)
-if n then setPath("curvature", n) end
+if n then setProfile("curvature", n) end
 end)
 
-labeledTextBox(secPath, "Zigzag Every", "1", function(txt)
+zigEveryBox = labeledTextBox(secProfile, "Zigzag Every", "1", function(txt)
 local n = tonumber(txt)
-if n then setPath("zigzagEvery", n) end
+if n then setProfile("zigzagEvery", n) end
 end)
 
-labeledTextBox(secPath, "Sigmoid K", "6", function(txt)
+noiseAmpBox = labeledTextBox(secProfile, "Noise Amp", "10", function(txt)
 local n = tonumber(txt)
-if n then setPath("sigmoidK", n) end
+if n then setProfile("noiseAmp", n) end
 end)
 
-labeledTextBox(secPath, "Sigmoid Mid", "0.5", function(txt)
+sigKBox = labeledTextBox(secProfile, "Sigmoid K", "6", function(txt)
 local n = tonumber(txt)
-if n then setPath("sigmoidMid", n) end
+if n then setProfile("sigmoidK", n) end
 end)
 
-labeledTextBox(secPath, "Chaotic R", "3.9", function(txt)
+sigMidBox = labeledTextBox(secProfile, "Sigmoid Mid", "0.5", function(txt)
 local n = tonumber(txt)
-if n then setPath("chaoticR", n) end
+if n then setProfile("sigmoidMid", n) end
 end)
+
+chaoticRBox = labeledTextBox(secProfile, "Chaotic R", "3.9", function(txt)
+local n = tonumber(txt)
+if n then setProfile("chaoticR", n) end
+end)
+
+yawStepBox = labeledTextBox(secProfile, "Yaw Step", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("yawStep", n) end
+end)
+
+yawVarBox = labeledTextBox(secProfile, "Yaw Var", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("yawVar", n) end
+end)
+
+pitchBiasBox = labeledTextBox(secProfile, "Pitch Bias", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("pitchBias", n) end
+end)
+
+pitchVarBox = labeledTextBox(secProfile, "Pitch Var", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("pitchVar", n) end
+end)
+
+rollBiasBox = labeledTextBox(secProfile, "Roll Bias", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("rollBias", n) end
+end)
+
+rollVarBox = labeledTextBox(secProfile, "Roll Var", "0", function(txt)
+local n = tonumber(txt)
+if n then setProfile("rollVar", n) end
+end)
+
+randomChaosBox = labeledTextBox(secProfile, "Chaos", "10", function(txt)
+local n = tonumber(txt)
+if n then setProfile("randomChaos", n) end
+end)
+
+updateProfileVis()
 
 
 -- === Segment Geometry ===
