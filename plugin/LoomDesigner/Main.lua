@@ -29,6 +29,7 @@ ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
 -- Forward declare so we can use local deepCopy inside DC even if it’s defined later
 local deepCopy
+local ensureTrunk
 
 -- DC: resilient deep copy that uses LoomConfigUtil if available, else local
 local function DC(v)
@@ -215,7 +216,7 @@ deepCopy = FT.fn("Main.deepCopy", deepCopy)
 
 local _commitTimer: thread? = nil
 
-local function ensureTrunk(st)
+function ensureTrunk(st)
         st.savedProfiles = st.savedProfiles or {}
         local first
         for n in pairs(st.savedProfiles) do first = first or n end
