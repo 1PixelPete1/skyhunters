@@ -17,6 +17,7 @@ LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
 local LoomConfigUtil = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigUtil"})
     or RequireUtil.fromReplicatedStorage({"looms","LoomConfigUtil"})
 LoomConfigUtil = RequireUtil.must(LoomConfigUtil, "looms/LoomConfigUtil")
+print("[LoomDesigner] Using LoomConfigUtil.deepCopy:", type(LoomConfigUtil and LoomConfigUtil.deepCopy))
 
 local VisualScene = RequireUtil.fromRelative(script.Parent, {"VisualScene"})
 VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
@@ -121,7 +122,9 @@ end
 
 function LoomDesigner.Start(plugin)
         print("LoomDesigner plugin started", plugin)
-        GrowthVisualizer.SetEditorMode(true)
+        if GrowthVisualizer and type(GrowthVisualizer.SetEditorMode) == "function" then
+                GrowthVisualizer.SetEditorMode(true)
+        end
         -- Bootstrap one profile if none exist
         if next(state.savedProfiles or {}) == nil then
                 LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
