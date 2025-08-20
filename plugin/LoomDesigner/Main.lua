@@ -2,7 +2,15 @@
 -- LoomDesigner plugin. Manages a tiny state object representing the designer
 -- selections and can export configs to a Lua file.
 
+-- FlowTrace provides detailed logging and is required near the top so all
+-- subsequent logic can use it. Every line includes explicit commentary.
+local FT = require(script.Parent.FlowTrace) -- tracing module
+
 local RequireUtil = require(script.Parent.RequireUtil)
+
+-- Initialize tracing with default options. Enabled can be flipped off via
+-- global flag or Plugin settings; maxStr limits string lengths in logs.
+FT.init({ enabled = true, tagAllow = nil, maxStr = 160, plugin = plugin })
 
 -- Prefer plugin-local GrowthVisualizer so Studio uses scene-driven version
 local GrowthVisualizer = RequireUtil.fromRelative(script.Parent.Parent, {"growth","GrowthVisualizer"})
@@ -37,6 +45,8 @@ local function DC(v)
     -- fall back to local deepCopy (defined below)
     return deepCopy and deepCopy(v) or v
 end
+-- Wrap DC to log cloning operations
+DC = FT.fn("Main.DC", DC)
 
 local LoomDesigner = {}
 
@@ -104,6 +114,13 @@ local state = {
         decoLibrary = {},
 }
 
+-- Wrap the primary state table with a proxy so all reads/writes are logged.
+state = select(1, FT.watchTable("state", state))
+-- Also watch key mutable subtables to trace deeper mutations.
+state.savedProfiles = select(1, FT.watchTable("state.savedProfiles", state.savedProfiles))
+state.profileDrafts = select(1, FT.watchTable("state.profileDrafts", state.profileDrafts))
+state.overrides = select(1, FT.watchTable("state.overrides", state.overrides))
+
 local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
@@ -121,21 +138,30 @@ local function normalizeSeed(seed)
 end
 
 function LoomDesigner.Start(plugin)
+        -- Basic startup message for context
         print("LoomDesigner plugin started", plugin)
-        if GrowthVisualizer and type(GrowthVisualizer.SetEditorMode) == "function" then
+        -- First checkpoint indicates plugin start and if GV is available
+        FT.check("Start.begin", {hasGV = GrowthVisualizer ~= nil})
+        -- Safely attempt to enable editor mode on GV
+        if FT.branch("GV.has.SetEditorMode", type(GrowthVisualizer.SetEditorMode) == "function") then
                 GrowthVisualizer.SetEditorMode(true)
+        else
+                FT.warn("GV.missing.SetEditorMode", "skipped")
         end
-        -- Bootstrap one profile if none exist
-        if next(state.savedProfiles or {}) == nil then
+        -- Bootstrap one profile if none exist and log branch decision
+        if FT.branch("Start.hasProfiles", next(state.savedProfiles or {}) ~= nil, {count = state.savedProfiles and #state.savedProfiles}) then
+                ensureTrunk(state)
+        else
                 LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
                 state.profileDrafts = state.profileDrafts or {}
                 state.profileDrafts["profile1"] = DC(state.savedProfiles["profile1"])
                 state.activeProfileName = "profile1"
                 ensureTrunk(state)
                 LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
-        else
-                ensureTrunk(state)
+                -- After creating default profile log active profile name
+                FT.check("Start.created", {active = state.activeProfileName})
         end
+        -- Return current state at end of Start
         return state
 end
 
@@ -183,6 +209,8 @@ deepCopy = function(v)
         end
         return copy
 end
+-- Trace standalone deepCopy utility
+deepCopy = FT.fn("Main.deepCopy", deepCopy)
 
 local _commitTimer: thread? = nil
 
@@ -196,8 +224,12 @@ local function ensureTrunk(st)
                 st.branchAssignments.trunkProfile = first or "trunk"
         end
 end
+-- Instrument ensureTrunk for visibility
+ensureTrunk = FT.fn("Main.ensureTrunk", ensureTrunk)
 
 function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
+        -- Record incoming arguments for debugging
+        FT.check("Commit.args", {name = draftName})
         local st = LoomDesigner.GetState()
         st.savedProfiles = st.savedProfiles or {}
         if draftName and draftName ~= "" and draftTable then
@@ -207,6 +239,8 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
                 st.savedProfiles[draftName] = DC(draftTable)
+                -- After cloning draft, note success status
+                FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
         end
         ensureTrunk(st)
 
@@ -316,6 +350,9 @@ local function applyAuthoring()
         return merged
 end
 
+-- Wrap applyAuthoring to capture calls and results
+applyAuthoring = FT.fn("Main.applyAuthoring", applyAuthoring)
+
 function LoomDesigner.ImportAuthoring()
         local cfg = LoomConfigs[state.configId]
         if not cfg then return end
@@ -387,9 +424,12 @@ function LoomDesigner.RebuildPreview(_container)
         model.Parent = parent
         VisualScene.SetPreviewModel(model)
 
-        if GrowthVisualizer and type(GrowthVisualizer.Release) == "function" then
+        -- Guard optional Release call on GrowthVisualizer
+        if FT.branch("Render.hasGV.Release", type(GrowthVisualizer.Release) == "function") then
                 GrowthVisualizer.Release(nil, 0)
         end
+        -- Check arguments before rendering
+        FT.check("Render.args", {configId = state.configId, baseSeed = state.baseSeed})
         local ok, err = pcall(function()
                 GrowthVisualizer.Render(nil, {
                         loomUid = 0,
@@ -404,6 +444,8 @@ function LoomDesigner.RebuildPreview(_container)
                         },
                 })
         end)
+        -- After render call, log same arguments for symmetry
+        FT.check("Render.args", {configId = state.configId, baseSeed = state.baseSeed})
 
         if not ok then
                 warn("RebuildPreview failed: ", err)
@@ -505,5 +547,8 @@ function LoomDesigner.ExportConfig(config, destPath)
 	file:close()
 	return true
 end
+
+-- Wrap the exported module table so each function logs automatically
+LoomDesigner = FT.traceTable("Main", LoomDesigner)
 
 return LoomDesigner
