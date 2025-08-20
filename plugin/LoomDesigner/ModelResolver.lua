@@ -59,7 +59,7 @@ function ModelResolver.ResolveOne(ref)
         local have = {}
         if folder then
             for _, ch in ipairs(folder:GetChildren()) do
-                table.insert(have, ch.Name .. "(" .. ch.ClassName .. ")")
+                table.insert(have, string.format("%s(%s)", ch.Name, ch.ClassName))
             end
         end
         warn(("ModelResolver: missing model '%s' in %s; have: [%s]")
@@ -70,7 +70,7 @@ function ModelResolver.ResolveOne(ref)
         if cached then
             return cached:Clone()
         end
-        local ok, got = pcall(game.GetObjects, game, "rbxassetid://" .. tostring(ref))
+        local ok, got = pcall(game.GetObjects, game, string.format("rbxassetid://%s", tostring(ref)))
         if ok and got and got[1] then
             local inst = got[1]
             if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("BasePart") then
@@ -78,10 +78,10 @@ function ModelResolver.ResolveOne(ref)
                 return inst:Clone()
             end
         end
-        warn("ModelResolver: failed to load asset id " .. tostring(ref))
+        warn(("ModelResolver: failed to load asset id %s"):format(tostring(ref)))
         return nil
     else
-        warn("ModelResolver: unsupported ref type " .. type(ref))
+        warn(("ModelResolver: unsupported ref type %s"):format(type(ref)))
         return nil
     end
 end

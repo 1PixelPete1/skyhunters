@@ -479,23 +479,24 @@ local function parseVector3(s: any): Vector3
 end
 
 local function parseColor3(s)
-if typeof(s) == "Color3" then return s end
-s = tostring(s):lower():gsub("%s+", "")
-if NamedColors[s] then return NamedColors[s] end
-local r,g,b = s:match("^rgb%((%d+),(%d+),(%d+)%)$")
-if not r then
-    r,g,b = s:match("^(%d+),(%d+),(%d+)$")
-end
-if r and g and b then
-    return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
-end
-if s:sub(1,1) ~= "#" then s = "#" .. s end
-local hex = s:match("^#(%x%x)(%x%x)(%x%x)$")
-if hex then
-    local rr,gg,bb = s:sub(2,3), s:sub(4,5), s:sub(6,7)
-    return Color3.fromRGB(tonumber(rr,16), tonumber(gg,16), tonumber(bb,16))
-end
-return Color3.fromRGB(255,255,255)
+    if typeof(s) == "Color3" then return s end
+    s = tostring(s):lower():gsub("%s+", "")
+    if NamedColors[s] then return NamedColors[s] end
+    local r, g, b = s:match("^rgb%((%d+),(%d+),(%d+)%)$")
+    if not r then
+        r, g, b = s:match("^(%d+),(%d+),(%d+)$")
+    end
+    if r and g and b then
+        return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
+    end
+    if s:sub(1, 1) ~= "#" then
+        s = "#" .. s
+    end
+    local rr, gg, bb = s:match("^#(%x%x)(%x%x)(%x%x)$")
+    if rr then
+        return Color3.fromRGB(tonumber(rr, 16), tonumber(gg, 16), tonumber(bb, 16))
+    end
+    return Color3.fromRGB(255, 255, 255)
 end
 
 labeledTextBox(secGeo, "Color", "#ffffff", function(txt)
