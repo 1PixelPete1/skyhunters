@@ -3,6 +3,8 @@
 -- selections and can export configs to a Lua file.
 
 local RequireUtil = require(script.Parent.RequireUtil)
+-- Import FlowTrace for rich tracing; every public function will be wrapped
+local FT = require(script.Parent.FlowTrace)
 
 -- Prefer plugin-local GrowthVisualizer so Studio uses scene-driven version
 local GrowthVisualizer = RequireUtil.fromRelative(script.Parent.Parent, {"growth","GrowthVisualizer"})
@@ -104,6 +106,12 @@ local state = {
         decoLibrary = {},
 }
 
+-- Proxy top-level state and sub tables so every read/write is logged
+state = select(1, FT.watchTable("state", state))
+state.savedProfiles = select(1, FT.watchTable("state.savedProfiles", state.savedProfiles))
+state.profileDrafts = select(1, FT.watchTable("state.profileDrafts", state.profileDrafts))
+state.overrides = select(1, FT.watchTable("state.overrides", state.overrides))
+
 local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
@@ -122,19 +130,37 @@ end
 
 function LoomDesigner.Start(plugin)
         print("LoomDesigner plugin started", plugin)
-        if GrowthVisualizer and type(GrowthVisualizer.SetEditorMode) == "function" then
-                GrowthVisualizer.SetEditorMode(true)
+
+        -- read optional tag filter from plugin settings then init tracer
+        local tagAllow
+        if plugin and plugin.GetSetting then
+                local ok, tags = pcall(plugin.GetSetting, plugin, "ld.ft.tags")
+                if ok then tagAllow = tags end
         end
+        FT.init({enabled = true, tagAllow = tagAllow, maxStr = 160})
+
+        -- checkpoint at start: do we have a GrowthVisualizer module?
+        FT.check("Start.begin", {hasGV = GrowthVisualizer ~= nil})
+
+        -- guard SetEditorMode presence before calling
+        if FT.branch("GV.has.SetEditorMode", type(GrowthVisualizer.SetEditorMode) == "function") then
+                GrowthVisualizer.SetEditorMode(true)
+        else
+                FT.warn("GV.missing.SetEditorMode", "skipped")
+        end
+
         -- Bootstrap one profile if none exist
-        if next(state.savedProfiles or {}) == nil then
+        if FT.branch("Start.hasProfiles", next(state.savedProfiles or {}) ~= nil,
+                {count = (state.savedProfiles and #state.savedProfiles)}) then
+                ensureTrunk(state)
+        else
                 LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
                 state.profileDrafts = state.profileDrafts or {}
                 state.profileDrafts["profile1"] = DC(state.savedProfiles["profile1"])
                 state.activeProfileName = "profile1"
                 ensureTrunk(state)
                 LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
-        else
-                ensureTrunk(state)
+                FT.check("Start.created", {active = state.activeProfileName})
         end
         return state
 end
@@ -184,6 +210,9 @@ deepCopy = function(v)
         return copy
 end
 
+-- Trace deepCopy helper as it is reused in multiple paths
+deepCopy = FT.fn("Main.deepCopy", deepCopy)
+
 local _commitTimer: thread? = nil
 
 local function ensureTrunk(st)
@@ -197,9 +226,13 @@ local function ensureTrunk(st)
         end
 end
 
+-- Wrap local helpers for traceable entry/exit
+ensureTrunk = FT.fn("Main.ensureTrunk", ensureTrunk)
+
 function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
         local st = LoomDesigner.GetState()
         st.savedProfiles = st.savedProfiles or {}
+        FT.check("Commit.args", {name = draftName})
         if draftName and draftName ~= "" and draftTable then
                 -- Normalize & validate kind
                 if draftTable.kind then
@@ -207,6 +240,7 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
                 st.savedProfiles[draftName] = DC(draftTable)
+                FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
         end
         ensureTrunk(st)
 
@@ -315,6 +349,9 @@ local function applyAuthoring()
         LoomConfigs[cfgId] = merged
         return merged
 end
+
+-- Trace the local utility for visibility across calls
+applyAuthoring = FT.fn("Main.applyAuthoring", applyAuthoring)
 
 function LoomDesigner.ImportAuthoring()
         local cfg = LoomConfigs[state.configId]
@@ -503,7 +540,10 @@ function LoomDesigner.ExportConfig(config, destPath)
 	end
 	file:write("}\n\nreturn configs\n")
 	file:close()
-	return true
+        return true
 end
+
+-- Wrap exported table so all public methods are traced
+LoomDesigner = FT.traceTable("Main", LoomDesigner)
 
 return LoomDesigner
