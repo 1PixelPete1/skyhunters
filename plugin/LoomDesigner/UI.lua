@@ -380,7 +380,13 @@ local ampBox, freqBox, curvBox, zigEveryBox, noiseAmpBox, sigKBox, sigMidBox, ch
 local yawStepBox, yawVarBox, pitchBiasBox, pitchVarBox, rollBiasBox, rollVarBox, randomChaosBox
 
 local function setProfile(field, value)
-    LoomDesigner.SetOverrides({profile = {[field] = value}})
+    local st = LoomDesigner.GetState()
+    local active = st.activeProfileName
+    if not active then return end
+    st.profileDrafts = st.profileDrafts or {}
+    st.profileDrafts[active] = st.profileDrafts[active] or LoomConfigUtil.deepCopy(st.savedProfiles[active] or {})
+    st.profileDrafts[active][field] = value
+    LoomDesigner.CommitProfileEdit(active, st.profileDrafts[active])
     LoomDesigner.RebuildPreview(nil)
 end
 
@@ -407,8 +413,7 @@ end
 
 dropdown(secProfile, popupHost, "Profile Kind", {"straight","curved","zigzag","noise","sigmoid","chaotic","spiral","random"}, 2, function(opt)
     currentProfileKind = opt
-    LoomDesigner.SetOverrides({profile = {kind = opt}})
-    LoomDesigner.RebuildPreview(nil)
+    setProfile("kind", opt)
     updateProfileVis()
 end)
 
@@ -1077,6 +1082,12 @@ local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
     local st = LoomDesigner.GetState()
 
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0,4)
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = secModels
+
     local libLabel = Instance.new("TextLabel")
     libLabel.Text = "Library"
     libLabel.TextColor3 = Color3.fromRGB(200,200,200)
@@ -1126,6 +1137,17 @@ local function renderModels()
     mapLabel.TextXAlignment = Enum.TextXAlignment.Left
     mapLabel.Parent = secModels
 
+    local mapContainer = Instance.new("Frame")
+    mapContainer.BackgroundTransparency = 1
+    mapContainer.Size = UDim2.new(1,0,0,0)
+    mapContainer.AutomaticSize = Enum.AutomaticSize.Y
+    mapContainer.Parent = secModels
+    local mapLayout = Instance.new("UIListLayout")
+    mapLayout.Padding = UDim.new(0,4)
+    mapLayout.FillDirection = Enum.FillDirection.Vertical
+    mapLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    mapLayout.Parent = mapContainer
+
     local depths = {}
     for k in pairs(st.modelsByDepth) do table.insert(depths, k) end
     table.insert(depths, "terminal")
@@ -1141,7 +1163,11 @@ local function renderModels()
         df.BackgroundTransparency = 1
         df.Size = UDim2.new(1,0,0,0)
         df.AutomaticSize = Enum.AutomaticSize.Y
-        df.Parent = secModels
+        df.Parent = mapContainer
+        local dfLayout = Instance.new("UIListLayout")
+        dfLayout.FillDirection = Enum.FillDirection.Vertical
+        dfLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        dfLayout.Parent = df
         local header = Instance.new("TextLabel")
         header.Text = depth=="terminal" and "Terminal" or ("Depth "..depth)
         header.BackgroundTransparency = 1
@@ -1179,7 +1205,7 @@ local function renderModels()
                 renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
             end)
         end
-        makeBtn(df, "Add", function()
+        local addBtn = makeBtn(df, "Add", function()
             local ref = st.modelLibrary[1]
             if ref == nil then
                 warn("[LoomDesigner] Model library is empty. Use 'Add by Name' or 'Add AssetId' first.")
@@ -1188,7 +1214,13 @@ local function renderModels()
             st.modelsByDepth[depth] = list
             table.insert(list, ref)
             renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-        end).Size = UDim2.new(0,60,0,24)
+        end)
+        addBtn.Size = UDim2.new(0,60,0,24)
+        if not st.modelLibrary[1] then
+            addBtn.Active = false
+            addBtn.AutoButtonColor = false
+            addBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+        end
     end
 end
 
@@ -1198,6 +1230,13 @@ renderModels()
 local function renderDecorations()
     for _, c in ipairs(secDecoAuth:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
     local st = LoomDesigner.GetState()
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0,4)
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = secDecoAuth
+
     checkbox(secDecoAuth, "Enable", st.overrides.decorations.enabled, function(val)
         st.overrides.decorations.enabled = val
         LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
@@ -1209,6 +1248,10 @@ local function renderDecorations()
         frame.BackgroundTransparency = 1
         frame.AutomaticSize = Enum.AutomaticSize.Y
         frame.Parent = secDecoAuth
+        local frameLayout = Instance.new("UIListLayout")
+        frameLayout.FillDirection = Enum.FillDirection.Vertical
+        frameLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        frameLayout.Parent = frame
 
         local header = Instance.new("TextLabel")
         header.Text = "Decoration "..idx
@@ -1223,6 +1266,10 @@ local function renderDecorations()
         modelsFrame.AutomaticSize = Enum.AutomaticSize.Y
         modelsFrame.BackgroundTransparency = 1
         modelsFrame.Parent = frame
+        local modelsLayout = Instance.new("UIListLayout")
+        modelsLayout.FillDirection = Enum.FillDirection.Vertical
+        modelsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        modelsLayout.Parent = modelsFrame
         for i, ref in ipairs(deco.models or {}) do
             local row = Instance.new("Frame")
             row.Size = UDim2.new(1,0,0,26)
@@ -1245,7 +1292,7 @@ local function renderDecorations()
                 LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
             end)
         end
-        makeBtn(modelsFrame, "Add Model", function()
+        local addModelBtn = makeBtn(modelsFrame, "Add Model", function()
             deco.models = deco.models or {}
             local ref = st.modelLibrary[1]
             if ref == nil then
@@ -1254,7 +1301,13 @@ local function renderDecorations()
             end
             table.insert(deco.models, ref)
             renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-        end).Size = UDim2.new(0,100,0,24)
+        end)
+        addModelBtn.Size = UDim2.new(0,100,0,24)
+        if not st.modelLibrary[1] then
+            addModelBtn.Active = false
+            addModelBtn.AutoButtonColor = false
+            addModelBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+        end
 
         dropdown(frame, popupHost, "Placement", {"tip","junction","along","radial","spiral"}, 1, function(opt)
             deco.placement = opt
@@ -1316,10 +1369,16 @@ local function renderDecorations()
         decoEditor(deco, i)
     end
 
-    makeBtn(secDecoAuth, "Add Decoration", function()
+    local addDecoBtn = makeBtn(secDecoAuth, "Add Decoration", function()
         table.insert(st.overrides.decorations.types, {models = {st.modelLibrary[1] or nil}, placement="tip", rotation="upright", density=1, minDepth=0, maxDepth=0, scaleMin=1, scaleMax=1})
         renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-    end).Size = UDim2.new(0,120,0,24)
+    end)
+    addDecoBtn.Size = UDim2.new(0,120,0,24)
+    if not st.modelLibrary[1] then
+        addDecoBtn.Active = false
+        addDecoBtn.AutoButtonColor = false
+        addDecoBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+    end
 end
 
 renderDecorations()
