@@ -71,14 +71,18 @@ local function formatExtras(extras: any?): string
     return table.concat(parts, " ")
 end
 
--- central prefix builder; uses debug info for file:line
-local function makePrefix(tag: string): string
+local function makePrefix(tag: string, level: number?)
+    -- default to stack level 3 which corresponds to the external caller when
+    -- FT.log/FT.warn are invoked directly. Additional wrapper layers can pass
+    -- in a higher level so we report the true callsite.
+    local lvl = level or 3
     local src = "?"
     local line = "?"
-    local info = debug and debug.getinfo(3, "Sl")
-    if info then
-        src = info.short_src or src
-        line = info.currentline or line
+    if debug and debug.info then
+        -- debug.info returns individual pieces of information so we call it
+        -- separately for source and line number.
+        src = debug.info(lvl, "s") or src
+        line = debug.info(lvl, "l") or line
     end
     local now = string.format("%.3f", os.clock())
     return string.format("[FT][%s][%s][%s:%s][%s]", context, now, src, line, tag)
@@ -135,15 +139,31 @@ end
 
 -- log helper
 function FT.log(tag: string, fmt: string, ...)
-    local prefix = makePrefix(tag)
-    local msg = string.format(fmt, ...)
+    local args = { ... }
+    local n = select("#", ...)
+    local extraLevel = 0
+    if n > 0 and type(args[n]) == "number" then
+        extraLevel = args[n]
+        args[n] = nil
+        n -= 1
+    end
+    local prefix = makePrefix(tag, 3 + extraLevel)
+    local msg = string.format(fmt, table.unpack(args, 1, n))
     emit("print", tag, prefix .. " " .. truncate(msg))
 end
 
 -- warn helper
 function FT.warn(tag: string, fmt: string, ...)
-    local prefix = makePrefix(tag)
-    local msg = string.format(fmt, ...)
+    local args = { ... }
+    local n = select("#", ...)
+    local extraLevel = 0
+    if n > 0 and type(args[n]) == "number" then
+        extraLevel = args[n]
+        args[n] = nil
+        n -= 1
+    end
+    local prefix = makePrefix(tag, 3 + extraLevel)
+    local msg = string.format(fmt, table.unpack(args, 1, n))
     emit("warn", tag, prefix .. " " .. truncate(msg))
 end
 
@@ -156,7 +176,7 @@ function FT.fn(tag: string, f: (any) -> any)
             argParts[i] = formatValue(select(i, ...))
         end
         -- use Unicode arrow to denote function entry
-        FT.log(tag, "→ %s", table.concat(argParts, ",")) -- entry
+        FT.log(tag, "→ %s", table.concat(argParts, ","), 1) -- entry
 
         -- execute function safely
         local results = {pcall(f, ...)}
@@ -167,12 +187,12 @@ function FT.fn(tag: string, f: (any) -> any)
                 ret[#ret+1] = formatValue(results[i])
             end
             -- arrow left marks function return values
-            FT.log(tag, "← %s", table.concat(ret, ",")) -- return
+            FT.log(tag, "← %s", table.concat(ret, ","), 1) -- return
             return table.unpack(results, 2)
         else
             -- failure path: log and rethrow
             -- cross symbol marks an error during execution
-            FT.warn(tag, "× %s", formatValue(results[2])) -- error
+            FT.warn(tag, "× %s", formatValue(results[2]), 1) -- error
 
             error(results[2])
         end
@@ -198,7 +218,7 @@ function FT.watchTable(tag: string, t: table)
     -- log reading
     function meta:__index(k)
         local v = t[k] -- fetch original value
-        FT.log(tag, "GET %s=%s", truncate(k), formatValue(v)) -- emit read trace
+        FT.log(tag, "GET %s=%s", truncate(k), formatValue(v), 1) -- emit read trace
         return v -- provide value to caller
     end
 
@@ -206,7 +226,7 @@ function FT.watchTable(tag: string, t: table)
     function meta:__newindex(k, v)
         local old = t[k] -- capture previous value
         t[k] = v -- perform the write on real table
-        FT.log(tag, "SET %s %s->%s", truncate(k), formatValue(old), formatValue(v)) -- emit write trace
+        FT.log(tag, "SET %s %s->%s", truncate(k), formatValue(old), formatValue(v), 1) -- emit write trace
     end
 
     -- forward table functions
@@ -225,18 +245,18 @@ end
 
 -- branch probe
 function FT.branch(tag: string, cond: boolean, extras: table?)
-    FT.log(tag, "IF %s %s", tostring(cond), formatExtras(extras)) -- log condition result
+    FT.log(tag, "IF %s %s", tostring(cond), formatExtras(extras), 1) -- log condition result
     return cond -- pass through condition for inline 
 end
 
 -- loop probe
 function FT.loop(tag: string, i: number, n: number, extras: table?)
-    FT.log(tag, "FOR %d/%d %s", i, n, formatExtras(extras)) -- log iteration index and extras
+    FT.log(tag, "FOR %d/%d %s", i, n, formatExtras(extras), 1) -- log iteration index and extras
 end
 
 -- checkpoint probe
 function FT.check(tag: string, kv: table)
-    FT.log(tag, "CHECK %s", formatExtras(kv)) -- log arbitrary key/value snapshot
+    FT.log(tag, "CHECK %s", formatExtras(kv), 1) -- log arbitrary key/value snapshot
 end
 
 return FT
