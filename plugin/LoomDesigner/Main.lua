@@ -10,12 +10,12 @@ local GrowthVisualizer = RequireUtil.fromRelative(script.Parent.Parent, {"growth
 GrowthVisualizer = RequireUtil.must(GrowthVisualizer, "growth/GrowthVisualizer")
 print("[LoomDesigner] GrowthVisualizer:", GrowthVisualizer._PLUGIN_VERSION or "unknown")
 
-local LoomConfigs = RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
-    or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+    or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
 LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
 
-local LoomConfigUtil = RequireUtil.fromReplicatedStorage({"looms","LoomConfigUtil"})
-    or RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigUtil"})
+local LoomConfigUtil = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigUtil"})
+    or RequireUtil.fromReplicatedStorage({"looms","LoomConfigUtil"})
 LoomConfigUtil = RequireUtil.must(LoomConfigUtil, "looms/LoomConfigUtil")
 
 local VisualScene = RequireUtil.fromRelative(script.Parent, {"VisualScene"})
@@ -23,6 +23,19 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
+
+-- Forward declare so we can use local deepCopy inside DC even if it’s defined later
+local deepCopy
+
+-- DC: resilient deep copy that uses LoomConfigUtil if available, else local
+local function DC(v)
+    local f = LoomConfigUtil and LoomConfigUtil.deepCopy
+    if type(f) == "function" then
+        return f(v)
+    end
+    -- fall back to local deepCopy (defined below)
+    return deepCopy and deepCopy(v) or v
+end
 
 local LoomDesigner = {}
 
@@ -113,7 +126,7 @@ function LoomDesigner.Start(plugin)
         if next(state.savedProfiles or {}) == nil then
                 LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
                 state.profileDrafts = state.profileDrafts or {}
-                state.profileDrafts["profile1"] = LoomConfigUtil.deepCopy(state.savedProfiles["profile1"])
+                state.profileDrafts["profile1"] = DC(state.savedProfiles["profile1"])
                 state.activeProfileName = "profile1"
                 ensureTrunk(state)
                 LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
@@ -159,7 +172,7 @@ local function deepMerge(dst, src)
         end
 end
 
-local function deepCopy(v)
+deepCopy = function(v)
         if type(v) ~= "table" then return v end
         local copy = {}
         for k, val in pairs(v) do
@@ -190,7 +203,7 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         local k = tostring(draftTable.kind):lower()
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
-                st.savedProfiles[draftName] = LoomConfigUtil.deepCopy(draftTable)
+                st.savedProfiles[draftName] = DC(draftTable)
         end
         ensureTrunk(st)
 
@@ -289,7 +302,7 @@ local function applyAuthoring()
                         byDepth = state.modelsByDepth,
                         decorations = (state.overrides and state.overrides.decorations and state.overrides.decorations.enabled)
                                 and state.overrides.decorations.types
-                                or (base.models and LoomConfigUtil.deepCopy(base.models.decorations)) or nil,
+                                or (base.models and DC(base.models.decorations)) or nil,
                 },
                 overrides = state.overrides,
         }
@@ -371,7 +384,9 @@ function LoomDesigner.RebuildPreview(_container)
         model.Parent = parent
         VisualScene.SetPreviewModel(model)
 
-        GrowthVisualizer.Release(nil, 0)
+        if GrowthVisualizer and type(GrowthVisualizer.Release) == "function" then
+                GrowthVisualizer.Release(nil, 0)
+        end
         local ok, err = pcall(function()
                 GrowthVisualizer.Render(nil, {
                         loomUid = 0,
