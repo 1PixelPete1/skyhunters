@@ -205,6 +205,19 @@ local function bindNumberField(parent: Instance, label: string, get: ()->number?
     end)
 end
 
+local function addTooltip(target: GuiObject, text: string)
+    local tip = Instance.new("TextLabel")
+    tip.Text = text
+    tip.Visible = false
+    tip.BackgroundColor3 = Color3.fromRGB(25,25,25)
+    tip.TextColor3 = Color3.fromRGB(220,220,220)
+    tip.BorderSizePixel = 0
+    tip.AutomaticSize = Enum.AutomaticSize.XY
+    tip.Parent = target
+    target.MouseEnter:Connect(function() tip.Visible = true end)
+    target.MouseLeave:Connect(function() tip.Visible = false end)
+end
+
 function UI.Build(widget: PluginGui, plugin: Plugin, where)
 local controlsHost: Frame = where.controlsHost
 local popupHost: Frame = where.popupHost
@@ -225,6 +238,14 @@ layout.FillDirection = Enum.FillDirection.Vertical
 layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = scroll
+
+local st = LoomDesigner.GetState()
+local status = Instance.new("TextLabel")
+status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments and st.branchAssignments.trunkProfile or "-")
+status.TextColor3 = Color3.fromRGB(160,200,255)
+status.BackgroundTransparency = 1
+status.Size = UDim2.new(1,0,0,18)
+status.Parent = scroll
 
 local spawnBtn = Instance.new("TextButton")
 spawnBtn.Size = UDim2.new(0,180,0,26)
@@ -375,125 +396,32 @@ if n then
 end
 end)
 
-local currentProfileKind = "curved"
-local ampBox, freqBox, curvBox, zigEveryBox, noiseAmpBox, sigKBox, sigMidBox, chaoticRBox
-local yawStepBox, yawVarBox, pitchBiasBox, pitchVarBox, rollBiasBox, rollVarBox, randomChaosBox
-
-local function setProfile(field, value)
+local function renderProfileSection()
+    for _, c in ipairs(secProfile:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
+    end
     local st = LoomDesigner.GetState()
     local active = st.activeProfileName
-    if not active then return end
-    st.profileDrafts = st.profileDrafts or {}
-    st.profileDrafts[active] = st.profileDrafts[active] or LoomConfigUtil.deepCopy(st.savedProfiles[active] or {})
-    st.profileDrafts[active][field] = value
-    LoomDesigner.CommitProfileEdit(active, st.profileDrafts[active])
-    LoomDesigner.RebuildPreview(nil)
+    if not active then
+        local banner = Instance.new("TextLabel")
+        banner.Text = "Select or create a Profile in Authoring to edit."
+        banner.TextColor3 = Color3.fromRGB(255,180,80)
+        banner.BackgroundTransparency = 1
+        banner.Size = UDim2.new(1,0,0,20)
+        banner.Parent = secProfile
+    else
+        local KINDS = LoomDesigner.SUPPORTED_KIND_LIST
+        local draft = st.profileDrafts[active]
+        dropdown(secProfile, popupHost, "Kind", KINDS,
+            table.find(KINDS, (draft and draft.kind) or "curved") or 2,
+            function(opt)
+                draft.kind = string.lower(opt)
+                LoomDesigner.CommitProfileEdit(active, draft)
+            end
+        )
+    end
 end
-
-local function updateProfileVis()
-    local k = currentProfileKind
-    if ampBox then ampBox.Parent.Visible = (k == "curved" or k == "zigzag" or k == "sigmoid" or k == "chaotic") end
-    if freqBox then freqBox.Parent.Visible = (k == "curved") end
-    if curvBox then curvBox.Parent.Visible = (k == "curved") end
-    if zigEveryBox then zigEveryBox.Parent.Visible = (k == "zigzag") end
-    if noiseAmpBox then noiseAmpBox.Parent.Visible = (k == "noise") end
-    if sigKBox then sigKBox.Parent.Visible = (k == "sigmoid") end
-    if sigMidBox then sigMidBox.Parent.Visible = (k == "sigmoid") end
-    if chaoticRBox then chaoticRBox.Parent.Visible = (k == "chaotic") end
-    local spiral = (k == "spiral")
-    if yawStepBox then yawStepBox.Parent.Visible = spiral end
-    if yawVarBox then yawVarBox.Parent.Visible = spiral end
-    local prPitch = (spiral or k == "random")
-    if pitchBiasBox then pitchBiasBox.Parent.Visible = prPitch end
-    if pitchVarBox then pitchVarBox.Parent.Visible = prPitch end
-    if rollBiasBox then rollBiasBox.Parent.Visible = prPitch end
-    if rollVarBox then rollVarBox.Parent.Visible = prPitch end
-    if randomChaosBox then randomChaosBox.Parent.Visible = (k == "random") end
-end
-
-dropdown(secProfile, popupHost, "Profile Kind", {"straight","curved","zigzag","noise","sigmoid","chaotic","spiral","random"}, 2, function(opt)
-    currentProfileKind = opt
-    setProfile("kind", opt)
-    updateProfileVis()
-end)
-
-ampBox = labeledTextBox(secProfile, "Amplitude Deg", "10", function(txt)
-local n = tonumber(txt)
-if n then setProfile("amplitudeDeg", n) end
-end)
-
-freqBox = labeledTextBox(secProfile, "Frequency", "1", function(txt)
-local n = tonumber(txt)
-if n then setProfile("frequency", n) end
-end)
-
-curvBox = labeledTextBox(secProfile, "Curvature", "1", function(txt)
-local n = tonumber(txt)
-if n then setProfile("curvature", n) end
-end)
-
-zigEveryBox = labeledTextBox(secProfile, "Zigzag Every", "1", function(txt)
-local n = tonumber(txt)
-if n then setProfile("zigzagEvery", n) end
-end)
-
-noiseAmpBox = labeledTextBox(secProfile, "Noise Amp", "10", function(txt)
-local n = tonumber(txt)
-if n then setProfile("noiseAmp", n) end
-end)
-
-sigKBox = labeledTextBox(secProfile, "Sigmoid K", "6", function(txt)
-local n = tonumber(txt)
-if n then setProfile("sigmoidK", n) end
-end)
-
-sigMidBox = labeledTextBox(secProfile, "Sigmoid Mid", "0.5", function(txt)
-local n = tonumber(txt)
-if n then setProfile("sigmoidMid", n) end
-end)
-
-chaoticRBox = labeledTextBox(secProfile, "Chaotic R", "3.9", function(txt)
-local n = tonumber(txt)
-if n then setProfile("chaoticR", n) end
-end)
-
-yawStepBox = labeledTextBox(secProfile, "Yaw Step", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("yawStep", n) end
-end)
-
-yawVarBox = labeledTextBox(secProfile, "Yaw Var", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("yawVar", n) end
-end)
-
-pitchBiasBox = labeledTextBox(secProfile, "Pitch Bias", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("pitchBias", n) end
-end)
-
-pitchVarBox = labeledTextBox(secProfile, "Pitch Var", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("pitchVar", n) end
-end)
-
-rollBiasBox = labeledTextBox(secProfile, "Roll Bias", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("rollBias", n) end
-end)
-
-rollVarBox = labeledTextBox(secProfile, "Roll Var", "0", function(txt)
-local n = tonumber(txt)
-if n then setProfile("rollVar", n) end
-end)
-
-randomChaosBox = labeledTextBox(secProfile, "Chaos", "10", function(txt)
-local n = tonumber(txt)
-if n then setProfile("randomChaos", n) end
-end)
-
-updateProfileVis()
-
+renderProfileSection()
 
 -- === Segment Geometry ===
 dropdown(secGeo, popupHost, "Mode", {"Model", "Part"}, 1, function(opt)
@@ -1080,13 +1008,12 @@ renderAssignments()
 -- Models -------------------------------------------------------------------
 local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
-    local st = LoomDesigner.GetState()
-
     local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0,4)
+    layout.Padding = UDim.new(0,6)
     layout.FillDirection = Enum.FillDirection.Vertical
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Parent = secModels
+    local st = LoomDesigner.GetState()
 
     local libLabel = Instance.new("TextLabel")
     libLabel.Text = "Library"
@@ -1103,6 +1030,15 @@ local function renderModels()
         local n = tonumber(txt)
         if n then table.insert(st.modelLibrary, n); renderModels() end
     end)
+
+    if #st.modelLibrary == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Text = "Model Library is empty. Use 'Add by Name' or 'Add AssetId' to seed it."
+        empty.TextColor3 = Color3.fromRGB(180,180,180)
+        empty.BackgroundTransparency = 1
+        empty.Size = UDim2.new(1,0,0,22)
+        empty.Parent = secModels
+    end
 
     for i, ref in ipairs(st.modelLibrary) do
         local row = Instance.new("Frame")
@@ -1143,7 +1079,7 @@ local function renderModels()
     mapContainer.AutomaticSize = Enum.AutomaticSize.Y
     mapContainer.Parent = secModels
     local mapLayout = Instance.new("UIListLayout")
-    mapLayout.Padding = UDim.new(0,4)
+    mapLayout.Padding = UDim.new(0,6)
     mapLayout.FillDirection = Enum.FillDirection.Vertical
     mapLayout.SortOrder = Enum.SortOrder.LayoutOrder
     mapLayout.Parent = mapContainer
@@ -1165,6 +1101,7 @@ local function renderModels()
         df.AutomaticSize = Enum.AutomaticSize.Y
         df.Parent = mapContainer
         local dfLayout = Instance.new("UIListLayout")
+        dfLayout.Padding = UDim.new(0,6)
         dfLayout.FillDirection = Enum.FillDirection.Vertical
         dfLayout.SortOrder = Enum.SortOrder.LayoutOrder
         dfLayout.Parent = df
@@ -1177,7 +1114,8 @@ local function renderModels()
         header.Parent = df
         for i, ref in ipairs(list) do
             local row = Instance.new("Frame")
-            row.Size = UDim2.new(1,0,0,26)
+            row.Size = UDim2.new(1,-160,0,26)
+            row.Position = UDim2.new(0,160,0,0)
             row.BackgroundTransparency = 1
             row.Parent = df
             dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
@@ -1207,20 +1145,17 @@ local function renderModels()
         end
         local addBtn = makeBtn(df, "Add", function()
             local ref = st.modelLibrary[1]
-            if ref == nil then
-                warn("[LoomDesigner] Model library is empty. Use 'Add by Name' or 'Add AssetId' first.")
-                return
-            end
+            if ref == nil then return end
             st.modelsByDepth[depth] = list
             table.insert(list, ref)
             renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         end)
         addBtn.Size = UDim2.new(0,60,0,24)
-        if not st.modelLibrary[1] then
-            addBtn.Active = false
-            addBtn.AutoButtonColor = false
-            addBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
-        end
+        local hasLib = (#st.modelLibrary > 0)
+        addBtn.Active = hasLib
+        addBtn.AutoButtonColor = hasLib
+        addBtn.BackgroundTransparency = hasLib and 0 or 0.5
+        addTooltip(addBtn, "Add the first model from the library to this depth.")
     end
 end
 
@@ -1229,13 +1164,12 @@ renderModels()
 -- Decorations ---------------------------------------------------------------
 local function renderDecorations()
     for _, c in ipairs(secDecoAuth:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
-    local st = LoomDesigner.GetState()
-
     local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0,4)
+    layout.Padding = UDim.new(0,6)
     layout.FillDirection = Enum.FillDirection.Vertical
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Parent = secDecoAuth
+    local st = LoomDesigner.GetState()
 
     checkbox(secDecoAuth, "Enable", st.overrides.decorations.enabled, function(val)
         st.overrides.decorations.enabled = val
@@ -1249,6 +1183,7 @@ local function renderDecorations()
         frame.AutomaticSize = Enum.AutomaticSize.Y
         frame.Parent = secDecoAuth
         local frameLayout = Instance.new("UIListLayout")
+        frameLayout.Padding = UDim.new(0,6)
         frameLayout.FillDirection = Enum.FillDirection.Vertical
         frameLayout.SortOrder = Enum.SortOrder.LayoutOrder
         frameLayout.Parent = frame
@@ -1267,6 +1202,7 @@ local function renderDecorations()
         modelsFrame.BackgroundTransparency = 1
         modelsFrame.Parent = frame
         local modelsLayout = Instance.new("UIListLayout")
+        modelsLayout.Padding = UDim.new(0,6)
         modelsLayout.FillDirection = Enum.FillDirection.Vertical
         modelsLayout.SortOrder = Enum.SortOrder.LayoutOrder
         modelsLayout.Parent = modelsFrame
@@ -1295,19 +1231,15 @@ local function renderDecorations()
         local addModelBtn = makeBtn(modelsFrame, "Add Model", function()
             deco.models = deco.models or {}
             local ref = st.modelLibrary[1]
-            if ref == nil then
-                warn("[LoomDesigner] Model library is empty. Use 'Add by Name' or 'Add AssetId' first.")
-                return
-            end
+            if ref == nil then return end
             table.insert(deco.models, ref)
             renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         end)
         addModelBtn.Size = UDim2.new(0,100,0,24)
-        if not st.modelLibrary[1] then
-            addModelBtn.Active = false
-            addModelBtn.AutoButtonColor = false
-            addModelBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
-        end
+        local hasLib = (#st.modelLibrary > 0)
+        addModelBtn.Active = hasLib
+        addModelBtn.AutoButtonColor = hasLib
+        addModelBtn.BackgroundTransparency = hasLib and 0 or 0.5
 
         dropdown(frame, popupHost, "Placement", {"tip","junction","along","radial","spiral"}, 1, function(opt)
             deco.placement = opt
@@ -1365,6 +1297,15 @@ local function renderDecorations()
         delBtn.Size = UDim2.new(0,80,0,24)
     end
 
+    if #st.overrides.decorations.types == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Text = "No decorations defined. Use 'Add Decoration' to begin."
+        empty.TextColor3 = Color3.fromRGB(180,180,180)
+        empty.BackgroundTransparency = 1
+        empty.Size = UDim2.new(1,0,0,22)
+        empty.Parent = secDecoAuth
+    end
+
     for i, deco in ipairs(st.overrides.decorations.types) do
         decoEditor(deco, i)
     end
@@ -1374,11 +1315,10 @@ local function renderDecorations()
         renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
     end)
     addDecoBtn.Size = UDim2.new(0,120,0,24)
-    if not st.modelLibrary[1] then
-        addDecoBtn.Active = false
-        addDecoBtn.AutoButtonColor = false
-        addDecoBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
-    end
+    local hasLib = (#st.modelLibrary > 0)
+    addDecoBtn.Active = hasLib
+    addDecoBtn.AutoButtonColor = hasLib
+    addDecoBtn.BackgroundTransparency = hasLib and 0 or 0.5
 end
 
 renderDecorations()
