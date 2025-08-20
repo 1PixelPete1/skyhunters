@@ -155,7 +155,9 @@ function FT.fn(tag: string, f: (any) -> any)
         for i = 1, select("#", ...) do
             argParts[i] = formatValue(select(i, ...))
         end
-        FT.log(tag, "\226\134\146 %s", table.concat(argParts, ",")) -- →
+        -- use Unicode arrow to denote function entry
+        FT.log(tag, "→ %s", table.concat(argParts, ",")) -- entry
+
         -- execute function safely
         local results = {pcall(f, ...)}
         if results[1] then
@@ -164,11 +166,14 @@ function FT.fn(tag: string, f: (any) -> any)
             for i = 2, #results do
                 ret[#ret+1] = formatValue(results[i])
             end
-            FT.log(tag, "\226\134\148 %s", table.concat(ret, ",")) -- ←
+            -- arrow left marks function return values
+            FT.log(tag, "← %s", table.concat(ret, ",")) -- return
             return table.unpack(results, 2)
         else
             -- failure path: log and rethrow
-            FT.warn(tag, "\303\227 %s", formatValue(results[2])) -- ×
+            -- cross symbol marks an error during execution
+            FT.warn(tag, "× %s", formatValue(results[2])) -- error
+
             error(results[2])
         end
     end
@@ -176,61 +181,62 @@ end
 
 -- wrap all function fields of a table
 function FT.traceTable(tag: string, tbl: table)
-    for k, v in pairs(tbl) do
-        if type(v) == "function" then
-            tbl[k] = FT.fn(tag .. "." .. tostring(k), v)
+    for k, v in pairs(tbl) do -- iterate over entries in the table
+        if type(v) == "function" then -- only wrap callable fields
+            tbl[k] = FT.fn(tag .. "." .. tostring(k), v) -- replace with traced wrapper
         end
     end
-    return tbl
+    return tbl -- return mutated table to caller
+
 end
 
 -- watchTable: proxy that logs reads and writes
 function FT.watchTable(tag: string, t: table)
-    local proxy = {}
-    local meta = {}
+    local proxy = {} -- table returned to the caller
+    local meta = {} -- metatable housing interception logic
 
     -- log reading
     function meta:__index(k)
-        local v = t[k]
-        FT.log(tag, "GET %s=%s", truncate(k), formatValue(v))
-        return v
+        local v = t[k] -- fetch original value
+        FT.log(tag, "GET %s=%s", truncate(k), formatValue(v)) -- emit read trace
+        return v -- provide value to caller
     end
 
     -- log writing
     function meta:__newindex(k, v)
-        local old = t[k]
-        t[k] = v
-        FT.log(tag, "SET %s %s->%s", truncate(k), formatValue(old), formatValue(v))
+        local old = t[k] -- capture previous value
+        t[k] = v -- perform the write on real table
+        FT.log(tag, "SET %s %s->%s", truncate(k), formatValue(old), formatValue(v)) -- emit write trace
     end
 
     -- forward table functions
-    meta.__len = function()
-        return #t
+    meta.__len = function() -- length operator (#)
+        return #t -- delegate to original table
     end
-    meta.__pairs = function()
+    meta.__pairs = function() -- generic iteration
         return pairs(t)
     end
-    meta.__ipairs = function()
+    meta.__ipairs = function() -- array iteration
         return ipairs(t)
     end
 
-    return setmetatable(proxy, meta), t
+    return setmetatable(proxy, meta), t -- return proxy along with original
 end
 
 -- branch probe
 function FT.branch(tag: string, cond: boolean, extras: table?)
-    FT.log(tag, "IF %s %s", tostring(cond), formatExtras(extras))
-    return cond
+    FT.log(tag, "IF %s %s", tostring(cond), formatExtras(extras)) -- log condition result
+    return cond -- pass through condition for inline 
 end
 
 -- loop probe
 function FT.loop(tag: string, i: number, n: number, extras: table?)
-    FT.log(tag, "FOR %d/%d %s", i, n, formatExtras(extras))
+    FT.log(tag, "FOR %d/%d %s", i, n, formatExtras(extras)) -- log iteration index and extras
 end
 
 -- checkpoint probe
 function FT.check(tag: string, kv: table)
-    FT.log(tag, "CHECK %s", formatExtras(kv))
+    FT.log(tag, "CHECK %s", formatExtras(kv)) -- log arbitrary key/value snapshot
 end
 
 return FT
