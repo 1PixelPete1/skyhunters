@@ -198,6 +198,7 @@ end
 -- simple profile helpers ----------------------------------------------------
 function LoomDesigner.CreateProfile(name: string, profile)
         state.savedProfiles[name] = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+        ensureTrunk(state)
 end
 
 function LoomDesigner.DeleteProfile(name: string)
@@ -250,11 +251,7 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
-        if state.branchAssignments and (not state.branchAssignments.trunkProfile or state.branchAssignments.trunkProfile == "") then
-                local firstName
-                for n in pairs(state.savedProfiles or {}) do firstName = firstName or n end
-                state.branchAssignments.trunkProfile = firstName or "trunk"
-        end
+        ensureTrunk(state)
         local cfgId = resolveConfigId(LoomConfigs, state.configId)
         if not cfgId then return end
         state.configId = cfgId
@@ -306,7 +303,10 @@ end
 LoomDesigner.ApplyAuthoring = applyAuthoring
 
 function LoomDesigner.Reseed()
-        return LoomDesigner.RandomizeSeed()
+        state.baseSeed = LoomDesigner.RandomizeSeed()
+        LoomDesigner.ApplyAuthoring()
+        LoomDesigner.RebuildPreview(nil)
+        return state.baseSeed
 end
 
 local function ensurePreviewParent()
