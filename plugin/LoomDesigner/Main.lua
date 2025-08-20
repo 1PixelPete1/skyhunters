@@ -26,6 +26,13 @@ ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
 local LoomDesigner = {}
 
+-- Single source of truth for supported profile kinds
+local SUPPORTED_KIND_LIST = {"straight","curved","zigzag","sigmoid","chaotic"}
+local SUPPORTED_KINDS = {}
+for _,k in ipairs(SUPPORTED_KIND_LIST) do SUPPORTED_KINDS[k] = true end
+LoomDesigner.SUPPORTED_KIND_LIST = SUPPORTED_KIND_LIST
+LoomDesigner.SUPPORTED_KINDS = SUPPORTED_KINDS
+
 local function firstConfigKey(configs)
         for k, v in pairs(configs) do
                 if type(v) == "table" then return k end
@@ -102,6 +109,17 @@ end
 function LoomDesigner.Start(plugin)
         print("LoomDesigner plugin started", plugin)
         GrowthVisualizer.SetEditorMode(true)
+        -- Bootstrap one profile if none exist
+        if next(state.savedProfiles or {}) == nil then
+                LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
+                state.profileDrafts = state.profileDrafts or {}
+                state.profileDrafts["profile1"] = LoomConfigUtil.deepCopy(state.savedProfiles["profile1"])
+                state.activeProfileName = "profile1"
+                ensureTrunk(state)
+                LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
+        else
+                ensureTrunk(state)
+        end
         return state
 end
 
@@ -153,16 +171,13 @@ end
 local _commitTimer: thread? = nil
 
 local function ensureTrunk(st)
-        if not st.branchAssignments then
-                st.branchAssignments = { trunkProfile = "trunk", perDepth = {}, spacingN = {}, maxPerDepth = {} }
-        end
-        local names = st.savedProfiles or {}
+        st.savedProfiles = st.savedProfiles or {}
         local first
-        for n in pairs(names) do first = first or n end
-        if (not st.branchAssignments.trunkProfile) or st.branchAssignments.trunkProfile == "" then
+        for n in pairs(st.savedProfiles) do first = first or n end
+        st.branchAssignments = st.branchAssignments or { trunkProfile = first or "trunk", perDepth = {}, spacingN = {}, maxPerDepth = {} }
+        local trunk = st.branchAssignments.trunkProfile
+        if (trunk == nil) or (trunk == "") or (first and not st.savedProfiles[trunk]) then
                 st.branchAssignments.trunkProfile = first or "trunk"
-        elseif first and not names[st.branchAssignments.trunkProfile] then
-                st.branchAssignments.trunkProfile = first
         end
 end
 
@@ -170,6 +185,11 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
         local st = LoomDesigner.GetState()
         st.savedProfiles = st.savedProfiles or {}
         if draftName and draftName ~= "" and draftTable then
+                -- Normalize & validate kind
+                if draftTable.kind then
+                        local k = tostring(draftTable.kind):lower()
+                        draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
+                end
                 st.savedProfiles[draftName] = LoomConfigUtil.deepCopy(draftTable)
         end
         ensureTrunk(st)
