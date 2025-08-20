@@ -3,7 +3,23 @@
 -- Server and client share this logic to keep traversal deterministic.
 
 local GrowthProfiles = {}
-local SeedUtil = require(script.Parent.SeedUtil)
+
+local SeedUtil
+do
+    local ok, mod = pcall(function()
+        return script and script.Parent and require(script.Parent.SeedUtil)
+    end)
+    if ok and mod then
+        SeedUtil = mod
+    else
+        local ok2, mod2 = pcall(require, "looms/SeedUtil")
+        if ok2 then
+            SeedUtil = mod2
+        else
+            SeedUtil = { seededSign = function(_m, _k) return 1 end }
+        end
+    end
+end
 
 local function clamp(num, min, max)
     if num < min then return min end
@@ -18,7 +34,7 @@ local function clampExpArg(x)
     return x
 end
 
-local function seededSign(master: number, key: string)
+local function seededSign(master, key)
     return SeedUtil.seededSign(master, key)
 end
 

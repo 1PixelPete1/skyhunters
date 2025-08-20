@@ -266,13 +266,13 @@ end
 local function weightedPick(rng, items)
     local total = 0
     for _, item in ipairs(items or {}) do
-        total += item.chance or 0
+        total = total + (item.chance or 0)
     end
     if total <= 0 then return nil end
     local roll = rng:NextNumber(0, total)
     local acc = 0
     for _, item in ipairs(items) do
-        acc += item.chance or 0
+        acc = acc + (item.chance or 0)
         if roll < acc then
             return item
         end
@@ -280,27 +280,34 @@ local function weightedPick(rng, items)
     return nil
 end
 
-local function chooseSegCount(profile, rng)
+local function chooseSegCount(profile, overrides, rng)
+    overrides = overrides or {}
+    if overrides.segmentCount then
+        local mn = overrides.segmentCountMin or profile.segmentCountMin or overrides.segmentCount
+        local mx = overrides.segmentCountMax or profile.segmentCountMax or overrides.segmentCount
+        local val = clamp(overrides.segmentCount, mn, mx)
+        return math.max(1, math.floor(val))
+    end
     if profile.segmentCount then
         local mn = profile.segmentCountMin or profile.segmentCount
         local mx = profile.segmentCountMax or profile.segmentCount
         local val = clamp(profile.segmentCount, mn, mx)
         return math.max(1, math.floor(val))
     end
-    local mn = profile.segmentCountMin or (profile.segmentCount or 12)
-    local mx = profile.segmentCountMax or (profile.segmentCount or 12)
+    local mn = overrides.segmentCountMin or profile.segmentCountMin or (profile.segmentCount or 12)
+    local mx = overrides.segmentCountMax or profile.segmentCountMax or (profile.segmentCount or 12)
     if mx < mn then mn, mx = mx, mn end
-    local mode = profile.segmentCountMode or "uniform"
+    local mode = overrides.segmentCountMode or profile.segmentCountMode or "uniform"
     local val
     if mode == "triangular" then
-        local modeN = profile.segmentCountModeN or math.floor((mn + mx) / 2)
+        local modeN = overrides.segmentCountModeN or profile.segmentCountModeN or math.floor((mn + mx) / 2)
         val = sampleSegCountTri(rng, mn, mx, modeN)
     elseif mode == "normal" then
-        local meanN = profile.segmentCountMean or math.floor((mn + mx) / 2)
-        local sd = profile.segmentCountSd or ((mx - mn) / 6)
+        local meanN = overrides.segmentCountMean or profile.segmentCountMean or math.floor((mn + mx) / 2)
+        local sd = overrides.segmentCountSd or profile.segmentCountSd or ((mx - mn) / 6)
         val = sampleSegCountNormal(rng, mn, mx, meanN, sd)
     elseif mode == "biased" then
-        local bias = profile.segmentCountBias or 1
+        local bias = overrides.segmentCountBias or profile.segmentCountBias or 1
         val = sampleSegCountBiased(rng, mn, mx, bias)
     else
         val = rng:NextInteger(mn, mx)
@@ -309,11 +316,16 @@ local function chooseSegCount(profile, rng)
 end
 
 local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cfg, overrides)
-    local rngMacro = SeedUtil.rng(baseSeed, "macro", chainId)
-    local rngProfile = SeedUtil.rng(baseSeed, "profile", chainId)
-    local rngMicro = SeedUtil.rng(baseSeed, "micro", chainId)
+    local seedFlags = overrides.seedAffects or {}
+    local macroSeed = seedFlags.segmentCount == false and 0 or baseSeed
+    local profileSeed = (seedFlags.curvature == false and seedFlags.frequency == false) and 0 or baseSeed
+    local microSeed = seedFlags.jitter == false and 0 or baseSeed
 
-    local segCount = chooseSegCount(profile, rngMacro)
+    local rngMacro = SeedUtil.rng(macroSeed, "macro", chainId)
+    local rngProfile = SeedUtil.rng(profileSeed, "profile", chainId)
+    local rngMicro = SeedUtil.rng(microSeed, "micro", chainId)
+
+    local segCount = chooseSegCount(profile, overrides, rngMacro)
     profile.maxSegments = segCount
     local state = { seed = baseSeed }
 
@@ -361,15 +373,15 @@ local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cf
         local dy, dp, dr = delta.yaw, delta.pitch, delta.roll
         if enableMicroJitter then
             local j = microJitter
-            dy += rngMicro:NextNumber(-j, j)
-            dp += rngMicro:NextNumber(-j, j)
+            dy = dy + rngMicro:NextNumber(-j, j)
+            dp = dp + rngMicro:NextNumber(-j, j)
         end
         if twistStrength ~= 0 or (twistRngOn and twistRngRange > 0) then
             local rnd = twistRngOn and rngMicro:NextNumber(-twistRngRange, twistRngRange) or 0
             dr = dr + twistStrength + rnd
         end
         if cont == "accumulate" then
-            yaw += dy; pitch += dp; roll += dr
+            yaw = yaw + dy; pitch = pitch + dp; roll = roll + dr
         else
             yaw, pitch, roll = dy, dp, dr
         end
@@ -565,9 +577,11 @@ function GrowthVisualizer.Render(container, loomState)
 
     local designFull = (GrowthVisualizer._editorMode == true) or (overrides.designFull == true)
 
+    local profileOverride = overrides.profile
+
     for cIndex = 1, #chains do
         local chain = chains[cIndex]
-        local prof = profiles[chain.profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
+        local prof = profileOverride or profiles[chain.profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
         prof = GrowthProfiles.clampProfile(prof)
         local res = buildChain(segOut, chain.id, chain.depth, baseSeed, chain.startCF, prof, cfg, overrides)
         chain.segCount = res.segCount
@@ -595,21 +609,20 @@ function GrowthVisualizer.Render(container, loomState)
             local lastForkAt = -minGap
             local spawned = 0
             for idx = 1, segCount do
-                if idx - lastForkAt < minGap then
-                    continue
-                end
-                local pick = weightedPick(rngBranch, rules)
-                if pick and rngBranch:NextNumber() <= (pick.chance or 0) then
-                    local seg = segRefs[idx]
-                    local startHere = seg.cframe * CFrame.new(0, seg.length/2, 0)
-                    nextId += 1
-                    local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
-                    chains[#chains + 1] = newChain
-                    chainMap[nextId] = newChain
-                    spawned += 1
-                    lastForkAt = idx
-                    if spawned >= forkLimit then
-                        break
+                if idx - lastForkAt >= minGap then
+                    local pick = weightedPick(rngBranch, rules)
+                    if pick and rngBranch:NextNumber() <= (pick.chance or 0) then
+                        local seg = segRefs[idx]
+                        local startHere = seg.cframe * CFrame.new(0, seg.length/2, 0)
+                        nextId = nextId + 1
+                        local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
+                        chains[#chains + 1] = newChain
+                        chainMap[nextId] = newChain
+                        spawned = spawned + 1
+                        lastForkAt = idx
+                        if spawned >= forkLimit then
+                            break
+                        end
                     end
                 end
             end

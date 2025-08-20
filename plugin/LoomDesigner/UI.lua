@@ -222,6 +222,9 @@ function UI.Build(widget: PluginGui, plugin: Plugin, where)
 local controlsHost: Frame = where.controlsHost
 local popupHost: Frame = where.popupHost
 
+-- Ensure LoomDesigner has a state/profile on first open
+LoomDesigner.Start(plugin)
+
 -- Scrolling container
 local scroll = Instance.new("ScrollingFrame")
 scroll.BackgroundTransparency = 1
@@ -285,6 +288,12 @@ local secAssign    = makeSection(scroll, "Assignments (Authoring)")
 local secModels    = makeSection(scroll, "Models (Authoring)")
 local secDecoAuth  = makeSection(scroll, "Decorations (Authoring)")
 local secIO        = makeSection(scroll, "Export / Import")
+
+-- Forward decls shared across profile authoring
+local selectedProfile: string? = nil
+local renderProfiles
+local renderProfileEditor
+local commitAndRebuild
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -410,13 +419,15 @@ local function renderProfileSection()
         banner.Size = UDim2.new(1,0,0,20)
         banner.Parent = secProfile
     else
-        local KINDS = LoomDesigner.SUPPORTED_KIND_LIST
+        local KINDS = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
         local draft = st.profileDrafts[active]
         dropdown(secProfile, popupHost, "Kind", KINDS,
             table.find(KINDS, (draft and draft.kind) or "curved") or 2,
             function(opt)
                 draft.kind = string.lower(opt)
                 LoomDesigner.CommitProfileEdit(active, draft)
+                LoomDesigner.ApplyAuthoring()
+                LoomDesigner.RebuildPreview(nil)
             end
         )
     end
@@ -459,6 +470,14 @@ cyan=Color3.new(0,1,1), magenta=Color3.new(1,0,1), gray=Color3.fromRGB(128,128,1
 grey=Color3.fromRGB(128,128,128), brown=Color3.fromRGB(165,42,42)
 }
 
+local function parseVector3(s: any): Vector3
+    local x,y,z = tostring(s):match("^%s*([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)%s*$")
+    if x then
+        return Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+    end
+    return Vector3.new()
+end
+
 local function parseColor3(s)
 if typeof(s) == "Color3" then return s end
 s = tostring(s):lower():gsub("%s+", "")
@@ -466,13 +485,6 @@ if NamedColors[s] then return NamedColors[s] end
 local r,g,b = s:match("^rgb%((%d+),(%d+),(%d+)%)$")
 if not r then
     r,g,b = s:match("^(%d+),(%d+),(%d+)$")
-end
-local function parseVector3(s)
-    local x,y,z = tostring(s):match("^%s*([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)%s*$")
-    if x then
-        return Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-    end
-    return Vector3.new()
 end
 if r and g and b then
     return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
@@ -704,12 +716,6 @@ local profileLayout = Instance.new("UIListLayout")
 profileLayout.SortOrder = Enum.SortOrder.LayoutOrder
 profileLayout.Parent = profileList
 
-local selectedProfile: string? = nil
-
-local function renderProfileEditor() end
-local function renderProfiles() end
-local function commitAndRebuild() end
-
 local buttonsRow = Instance.new("Frame")
 buttonsRow.Size = UDim2.new(1,0,0,26)
 buttonsRow.BackgroundTransparency = 1
@@ -805,14 +811,16 @@ profileEditor.AutomaticSize = Enum.AutomaticSize.Y
 profileEditor.Parent = secProfilesLib
 
 -- render functions ---------------------------------------------------------
-function commitAndRebuild()
+commitAndRebuild = function()
     local st = LoomDesigner.GetState()
     local active = st.activeProfileName
     local draft = active and st.profileDrafts and st.profileDrafts[active]
     LoomDesigner.CommitProfileEdit(active, draft)
+    LoomDesigner.ApplyAuthoring()
+    LoomDesigner.RebuildPreview(nil)
 end
 
-function renderProfileEditor()
+renderProfileEditor = function()
     for _, c in ipairs(profileEditor:GetChildren()) do c:Destroy() end
     if not selectedProfile then return end
     local st = LoomDesigner.GetState()
@@ -826,11 +834,13 @@ function renderProfileEditor()
 
     local function commit()
         LoomDesigner.CommitProfileEdit(selectedProfile, draft)
+        LoomDesigner.ApplyAuthoring()
+        LoomDesigner.RebuildPreview(nil)
     end
 
-    local kinds = {"straight","curved","zigzag","sigmoid","chaotic"}
+    local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
     dropdown(profileEditor, popupHost, "Kind", kinds, table.find(kinds, draft.kind) or 1, function(opt)
-        draft.kind = opt
+        draft.kind = string.lower(opt)
         commit()
         renderProfileEditor()
     end)
@@ -893,7 +903,8 @@ function renderProfileEditor()
     if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
     validate()
 end
-function renderProfiles()
+
+renderProfiles = function()
     for _, c in ipairs(profileList:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
     local st = LoomDesigner.GetState()
     for name, _ in pairs(st.savedProfiles) do
