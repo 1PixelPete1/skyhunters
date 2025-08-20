@@ -157,6 +157,7 @@ function FT.fn(tag: string, f: (any) -> any)
         end
         -- use Unicode arrow to denote function entry
         FT.log(tag, "→ %s", table.concat(argParts, ",")) -- entry
+
         -- execute function safely
         local results = {pcall(f, ...)}
         if results[1] then
@@ -172,6 +173,7 @@ function FT.fn(tag: string, f: (any) -> any)
             -- failure path: log and rethrow
             -- cross symbol marks an error during execution
             FT.warn(tag, "× %s", formatValue(results[2])) -- error
+
             error(results[2])
         end
     end
@@ -185,6 +187,7 @@ function FT.traceTable(tag: string, tbl: table)
         end
     end
     return tbl -- return mutated table to caller
+
 end
 
 -- watchTable: proxy that logs reads and writes
@@ -223,7 +226,7 @@ end
 -- branch probe
 function FT.branch(tag: string, cond: boolean, extras: table?)
     FT.log(tag, "IF %s %s", tostring(cond), formatExtras(extras)) -- log condition result
-    return cond -- pass through condition for inline use
+    return cond -- pass through condition for inline 
 end
 
 -- loop probe
