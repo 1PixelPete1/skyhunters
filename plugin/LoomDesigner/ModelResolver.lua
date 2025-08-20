@@ -12,20 +12,58 @@ local ModelResolver = {}
 -- simple cache so repeated asset-id lookups don't hit network every rebuild
 local _assetCache = {}
 
-local modelsFolder
-if ReplicatedStorage and ReplicatedStorage.WaitForChild then
-    modelsFolder = ReplicatedStorage:WaitForChild("models", 2)
+-- Resolve the models folder on each call; tolerate "Models"/"models"
+local function getModelsFolder()
+    if not ReplicatedStorage then return nil end
+    local f = ReplicatedStorage:FindFirstChild("models")
+        or ReplicatedStorage:FindFirstChild("Models")
+    if not f and ReplicatedStorage.WaitForChild then
+        -- tiny wait covers early-startup races without blocking UI
+        f = ReplicatedStorage:WaitForChild("models", 0.1)
+            or ReplicatedStorage:WaitForChild("Models", 0.1)
+    end
+    return f
 end
 
 function ModelResolver.ResolveOne(ref)
     if type(ref) == "string" then
-        if modelsFolder then
-            local m = modelsFolder:FindFirstChild(ref)
+        local folder = getModelsFolder()
+        local wanted = tostring(ref):gsub("^%s*(.-)%s*$", "%1")
+        if folder then
+            -- exact first
+            local m = folder:FindFirstChild(wanted)
+            if not m then
+                -- case-insensitive fallback
+                local lw = wanted:lower()
+                for _, ch in ipairs(folder:GetChildren()) do
+                    if ch.Name:lower() == lw then m = ch; break end
+                end
+            end
             if m then
-                return m:Clone()
+                if m:IsA("Model") then
+                    return m:Clone()
+                else
+                    -- wrap non-Model as a Model so downstream always receives a Model
+                    local wrap = Instance.new("Model")
+                    wrap.Name = m.Name
+                    local c = m:Clone()
+                    c.Parent = wrap
+                    local pp = c:IsA("BasePart") and c or wrap:FindFirstChildWhichIsA("BasePart", true)
+                    if pp then (wrap :: any).PrimaryPart = pp end
+                    return wrap
+                end
             end
         end
-        warn("ModelResolver: missing model named '" .. ref .. "' in ReplicatedStorage.models")
+        -- richer warning that shows what the resolver actually sees
+        local where = folder and folder:GetFullName() or "ReplicatedStorage.models/Models (not found)"
+        local have = {}
+        if folder then
+            for _, ch in ipairs(folder:GetChildren()) do
+                table.insert(have, ch.Name .. "(" .. ch.ClassName .. ")")
+            end
+        end
+        warn(("ModelResolver: missing model '%s' in %s; have: [%s]")
+            :format(wanted, where, table.concat(have, ", ")))
         return nil
     elseif type(ref) == "number" then
         local cached = _assetCache[ref]

@@ -1024,7 +1024,11 @@ local function renderModels()
     libLabel.Parent = secModels
 
     labeledTextBox(secModels, "Add by Name", "", function(txt)
-        if txt ~= "" then table.insert(st.modelLibrary, txt); renderModels() end
+        if txt ~= "" then
+            local cleaned = (tostring(txt):gsub("^%s*(.-)%s*$","%1"))
+            table.insert(st.modelLibrary, cleaned)
+            renderModels()
+        end
     end)
     labeledTextBox(secModels, "Add AssetId", "", function(txt)
         local n = tonumber(txt)
@@ -1119,7 +1123,7 @@ local function renderModels()
             row.BackgroundTransparency = 1
             row.Parent = df
             dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
-                list[i] = opt
+                list[i] = tostring(opt):gsub("^%s*(.-)%s*$","%1")
                 LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
             end)
             local up = makeBtn(row, "^", function()
