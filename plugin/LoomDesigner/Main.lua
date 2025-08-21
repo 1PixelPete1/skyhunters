@@ -480,6 +480,37 @@ function LoomDesigner.GetBranches()
         return copy
 end
 
+-- assignments API ------------------------------------------------------------
+function LoomDesigner.SetTrunk(name: string)
+        newState.assignments.trunk = name
+end
+
+function LoomDesigner.AddChild(parent: string, child: string, placement: string, count: number)
+        table.insert(newState.assignments.children, {
+                parent = parent,
+                child = child,
+                placement = placement or "tip",
+                count = count or 1,
+        })
+end
+
+function LoomDesigner.RemoveChild(idx: number)
+        table.remove(newState.assignments.children, idx)
+end
+
+function LoomDesigner.GetAssignments()
+        local copy = { trunk = newState.assignments.trunk, children = {} }
+        for i, a in ipairs(newState.assignments.children) do
+                copy.children[i] = {
+                        parent = a.parent,
+                        child = a.child,
+                        placement = a.placement,
+                        count = a.count,
+                }
+        end
+        return copy
+end
+
 -- export/import -------------------------------------------------------------
 local function rebuildLibraries()
         state.modelLibrary = {}
