@@ -78,3 +78,18 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+### LoomDesigner architecture
+
+```
++----------------------+      FlowTrace.watchTable      +--------------------+
+| LoomDesigner.Main    | -----------------------------> | LoomDesigner.UI    |
+| - state.savedProfiles|                                 | - listFrame        |
+| - activeProfileName  | <-----------------------------  | - renderProfiles() |
+|                      |   selection via button clicks  | - newProfileBox    |
++----------------------+                                 +--------------------+
+```
+
+The UI renders each entry in `state.savedProfiles` to `listFrame` and
+highlights `activeProfileName`. Creating a new profile uses `newProfileBox`
+to capture the name and updates the shared state.

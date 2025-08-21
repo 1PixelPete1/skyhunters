@@ -830,8 +830,8 @@ local function newProfile()
         newProfileBox.Text = pendingProfileName
         if newProfileBox.Parent then
             newProfileBox.Parent.Visible = true
+            newProfileBox:CaptureFocus()
         end
-        newProfileBox:CaptureFocus()
     end
 end
 
@@ -1074,9 +1074,11 @@ renderProfiles = function()
             btn.Font = Enum.Font.SourceSansBold
             btn.BorderSizePixel = 2
             btn.BorderColor3 = Color3.fromRGB(80,120,200)
+            btn.BackgroundColor3 = Color3.fromRGB(60,60,60)
         else
             btn.Font = Enum.Font.SourceSans
             btn.BorderSizePixel = 0
+            btn.BorderColor3 = Color3.fromRGB(0,0,0)
         end
         btn.Parent = listFrame
 
@@ -1190,7 +1192,7 @@ local function renderAssignments()
     layout.Parent = tree
 
     local visited = {}
-    local function renderNode(name: string, depth: number)
+    local function renderNode(name, depth)
         local row = Instance.new("TextButton")
         row.Name = name
         row.Size = UDim2.new(1,0,0,20)
