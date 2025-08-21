@@ -1044,7 +1044,7 @@ renderProfiles = function()
         btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
         btn.ZIndex = listFrame.ZIndex + 1
-        btn.Text = name .. ((name==selectedProfile) and " *" or "")
+        btn.Text = name
         if name == st.activeProfileName then
             btn.Font = Enum.Font.SourceSansBold
             btn.BorderSizePixel = 2
@@ -1068,6 +1068,15 @@ renderProfiles = function()
         profileLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
         profileLayout.VerticalAlignment = Enum.VerticalAlignment.Center
         selectedProfile = nil
+
+        local help = Instance.new("TextLabel")
+        help.Text = "No profiles yet. Create one to get started."
+        help.BackgroundTransparency = 1
+        help.TextColor3 = Color3.fromRGB(200,200,200)
+        help.TextXAlignment = Enum.TextXAlignment.Center
+        help.Size = UDim2.new(0,200,0,20)
+        help.Parent = listFrame
+
         local createBtn = Instance.new("TextButton")
         createBtn.Text = "Create Profile"
         createBtn.Size = UDim2.new(0,180,0,24)
