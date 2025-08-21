@@ -263,23 +263,6 @@ local function sampleSegCountBiased(rng, minN, maxN, bias)
     return x
 end
 
-local function weightedPick(rng, items)
-    local total = 0
-    for _, item in ipairs(items or {}) do
-        total = total + (item.chance or 0)
-    end
-    if total <= 0 then return nil end
-    local roll = rng:NextNumber(0, total)
-    local acc = 0
-    for _, item in ipairs(items) do
-        acc = acc + (item.chance or 0)
-        if roll < acc then
-            return item
-        end
-    end
-    return nil
-end
-
 local function chooseSegCount(profile, overrides, rng)
     overrides = overrides or {}
     if overrides.segmentCount then
@@ -571,17 +554,6 @@ function GrowthVisualizer.Render(container, loomState)
     local nextId = 1
     local baseSeed = loomState.baseSeed or 0
 
-    local childProfiles = branchAssignments.childProfiles or {}
-    local perDepth = branchAssignments.perDepth or nil
-    local spacingN = branchAssignments.spacingN or nil
-    local maxPerDepth = branchAssignments.maxPerDepth or nil
-    if perDepth or spacingN or maxPerDepth then
-        warn("branchAssignments per-depth fields are deprecated; use childProfiles")
-        perDepth = perDepth or {}
-        spacingN = spacingN or {}
-        maxPerDepth = maxPerDepth or {}
-    end
-
     local designFull = (GrowthVisualizer._editorMode == true) or (overrides.designFull == true)
 
     local profileOverride = overrides.profile
@@ -608,51 +580,36 @@ function GrowthVisualizer.Render(container, loomState)
         end
 
         local depth = chain.depth
-        local childSpec = childProfiles[chain.profileName]
-        local rules
-        local minGap = 0
-        local forkLimit = 0
-        if childSpec then
-            rules = childSpec.children
-            minGap = childSpec.spacingN or cfg.forkSpacingN or 0
-            forkLimit = childSpec.maxPerParent or cfg.forkLimitPerDepth or 2
-        elseif perDepth then
-            rules = perDepth[depth]
-            if rules then
-                minGap = spacingN[depth] or cfg.forkSpacingN or 0
-                forkLimit = maxPerDepth[depth] or cfg.forkLimitPerDepth or 2
-            end
-        end
+        local rules = prof.children
         if rules and depth < (cfg.branchDepthMax or 0) then
-            local rngBranch = SeedUtil.rng(baseSeed, "branch", chain.id)
-            local lastForkAt = -minGap
-            local spawned = 0
-            for idx = 1, segCount do
-                if idx - lastForkAt >= minGap then
-                    local pick = weightedPick(rngBranch, rules)
-                    if pick and rngBranch:NextNumber() <= (pick.chance or 0) then
-                        local seg = segRefs[idx]
-                        local baseCF = seg.cframe * CFrame.new(0, seg.length/2, 0)
-                        local orient = (pick.orientation or (childSpec and childSpec.orientation)) or {}
-                        local startHere = baseCF * CFrame.Angles(
-                            math.rad(orient.pitch or 0),
-                            math.rad(orient.yaw or 0),
-                            math.rad(orient.roll or 0)
-                        )
-                        local count = pick.count or 1
-                        for _ = 1, count do
-                            nextId = nextId + 1
-                            local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
-                            chains[#chains + 1] = newChain
-                            chainMap[nextId] = newChain
-                            spawned = spawned + 1
-                            if spawned >= forkLimit then break end
-                        end
-                        lastForkAt = idx
-                        if spawned >= forkLimit then
-                            break
-                        end
-                    end
+            local lastSeg = segRefs[segCount]
+            for _, pick in ipairs(rules) do
+                local count = pick.count or 1
+                local placement = pick.placement or "tip"
+                local orient
+                if type(pick.rotation) == "table" then
+                    orient = pick.rotation
+                elseif pick.rotation == "upright" then
+                    orient = {pitch = 0, yaw = 0, roll = 0}
+                else
+                    orient = {}
+                end
+                local baseCF
+                if placement == "tip" and lastSeg then
+                    baseCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
+                else
+                    baseCF = chain.startCF
+                end
+                local startHere = baseCF * CFrame.Angles(
+                    math.rad(orient.pitch or 0),
+                    math.rad(orient.yaw or 0),
+                    math.rad(orient.roll or 0)
+                )
+                for _ = 1, count do
+                    nextId = nextId + 1
+                    local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
+                    chains[#chains + 1] = newChain
+                    chainMap[nextId] = newChain
                 end
             end
         end
