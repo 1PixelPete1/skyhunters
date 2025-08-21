@@ -23,6 +23,9 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
+
 -- Forward declare so we can use local deepCopy inside DC even if it’s defined later
 local deepCopy
 local ensureTrunk
@@ -355,11 +358,25 @@ local function renderBranch(name, depth)
        local design = newState.branches[name]
        if not design then return end
 
+       local cfgId = "__ld_preview_" .. tostring(name)
+       LoomConfigs[cfgId] = {
+               profiles = { [name] = design },
+               branchAssignments = { trunkProfile = name },
+               models = {
+                       byDepth = newState.modelsByDepth,
+                       decorations = (newState.overrides and newState.overrides.decorations and newState.overrides.decorations.enabled)
+                               and newState.overrides.decorations.types
+                               or nil,
+               },
+               growthDefaults = {},
+       }
+
        GrowthVisualizer.Render(nil, {
                loomUid = 0,
+               configId = cfgId,
                baseSeed = newState.baseSeed,
                g = newState.g,
-               branchDesign = design,
+               overrides = newState.overrides,
                scene = {
                        Clear = VisualScene.Clear,
                        Spawn = VisualScene.Spawn,
@@ -377,6 +394,16 @@ local function renderBranch(name, depth)
 end
 
 function LoomDesigner.RebuildPreview(_container)
+       if next(newState.branches) == nil then
+               newState.branches["branch1"] = {kind = "straight"}
+               newState.assignments.trunk = "branch1"
+       elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
+               for name in pairs(newState.branches) do
+                       newState.assignments.trunk = name
+                       break
+               end
+       end
+
        local parent = ensurePreviewParent()
        clearExistingPreview(parent)
        local model = Instance.new("Model")
