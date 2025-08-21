@@ -303,6 +303,7 @@ local secIO        = makeSection(scroll, "Export / Import")
 local selectedProfile: string? = nil
 local renderProfiles
 local renderProfileEditor
+local renderAssignments
 local commitAndRebuild
 
 -- Config dropdown (list from LoomConfigs keys)
@@ -1086,11 +1087,14 @@ end
 
 renderProfiles()
 
--- re-render profiles automatically when the saved profiles table changes
+-- re-render UI automatically when the saved profiles table changes
 do
     local st = LoomDesigner.GetState()
     st.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", st.savedProfiles, function()
-        task.defer(renderProfiles)
+        task.defer(function()
+            renderProfiles()
+            renderAssignments()
+        end)
     end))
 end
 
@@ -1107,7 +1111,6 @@ local function renderAssignments()
     trunkFrame.AutomaticSize = Enum.AutomaticSize.Y
     trunkFrame.Parent = secAssign
     if #names == 0 then
-        st.branchAssignments.trunkProfile = nil
         local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
         btn.Active = false
         btn.AutoButtonColor = false
