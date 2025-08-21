@@ -763,6 +763,8 @@ local function newProfile()
     selectedProfile = name
     renderProfiles()
     commitAndRebuild()
+    -- ensure the newly created profile is immediately editable
+    renderProfileEditor()
 end
 
 local function duplicateProfile()
@@ -908,7 +910,9 @@ end
 renderProfiles = function()
     for _, c in ipairs(profileList:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
     local st = LoomDesigner.GetState()
+    local hasProfiles = false
     for name, _ in pairs(st.savedProfiles) do
+        hasProfiles = true
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0,180,0,24)
         btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
@@ -923,6 +927,17 @@ renderProfiles = function()
             renderProfiles()
             renderProfileEditor()
         end)
+    end
+    if not hasProfiles then
+        selectedProfile = nil
+        local hint = Instance.new("TextLabel")
+        hint.Text = "Click 'New' to add your first profile"
+        hint.TextColor3 = Color3.fromRGB(255,180,80)
+        hint.BackgroundTransparency = 1
+        hint.Size = UDim2.new(1,0,0,20)
+        hint.Parent = profileList
+        local createBtn = makeBtn(profileList, "Create Profile", newProfile)
+        createBtn.Size = UDim2.new(0,160,0,24)
     end
     renderProfileEditor()
 end
