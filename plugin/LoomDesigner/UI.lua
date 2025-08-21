@@ -312,6 +312,7 @@ local renderProfiles
 local renderProfileEditor
 local renderAssignments
 local commitAndRebuild
+local commitErrorLabel
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -896,6 +897,36 @@ commitAndRebuild = function()
     local st = LoomDesigner.GetState()
     local active = st.activeProfileName
     local draft = active and st.profileDrafts and st.profileDrafts[active]
+    local errors = {}
+    local function check(ref)
+        local res = ModelResolver.ResolveOne(ref)
+        if typeof(res) ~= "Instance" then
+            table.insert(errors, res)
+        end
+    end
+    for _, ref in ipairs(st.modelLibrary or {}) do check(ref) end
+    for _, list in pairs(st.modelsByDepth or {}) do
+        for _, ref in ipairs(list) do check(ref) end
+    end
+    if st.overrides and st.overrides.decorations and st.overrides.decorations.types then
+        for _, deco in pairs(st.overrides.decorations.types) do
+            if deco.models then
+                for _, ref in ipairs(deco.models) do check(ref) end
+            end
+        end
+    end
+    if #errors > 0 then
+        if commitErrorLabel then
+            commitErrorLabel.Text = errors[1]
+            if #errors > 1 then
+                commitErrorLabel.Text = commitErrorLabel.Text .. string.format(" (+%d more)", #errors-1)
+            end
+            commitErrorLabel.Visible = true
+        end
+        return
+    elseif commitErrorLabel then
+        commitErrorLabel.Visible = false
+    end
     LoomDesigner.CommitProfileEdit(active, draft)
     LoomDesigner.ApplyAuthoring()
     LoomDesigner.RebuildPreview(nil)
@@ -909,6 +940,13 @@ renderProfileEditor = function()
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Padding = UDim.new(0,6)
     layout.Parent = profileEditor
+    commitErrorLabel = Instance.new("TextLabel")
+    commitErrorLabel.TextColor3 = Color3.fromRGB(255,100,100)
+    commitErrorLabel.BackgroundTransparency = 1
+    commitErrorLabel.Size = UDim2.new(1,0,0,20)
+    commitErrorLabel.TextXAlignment = Enum.TextXAlignment.Left
+    commitErrorLabel.Visible = false
+    commitErrorLabel.Parent = profileEditor
     st.activeProfileName = selectedProfile
     st.profileDrafts = st.profileDrafts or {}
     local draft = st.profileDrafts[selectedProfile]
@@ -1306,12 +1344,12 @@ local function renderModels()
     local accessoryRow: Frame? = nil
 
     local function tryAdd(ref)
-        local inst, err = ModelResolver.ResolveOne(ref)
-        if inst then
+        local resolved = ModelResolver.ResolveOne(ref)
+        if typeof(resolved) == "Instance" then
             table.insert(st.modelLibrary, ref)
             renderModels()
         else
-            warnLabel.Text = err or "Asset not found"
+            warnLabel.Text = resolved or "Asset not found"
             warnLabel.Visible = true
 
             if accessoryRow then accessoryRow:Destroy(); accessoryRow = nil end
@@ -1366,12 +1404,15 @@ local function renderModels()
         row.Size = UDim2.new(1,0,0,24)
         row.BackgroundTransparency = 1
         row.Parent = secModels
-        local inst, msg = ModelResolver.ResolveOne(ref)
+        local resolved = ModelResolver.ResolveOne(ref)
         local refText = (typeof(ref) == "Instance") and ref.Name or tostring(ref)
         local nameText
-        if inst then
+        local inst = nil
+        if typeof(resolved) == "Instance" then
+            inst = resolved
             nameText = string.format("%s (%s)", refText, inst.Name)
         else
+            local msg = resolved
             nameText = string.format("%s (%s)", refText, msg or "unresolved")
         end
         if inst then
@@ -1452,7 +1493,8 @@ local function renderModels()
         local list = st.modelsByDepth[depth] or {}
         local filtered = {}
         for _, ref in ipairs(list) do
-            if ModelResolver.ResolveOne(ref) then
+            local r = ModelResolver.ResolveOne(ref)
+            if typeof(r) == "Instance" then
                 table.insert(filtered, ref)
             end
         end
@@ -1483,7 +1525,8 @@ local function renderModels()
             row.Parent = df
             dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
                 local cleaned = tostring(opt):gsub("^%s*(.-)%s*$","%1")
-                if ModelResolver.ResolveOne(cleaned) then
+                local r = ModelResolver.ResolveOne(cleaned)
+                if typeof(r) == "Instance" then
                     list[i] = cleaned
                     LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
                 end
@@ -1512,7 +1555,8 @@ local function renderModels()
         local addBtn = makeBtn(df, "Add", function()
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            if ModelResolver.ResolveOne(ref) then
+            local r = ModelResolver.ResolveOne(ref)
+            if typeof(r) == "Instance" then
                 st.modelsByDepth[depth] = list
                 table.insert(list, ref)
                 renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
@@ -1589,22 +1633,22 @@ local function renderDecorations()
             errLabel.Visible = false
 
             local btn = dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
-                local inst2, err2 = ModelResolver.ResolveOne(opt)
-                if inst2 then
+                local res2 = ModelResolver.ResolveOne(opt)
+                if typeof(res2) == "Instance" then
                     deco.models[i] = opt
                     currentRef = opt
                     errLabel.Visible = false
                     LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
                 else
-                    errLabel.Text = err2 or "unresolved"
+                    errLabel.Text = res2 or "unresolved"
                     errLabel.Visible = true
                     btn.Text = (typeof(currentRef) == "Instance") and currentRef.Name or tostring(currentRef)
                 end
             end)
 
-            local inst, msg = ModelResolver.ResolveOne(ref)
-            if not inst then
-                errLabel.Text = msg or "unresolved"
+            local res = ModelResolver.ResolveOne(ref)
+            if typeof(res) ~= "Instance" then
+                errLabel.Text = res or "unresolved"
                 errLabel.Visible = true
             end
             errLabel.Parent = modelsFrame
@@ -1626,13 +1670,13 @@ local function renderDecorations()
             deco.models = deco.models or {}
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            local inst, msg = ModelResolver.ResolveOne(ref)
-            if inst then
+            local res3 = ModelResolver.ResolveOne(ref)
+            if typeof(res3) == "Instance" then
                 table.insert(deco.models, ref)
                 renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
             else
                 local warn = Instance.new("TextLabel")
-                warn.Text = msg or "unresolved"
+                warn.Text = res3 or "unresolved"
                 warn.TextColor3 = Color3.fromRGB(255,100,100)
                 warn.BackgroundTransparency = 1
                 warn.Size = UDim2.new(1,0,0,20)
