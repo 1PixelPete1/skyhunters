@@ -210,8 +210,8 @@ function FT.traceTable(tag: string, tbl: table)
 
 end
 
--- watchTable: proxy that logs reads and writes
-function FT.watchTable(tag: string, t: table)
+-- watchTable: proxy that logs reads and writes. Optional onWrite callback fires on mutations
+function FT.watchTable(tag: string, t: table, onWrite: ((any, any) -> ())?)
     local proxy = {} -- table returned to the caller
     local meta = {} -- metatable housing interception logic
 
@@ -227,6 +227,7 @@ function FT.watchTable(tag: string, t: table)
         local old = t[k] -- capture previous value
         t[k] = v -- perform the write on real table
         FT.log(tag, "SET %s %s->%s", truncate(k), formatValue(old), formatValue(v), 1) -- emit write trace
+        if onWrite then onWrite(k, v) end
     end
 
     -- forward table functions
