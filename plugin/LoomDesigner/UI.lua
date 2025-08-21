@@ -708,18 +708,31 @@ end)
 
 -- === Authoring Panels ======================================================
 -- Profiles list and editor --------------------------------------------------
-local profileList = Instance.new("Frame")
-profileList.BackgroundTransparency = 1
-profileList.Size = UDim2.new(1,0,0,0)
-profileList.AutomaticSize = Enum.AutomaticSize.Y
-profileList.Parent = secProfilesLib
+local listFrame = Instance.new("ScrollingFrame")
+listFrame.BackgroundTransparency = 1
+listFrame.BorderSizePixel = 0
+listFrame.Size = UDim2.new(1,0,0,150)
+listFrame.CanvasSize = UDim2.new(0,0,0,0)
+listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listFrame.ScrollBarThickness = 8
+listFrame.LayoutOrder = 1
+listFrame.Parent = secProfilesLib
+
+local listPadding = Instance.new("UIPadding")
+listPadding.PaddingTop = UDim.new(0,4)
+listPadding.PaddingBottom = UDim.new(0,4)
+listPadding.PaddingLeft = UDim.new(0,4)
+listPadding.PaddingRight = UDim.new(0,4)
+listPadding.Parent = listFrame
+
 local profileLayout = Instance.new("UIListLayout")
 profileLayout.SortOrder = Enum.SortOrder.LayoutOrder
-profileLayout.Parent = profileList
+profileLayout.Parent = listFrame
 
 local buttonsRow = Instance.new("Frame")
 buttonsRow.Size = UDim2.new(1,0,0,26)
 buttonsRow.BackgroundTransparency = 1
+buttonsRow.LayoutOrder = 2
 buttonsRow.Parent = secProfilesLib
 
 local function makeBtn(parent, text, cb)
@@ -977,7 +990,7 @@ renderProfileEditor = function()
 end
 
 renderProfiles = function()
-    for _, c in ipairs(profileList:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    for _, c in ipairs(listFrame:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
     local st = LoomDesigner.GetState()
     local hasProfiles = false
     for name, _ in pairs(st.savedProfiles) do
@@ -996,7 +1009,8 @@ renderProfiles = function()
             btn.Font = Enum.Font.SourceSans
             btn.BorderSizePixel = 0
         end
-        btn.Parent = profileList
+        btn.Parent = listFrame
+
         btn.MouseButton1Click:Connect(function()
             selectedProfile = name
             st.activeProfileName = name
@@ -1013,8 +1027,8 @@ renderProfiles = function()
         hint.TextColor3 = Color3.fromRGB(255,180,80)
         hint.BackgroundTransparency = 1
         hint.Size = UDim2.new(1,0,0,20)
-        hint.Parent = profileList
-        local createBtn = makeBtn(profileList, "Create Profile", newProfile)
+        hint.Parent = listFrame
+        local createBtn = makeBtn(listFrame, "Create Profile", newProfile)
         createBtn.Size = UDim2.new(0,160,0,24)
     end
     renderProfileEditor()
