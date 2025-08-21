@@ -250,11 +250,34 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
                 draftTable.children = DC(draftTable.children or {})
-                st.savedProfiles[draftName] = DC(draftTable)
+                local cloned = DC(draftTable)
+                st.savedProfiles[draftName] = cloned
+
+                -- Deep-copy into active LoomConfig
+                local cfgId = resolveConfigId(LoomConfigs, st.configId)
+                if cfgId then
+                        st.configId = cfgId
+                        local cfg = LoomConfigs[cfgId]
+                        if type(cfg) ~= "table" then
+                                cfg = { id = cfgId }
+                        end
+                        cfg.profiles = cfg.profiles or {}
+                        cfg.profiles[draftName] = DC(cloned)
+                        LoomConfigs[cfgId] = cfg
+                end
+
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
        end
+
+       st.branchAssignments = st.branchAssignments or {}
+       local trunk = st.branchAssignments.trunkProfile
+       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
+                st.branchAssignments.trunkProfile = draftName
+       end
+
        if _commitTimer then task.cancel(_commitTimer) end
 
+       -- Apply authoring after updating LoomConfig and trunk
        local f = LoomDesigner.ApplyAuthoring
        assert(type(f) == "function", "ApplyAuthoring missing")
        local merged = f()
@@ -263,23 +286,7 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                return
        end
 
-       st.branchAssignments = st.branchAssignments or {}
-       local trunk = st.branchAssignments.trunkProfile
-       if trunk == nil or trunk == "" then
-               st.branchAssignments.trunkProfile = draftName
-       elseif st.savedProfiles[trunk] == nil then
-               st.branchAssignments.trunkProfile = st.activeProfileName
-       end
-
        _commitTimer = task.delay(0.1, function()
-               local f = LoomDesigner.ApplyAuthoring
-               assert(type(f) == "function", "ApplyAuthoring missing")
-               local cfg = f()
-               if not cfg then
-                       warn(string.format("[LoomDesigner] Failed to merge profile '%s'; skipping preview", tostring(draftName)))
-                       _commitTimer = nil
-                       return
-               end
                local cfgId = state.configId
                local trunkName = state.branchAssignments and state.branchAssignments.trunkProfile
                local hasProfile = LoomConfigs
