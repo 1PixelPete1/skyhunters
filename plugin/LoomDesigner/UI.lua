@@ -305,6 +305,7 @@ local renderProfiles
 local renderProfileEditor
 local renderAssignments
 local commitAndRebuild
+local nodeExpanded = {}
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -1139,11 +1140,13 @@ local function renderAssignments()
     local names = {}
     for n in pairs(st.savedProfiles) do table.insert(names, n) end
     table.sort(names)
+
     local trunkFrame = Instance.new("Frame")
     trunkFrame.BackgroundTransparency = 1
     trunkFrame.Size = UDim2.new(1,0,0,0)
     trunkFrame.AutomaticSize = Enum.AutomaticSize.Y
     trunkFrame.Parent = secAssign
+
     if #names == 0 then
         local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
         btn.Active = false
@@ -1157,12 +1160,14 @@ local function renderAssignments()
         msg.Parent = secAssign
         return
     end
+
     if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
         st.branchAssignments.trunkProfile = names[1]
     end
+
     status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
-    local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
+    dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
         status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), opt)
         pcall(function()
@@ -1172,13 +1177,76 @@ local function renderAssignments()
         renderAssignments()
     end)
 
-    labeledTextBox(secAssign, "Branch Cap", tostring(st.branchAssignments.branchCap or 2), function(txt)
+    -- Count branches for limits
+    local countsByDepth: {[number]: number} = {}
+    local visitedCount = {}
+    local function countNode(name: string, depth: number)
+        local prof = st.savedProfiles[name]
+        if not prof or visitedCount[name] then return end
+        visitedCount[name] = true
+        countsByDepth[depth] = (countsByDepth[depth] or 0) + 1
+        if prof.children then
+            for _, child in ipairs(prof.children) do
+                countNode(child.name, depth+1)
+            end
+        end
+        visitedCount[name] = nil
+    end
+    countNode(st.branchAssignments.trunkProfile, 0)
+
+    local totalBranches = 0
+    for d, c in pairs(countsByDepth) do if d > 0 then totalBranches += c end end
+    local depthCaps = st.branchAssignments.depthCaps or {}
+    local maxDepth = 0
+    for d in pairs(countsByDepth) do if d > maxDepth then maxDepth = d end end
+    for d in pairs(depthCaps) do if d > maxDepth then maxDepth = d end end
+    local depthExceeded = {}
+    for d, c in pairs(countsByDepth) do
+        if depthCaps[d] and c > depthCaps[d] then depthExceeded[d] = true end
+    end
+    local globalExceeded = st.branchAssignments.branchCap and st.branchAssignments.branchCap > 0 and totalBranches > st.branchAssignments.branchCap
+
+    local capBox = labeledTextBox(secAssign, "Branch Cap", tostring(st.branchAssignments.branchCap or 0), function(txt)
         local n = tonumber(txt)
         if n then
             st.branchAssignments.branchCap = math.max(0, math.floor(n))
             LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         end
     end)
+    local capLabel = capBox.Parent:FindFirstChildOfClass("TextLabel")
+    if globalExceeded then capLabel.TextColor3 = Color3.fromRGB(255,120,120) end
+
+    local globalInfo = Instance.new("TextLabel")
+    globalInfo.BackgroundTransparency = 1
+    globalInfo.TextColor3 = globalExceeded and Color3.fromRGB(255,120,120) or Color3.fromRGB(200,200,200)
+    globalInfo.Size = UDim2.new(1,0,0,18)
+    globalInfo.TextXAlignment = Enum.TextXAlignment.Left
+    globalInfo.Text = string.format("Total branches: %d/%s", totalBranches, st.branchAssignments.branchCap or "-")
+    globalInfo.Parent = secAssign
+
+    st.branchAssignments.depthCaps = depthCaps
+    for d = 1, maxDepth do
+        local box = labeledTextBox(secAssign, string.format("Depth %d Cap", d), tostring(depthCaps[d] or ""), function(txt)
+            local n = tonumber(txt)
+            if n then
+                depthCaps[d] = math.max(0, math.floor(n))
+            else
+                depthCaps[d] = nil
+            end
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            renderAssignments()
+        end)
+        local lab = box.Parent:FindFirstChildOfClass("TextLabel")
+        if depthExceeded[d] then lab.TextColor3 = Color3.fromRGB(255,120,120) end
+
+        local info = Instance.new("TextLabel")
+        info.BackgroundTransparency = 1
+        info.Size = UDim2.new(1,0,0,18)
+        info.TextXAlignment = Enum.TextXAlignment.Left
+        info.TextColor3 = depthExceeded[d] and Color3.fromRGB(255,120,120) or Color3.fromRGB(200,200,200)
+        info.Text = string.format("Depth %d branches: %d/%s", d, countsByDepth[d] or 0, depthCaps[d] or "-")
+        info.Parent = secAssign
+    end
 
     local tree = Instance.new("Frame")
     tree.BackgroundTransparency = 1
@@ -1191,15 +1259,49 @@ local function renderAssignments()
 
     local visited = {}
     local function renderNode(name: string, depth: number)
-        local row = Instance.new("TextButton")
+        local prof = st.savedProfiles[name]
+        local hasChildren = prof and prof.children and #prof.children > 0
+        local expanded = nodeExpanded[name]
+        if expanded == nil then
+            expanded = depth == 0
+            nodeExpanded[name] = expanded
+        end
+
+        local row = Instance.new("Frame")
         row.Name = name
         row.Size = UDim2.new(1,0,0,20)
-        row.BackgroundColor3 = (name == selectedProfile) and Color3.fromRGB(70,70,110) or Color3.fromRGB(48,48,48)
-        row.TextColor3 = Color3.new(1,1,1)
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.Text = string.rep("    ", depth) .. name
+        row.BackgroundTransparency = 1
         row.Parent = tree
-        row.MouseButton1Click:Connect(function()
+
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, depth * 16)
+        pad.Parent = row
+
+        local expandBtn = Instance.new("TextButton")
+        expandBtn.Size = UDim2.fromOffset(16,20)
+        expandBtn.BackgroundTransparency = 1
+        expandBtn.TextColor3 = Color3.new(1,1,1)
+        expandBtn.Text = expanded and "-" or "+"
+        expandBtn.Visible = hasChildren
+        expandBtn.Parent = row
+        expandBtn.MouseButton1Click:Connect(function()
+            nodeExpanded[name] = not expanded
+            renderAssignments()
+        end)
+
+        local labelBtn = Instance.new("TextButton")
+        labelBtn.Size = UDim2.new(1,-16,1,0)
+        labelBtn.Position = UDim2.new(0,16,0,0)
+        labelBtn.BackgroundColor3 = (name == selectedProfile) and Color3.fromRGB(70,70,110) or Color3.fromRGB(48,48,48)
+        local txtColor = Color3.new(1,1,1)
+        if depthExceeded[depth] or (depth == 0 and globalExceeded) then
+            txtColor = Color3.fromRGB(255,120,120)
+        end
+        labelBtn.TextColor3 = txtColor
+        labelBtn.TextXAlignment = Enum.TextXAlignment.Left
+        labelBtn.Text = name
+        labelBtn.Parent = row
+        labelBtn.MouseButton1Click:Connect(function()
             selectedProfile = name
             st.activeProfileName = name
             st.profileDrafts = st.profileDrafts or {}
@@ -1215,9 +1317,8 @@ local function renderAssignments()
             end
         end)
 
-        local prof = st.savedProfiles[name]
         if not prof then
-            row.TextColor3 = Color3.fromRGB(255,120,120)
+            labelBtn.TextColor3 = Color3.fromRGB(255,120,120)
             return
         end
 
@@ -1233,7 +1334,7 @@ local function renderAssignments()
         end
         visited[name] = true
 
-        if prof.children then
+        if prof.children and expanded then
             for _, child in ipairs(prof.children) do
                 local childName = child.name
                 if st.savedProfiles[childName] then

@@ -78,3 +78,24 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+### Branch tree view
+
+```
+trunk
+├─ branchA
+│  ├─ branchB
+│  └─ branchB
+└─ branchC
+```
+
+### Limit checking flow
+
+```
+[branch tree]
+     |
+     v
+count branches ──▶ compare total to branchCap
+     |
+     └────▶ per depth count ──▶ compare to depthCaps[d]
+```
