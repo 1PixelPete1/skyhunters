@@ -323,6 +323,7 @@ function LoomDesigner.ImportAuthoring(cfg)
                         break
                 end
         end
+
 end
 
 LoomDesigner.ApplyAuthoring = applyAuthoring
