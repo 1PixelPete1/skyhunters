@@ -618,81 +618,73 @@ local function clearExistingPreview(parent)
         end
 end
 
+local function renderBranch(name, depth)
+       local design = newState.branches[name]
+       if not design then return end
+
+       GrowthVisualizer.Render(nil, {
+               loomUid = 0,
+               baseSeed = newState.baseSeed,
+               g = newState.g,
+               branchDesign = design,
+               scene = {
+                       Clear = VisualScene.Clear,
+                       Spawn = VisualScene.Spawn,
+                       ResolveModel = ModelResolver.ResolveFromList,
+               },
+       })
+
+       for _, child in ipairs(newState.assignments.children) do
+               if child.parent == name then
+                       for i = 1, child.count do
+                               renderBranch(child.child, depth + 1)
+                       end
+               end
+       end
+end
+
 function LoomDesigner.RebuildPreview(_container)
-        if not state.configId then return end
+       local parent = ensurePreviewParent()
+       clearExistingPreview(parent)
+       local model = Instance.new("Model")
+       model.Name = "PreviewBranch"
+       model.Parent = parent
+       VisualScene.SetPreviewModel(model)
 
-        -- ensure in-memory config reflects current authoring state
-        applyAuthoring()
+       if GrowthVisualizer and type(GrowthVisualizer.Release) == "function" then
+               GrowthVisualizer.Release(nil, 0)
+       end
 
-        -- robust configId fallback
-        if not LoomConfigs[state.configId] then
-                local firstId; for k in pairs(LoomConfigs) do firstId = k break end
-                if firstId then
-                        warn(("[LoomDesigner] Unknown configId '%s'. Using '%s'"):format(tostring(state.configId), firstId))
-                        state.configId = firstId
-                else
-                        warn("[LoomDesigner] LoomConfigs empty; skipping preview")
-                        return
-                end
-        end
+       VisualScene.Clear()
+       renderBranch(newState.assignments.trunk, 0)
 
-        local parent = ensurePreviewParent()
-        clearExistingPreview(parent)
-        local model = Instance.new("Model")
-        model.Name = "PreviewBranch"
-        model.Parent = parent
-        VisualScene.SetPreviewModel(model)
+       local sb = Instance.new("SelectionBox")
+       sb.Adornee = model
+       sb.LineThickness = 0.05
+       sb.Parent = model
+       task.delay(2, function()
+               sb:Destroy()
+       end)
 
-        if GrowthVisualizer and type(GrowthVisualizer.Release) == "function" then
-                GrowthVisualizer.Release(nil, 0)
-        end
-        local ok, err = pcall(function()
-                GrowthVisualizer.Render(nil, {
-                        loomUid = 0,
-                        configId = state.configId,
-                        baseSeed = state.baseSeed,
-                        g = state.g,
-                        overrides = state.overrides,
-                        scene = {
-                                Clear = VisualScene.Clear,
-                                Spawn = VisualScene.Spawn,
-                                ResolveModel = ModelResolver.ResolveFromList,
-                        },
-                })
-        end)
-
-        if not ok then
-                warn("RebuildPreview failed: ", err)
-                return
-        end
-
-        local sb = Instance.new("SelectionBox")
-        sb.Adornee = model
-        sb.LineThickness = 0.05
-        sb.Parent = model
-        task.delay(2, function()
-                sb:Destroy()
-        end)
-
-        local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-        local pivot = pp and pp.Position or Vector3.new()
-        local basePartCount = 0
-        for _, d in ipairs(model:GetDescendants()) do
-                if d:IsA("BasePart") then basePartCount += 1 end
-        end
-        print(string.format("Spawned PreviewBranch at %s with %d BaseParts", tostring(pivot), basePartCount))
-        if basePartCount == 0 then
-                VisualScene.Spawn({
-                        name="DebugSegment",
-                        shape=Enum.PartType.Ball,
-                        size=Vector3.new(0.8,0.8,0.8),
-                        cframe=CFrame.new(0,3,0),
-                        color=Color3.fromRGB(255,0,0),
-                        anchored=true,
-                        canCollide=false,
-                })
-                warn("[LoomDesigner] Render produced 0 BaseParts; placed DebugSegment for visibility.")
-        end
+       local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+       local pivot = pp and pp.Position or Vector3.new()
+       local basePartCount = 0
+       for _, d in ipairs(model:GetDescendants()) do
+               if d:IsA("BasePart") then basePartCount += 1 end
+       end
+       print(string.format("Spawned PreviewBranch at %s with %d BaseParts", tostring(pivot), basePartCount))
+       if basePartCount == 0 then
+               VisualScene.Spawn({
+                       name = "DebugSegment",
+                       shape = Enum.PartType.Ball,
+                       size = Vector3.new(0.8, 0.8, 0.8),
+                       cframe = CFrame.new(0, 3, 0),
+                       color = Color3.fromRGB(255, 0, 0),
+                       anchored = true,
+                       canCollide = false,
+               })
+               warn("[LoomDesigner] Render produced 0 BaseParts; placed DebugSegment for visibility.")
+       end
 end
 
 -- Simple validation that checks for expected field types. Returns true if the
