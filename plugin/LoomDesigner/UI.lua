@@ -974,6 +974,7 @@ renderProfiles = function()
     for name, _ in pairs(st.savedProfiles) do
         hasProfiles = true
         local btn = Instance.new("TextButton")
+        btn.Name = name
         btn.Size = UDim2.new(0,180,0,24)
         btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
@@ -1012,7 +1013,6 @@ local function renderAssignments()
     for n in pairs(st.savedProfiles) do table.insert(names, n) end
     table.sort(names)
     if #names == 0 then names = {"trunk"} end
-    -- ensure trunkProfile always points at a real name
     if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
         st.branchAssignments.trunkProfile = names[1]
     end
@@ -1020,74 +1020,82 @@ local function renderAssignments()
     dropdown(secAssign, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
         LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        renderAssignments()
     end)
 
-    for depth = 0, 10 do
-        local rules = st.branchAssignments.perDepth[depth]
-        if rules and #rules > 0 then
-            local depthFrame = Instance.new("Frame")
-            depthFrame.BackgroundTransparency = 1
-            depthFrame.Size = UDim2.new(1,0,0,0)
-            depthFrame.AutomaticSize = Enum.AutomaticSize.Y
-            depthFrame.Parent = secAssign
-            local header = Instance.new("TextLabel")
-            header.Text = "Depth "..depth
-            header.BackgroundTransparency = 1
-            header.TextColor3 = Color3.fromRGB(200,200,200)
-            header.Size = UDim2.new(1,0,0,20)
-            header.TextXAlignment = Enum.TextXAlignment.Left
-            header.Parent = depthFrame
+    local tree = Instance.new("Frame")
+    tree.BackgroundTransparency = 1
+    tree.Size = UDim2.new(1,0,0,0)
+    tree.AutomaticSize = Enum.AutomaticSize.Y
+    tree.Parent = secAssign
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = tree
 
-            for i, rule in ipairs(rules) do
-                local row = Instance.new("Frame")
-                row.Size = UDim2.new(1,0,0,26)
-                row.BackgroundTransparency = 1
-                row.Parent = depthFrame
-                dropdown(row, popupHost, "", names, table.find(names, rule.name) or 1, function(opt)
-                    rule.name = opt
-                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-                end)
-                labeledTextBox(row, "Chance", tostring(rule.chance or 1), function(txt)
-                    rule.chance = tonumber(txt) or 1
-                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-                end)
-                local del = Instance.new("TextButton")
-                del.Text = "X"
-                del.Size = UDim2.new(0,24,0,24)
-                del.Position = UDim2.new(1,-24,0,0)
-                del.BackgroundColor3 = Color3.fromRGB(80,40,40)
-                del.TextColor3 = Color3.new(1,1,1)
-                del.Parent = row
-                del.MouseButton1Click:Connect(function()
-                    table.remove(rules, i)
-                    renderAssignments()
-                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-                end)
+    local visited = {}
+    local function renderNode(name: string, depth: number)
+        local row = Instance.new("TextButton")
+        row.Name = name
+        row.Size = UDim2.new(1,0,0,20)
+        row.BackgroundColor3 = (name == selectedProfile) and Color3.fromRGB(70,70,110) or Color3.fromRGB(48,48,48)
+        row.TextColor3 = Color3.new(1,1,1)
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.Text = string.rep("    ", depth) .. name
+        row.Parent = tree
+        row.MouseButton1Click:Connect(function()
+            selectedProfile = name
+            st.activeProfileName = name
+            st.profileDrafts = st.profileDrafts or {}
+            st.profileDrafts[name] = st.profileDrafts[name] or LoomConfigUtil.deepCopy(st.savedProfiles[name])
+            renderProfiles()
+            renderProfileEditor()
+            renderAssignments()
+            local btn = profileList:FindFirstChild(name)
+            if btn then
+                local abs = btn.AbsolutePosition
+                local rootAbs = scroll.AbsolutePosition
+                scroll.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
             end
+        end)
 
-            makeBtn(depthFrame, "Add Rule", function()
-                st.branchAssignments.perDepth[depth] = st.branchAssignments.perDepth[depth] or {}
-                table.insert(st.branchAssignments.perDepth[depth], {name = names[1], chance = 1})
-                renderAssignments(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-            end).Size = UDim2.new(0,100,0,24)
-
-            labeledTextBox(depthFrame, "spacingN", tostring(st.branchAssignments.spacingN[depth] or ""), function(txt)
-                st.branchAssignments.spacingN[depth] = tonumber(txt)
-                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-            end)
-            labeledTextBox(depthFrame, "maxPerDepth", tostring(st.branchAssignments.maxPerDepth[depth] or ""), function(txt)
-                st.branchAssignments.maxPerDepth[depth] = tonumber(txt)
-                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-            end)
+        local prof = st.savedProfiles[name]
+        if not prof then
+            row.TextColor3 = Color3.fromRGB(255,120,120)
+            return
         end
+
+        if visited[name] then
+            local cyc = Instance.new("TextLabel")
+            cyc.BackgroundTransparency = 1
+            cyc.TextColor3 = Color3.fromRGB(255,120,120)
+            cyc.TextXAlignment = Enum.TextXAlignment.Left
+            cyc.Size = UDim2.new(1,0,0,20)
+            cyc.Text = string.rep("    ", depth+1) .. "(cycle)"
+            cyc.Parent = tree
+            return
+        end
+        visited[name] = true
+
+        if prof.children then
+            for _, child in ipairs(prof.children) do
+                local childName = child.name
+                if st.savedProfiles[childName] then
+                    renderNode(childName, depth+1)
+                else
+                    local warn = Instance.new("TextLabel")
+                    warn.Size = UDim2.new(1,0,0,20)
+                    warn.BackgroundTransparency = 1
+                    warn.TextXAlignment = Enum.TextXAlignment.Left
+                    warn.TextColor3 = Color3.fromRGB(255,120,120)
+                    warn.Text = string.rep("    ", depth+1) .. childName .. " (missing)"
+                    warn.Parent = tree
+                end
+            end
+        end
+        visited[name] = nil
     end
 
-    makeBtn(secAssign, "Add Depth", function()
-        local d = 0
-        for k in pairs(st.branchAssignments.perDepth) do if k>=d then d = k+1 end end
-        st.branchAssignments.perDepth[d] = { {name = names[1], chance = 1} }
-        renderAssignments(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
-    end).Size = UDim2.new(0,100,0,24)
+    renderNode(st.branchAssignments.trunkProfile, 0)
 end
 
 renderAssignments()
