@@ -168,12 +168,30 @@ local configs = {
         },
         branchAssignments = {
             trunkProfile = "trunk",
-            perDepth = {
-                [0] = { {name="branchA", chance=0.6}, {name="branchB", chance=0.4} },
-                [1] = { {name="branchA", chance=1.0} },
+            childProfiles = {
+                trunk = {
+                    spacingN = 3,
+                    maxPerParent = 2,
+                    children = {
+                        {name = "branchA", chance = 0.6},
+                        {name = "branchB", chance = 0.4},
+                    },
+                },
+                branchA = {
+                    spacingN = 2,
+                    maxPerParent = 2,
+                    children = {
+                        {name = "branchA", chance = 1.0},
+                    },
+                },
+                branchB = {
+                    spacingN = 2,
+                    maxPerParent = 2,
+                    children = {
+                        {name = "branchA", chance = 1.0},
+                    },
+                },
             },
-            spacingN    = { [0] = 3, [1] = 2 },
-            maxPerDepth = { [0] = 2, [1] = 2, [2] = 3 },
         },
     },
 }

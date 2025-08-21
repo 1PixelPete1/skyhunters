@@ -571,9 +571,16 @@ function GrowthVisualizer.Render(container, loomState)
     local nextId = 1
     local baseSeed = loomState.baseSeed or 0
 
-    local perDepth = branchAssignments.perDepth or {}
-    local spacingN = branchAssignments.spacingN or {}
-    local maxPerDepth = branchAssignments.maxPerDepth or {}
+    local childProfiles = branchAssignments.childProfiles or {}
+    local perDepth = branchAssignments.perDepth or nil
+    local spacingN = branchAssignments.spacingN or nil
+    local maxPerDepth = branchAssignments.maxPerDepth or nil
+    if perDepth or spacingN or maxPerDepth then
+        warn("branchAssignments per-depth fields are deprecated; use childProfiles")
+        perDepth = perDepth or {}
+        spacingN = spacingN or {}
+        maxPerDepth = maxPerDepth or {}
+    end
 
     local designFull = (GrowthVisualizer._editorMode == true) or (overrides.designFull == true)
 
@@ -601,11 +608,23 @@ function GrowthVisualizer.Render(container, loomState)
         end
 
         local depth = chain.depth
-        local rules = perDepth[depth]
+        local childSpec = childProfiles[chain.profileName]
+        local rules
+        local minGap = 0
+        local forkLimit = 0
+        if childSpec then
+            rules = childSpec.children
+            minGap = childSpec.spacingN or cfg.forkSpacingN or 0
+            forkLimit = childSpec.maxPerParent or cfg.forkLimitPerDepth or 2
+        elseif perDepth then
+            rules = perDepth[depth]
+            if rules then
+                minGap = spacingN[depth] or cfg.forkSpacingN or 0
+                forkLimit = maxPerDepth[depth] or cfg.forkLimitPerDepth or 2
+            end
+        end
         if rules and depth < (cfg.branchDepthMax or 0) then
             local rngBranch = SeedUtil.rng(baseSeed, "branch", chain.id)
-            local minGap = spacingN[depth] or cfg.forkSpacingN or 0
-            local forkLimit = maxPerDepth[depth] or cfg.forkLimitPerDepth or 2
             local lastForkAt = -minGap
             local spawned = 0
             for idx = 1, segCount do
@@ -613,12 +632,22 @@ function GrowthVisualizer.Render(container, loomState)
                     local pick = weightedPick(rngBranch, rules)
                     if pick and rngBranch:NextNumber() <= (pick.chance or 0) then
                         local seg = segRefs[idx]
-                        local startHere = seg.cframe * CFrame.new(0, seg.length/2, 0)
-                        nextId = nextId + 1
-                        local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
-                        chains[#chains + 1] = newChain
-                        chainMap[nextId] = newChain
-                        spawned = spawned + 1
+                        local baseCF = seg.cframe * CFrame.new(0, seg.length/2, 0)
+                        local orient = (pick.orientation or (childSpec and childSpec.orientation)) or {}
+                        local startHere = baseCF * CFrame.Angles(
+                            math.rad(orient.pitch or 0),
+                            math.rad(orient.yaw or 0),
+                            math.rad(orient.roll or 0)
+                        )
+                        local count = pick.count or 1
+                        for _ = 1, count do
+                            nextId = nextId + 1
+                            local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
+                            chains[#chains + 1] = newChain
+                            chainMap[nextId] = newChain
+                            spawned = spawned + 1
+                            if spawned >= forkLimit then break end
+                        end
                         lastForkAt = idx
                         if spawned >= forkLimit then
                             break
