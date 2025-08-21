@@ -190,6 +190,18 @@ end)
 return btn
 end
 
+local function makeBtn(parent, text, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,80,1,0)
+    b.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Text = text
+    b.ZIndex = (parent.ZIndex or 0) + 1
+    b.Parent = parent
+    b.MouseButton1Click:Connect(cb)
+    return b
+end
+
 local function bindNumberField(parent: Instance, label: string, get: ()->number?, setDraft: (number)->(), commit: ()->())
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1,0,0,24)
@@ -262,8 +274,6 @@ layout.FillDirection = Enum.FillDirection.Vertical
 layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = scroll
-
-local st = LoomDesigner.GetState()
 local status = Instance.new("TextLabel")
 status.TextColor3 = Color3.fromRGB(160,200,255)
 status.BackgroundTransparency = 1
@@ -272,9 +282,10 @@ status.Font = Enum.Font.SourceSansSemibold
 status.Parent = scroll
 
 local function updateStatus()
-    local st = LoomDesigner.GetState()
-    local trunk = st.branchAssignments and st.branchAssignments.trunkProfile or "-"
-    status.Text = string.format("Trunk: %s   Seed: %s", trunk, tostring(st.baseSeed))
+    local assign = LoomDesigner.GetAssignments and LoomDesigner.GetAssignments() or {trunk = ""}
+    local trunk = assign.trunk or "-"
+    local seed = LoomDesigner.GetSeed and LoomDesigner.GetSeed() or "?"
+    status.Text = string.format("Trunk: %s   Seed: %s", trunk, tostring(seed))
 end
 updateStatus()
 
@@ -305,25 +316,21 @@ local secConfig   = makeSection(scroll, "Branch Config")
 local secSeed     = makeSection(scroll, "Seed / Randomness")
 local secGrowth   = makeSection(scroll, "Growth Progression")
 local secSeg      = makeSection(scroll, "Segment Overrides")
-local secProfile  = makeSection(scroll, "Profile")
 local secGeo      = makeSection(scroll, "Segment Geometry")
 local secScale    = makeSection(scroll, "Size Profile")
 local secRot      = makeSection(scroll, "Rotation Rules")
 local secDeco     = makeSection(scroll, "Decorations")
--- Stage D authoring panels
-local secProfilesLib = makeSection(scroll, "Profiles (Authoring)")
-local secAssign    = makeSection(scroll, "Assignments (Authoring)")
+-- Branch authoring panels
+local secBranchLib = makeSection(scroll, "Branch Library")
+local secBranchTree = makeSection(scroll, "Branch Tree")
 local secModels    = makeSection(scroll, "Models (Authoring)")
 local secDecoAuth  = makeSection(scroll, "Decorations (Authoring)")
 local secIO        = makeSection(scroll, "Export / Import")
 
--- Forward decls shared across profile authoring
-local selectedProfile: string? = nil
-local renderProfiles
-local renderProfileEditor
-local renderAssignments
-local commitAndRebuild
-local nodeExpanded = {}
+-- Forward decls for branch authoring
+local selectedBranch: string? = nil
+local renderBranchLibrary
+local renderBranchTree
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -737,699 +744,160 @@ labeledTextBox(secRot, "FaceForward Bias", "", function(txt)
 end)
 
 -- === Authoring Panels ======================================================
--- Profiles list and editor --------------------------------------------------
-local listFrame = Instance.new("ScrollingFrame")
-listFrame.BackgroundTransparency = 1
-listFrame.BorderSizePixel = 0
-listFrame.Size = UDim2.new(1,0,0,150)
-listFrame.CanvasSize = UDim2.new(0,0,0,0)
-listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-listFrame.ScrollBarThickness = 8
-listFrame.LayoutOrder = 1
-listFrame.Parent = secProfilesLib
-listFrame.ZIndex = 2
-listFrame.ClipsDescendants = false
--- ensure the list is mounted correctly and not clipped by ancestors
-task.defer(function()
-    if not listFrame:IsDescendantOf(controlsHost) then
-        listFrame.Parent = secProfilesLib
-    end
-    local ancestor = listFrame.Parent
-    while ancestor do
-        if ancestor:IsA("GuiObject") then
-            ancestor.ClipsDescendants = false
-        end
-        ancestor = ancestor.Parent
-    end
-end)
+-- Branch Library -------------------------------------------------------------
+local branchList = Instance.new("Frame")
+branchList.BackgroundTransparency = 1
+branchList.Size = UDim2.new(1,0,0,0)
+branchList.AutomaticSize = Enum.AutomaticSize.Y
+branchList.Parent = secBranchLib
 
-local listPadding = Instance.new("UIPadding")
-listPadding.PaddingTop = UDim.new(0,4)
-listPadding.PaddingBottom = UDim.new(0,4)
-listPadding.PaddingLeft = UDim.new(0,4)
-listPadding.PaddingRight = UDim.new(0,4)
-listPadding.Parent = listFrame
+local branchLayout = Instance.new("UIListLayout")
+branchLayout.SortOrder = Enum.SortOrder.LayoutOrder
+branchLayout.Parent = branchList
 
-local profileLayout = Instance.new("UIListLayout")
-profileLayout.SortOrder = Enum.SortOrder.LayoutOrder
-profileLayout.Parent = listFrame
+local branchButtonsRow = Instance.new("Frame")
+branchButtonsRow.Size = UDim2.new(1,0,0,26)
+branchButtonsRow.BackgroundTransparency = 1
+branchButtonsRow.Parent = secBranchLib
 
-local buttonsRow = Instance.new("Frame")
-buttonsRow.Size = UDim2.new(1,0,0,26)
-buttonsRow.BackgroundTransparency = 1
-buttonsRow.LayoutOrder = 2
-buttonsRow.Parent = secProfilesLib
-buttonsRow.ZIndex = 2
-
-local function makeBtn(parent, text, cb)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0,80,1,0)
-    b.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    b.TextColor3 = Color3.new(1,1,1)
-    b.Text = text
-    b.ZIndex = (parent.ZIndex or 0) + 1
-    b.Parent = parent
-    b.MouseButton1Click:Connect(cb)
-    return b
-end
-
-local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
-    if selectedProfile and txt ~= "" then
-        local st = LoomDesigner.GetState()
-        LoomDesigner.RenameProfile(selectedProfile, txt)
-        if st.profileDrafts[selectedProfile] then
-            st.profileDrafts[txt] = st.profileDrafts[selectedProfile]
-            st.profileDrafts[selectedProfile] = nil
-        end
-        if st.activeProfileName == selectedProfile then
-            st.activeProfileName = txt
-        end
-        selectedProfile = txt
-        commitAndRebuild()
-        renderAssignments()
+local renameBox = labeledTextBox(secBranchLib, "New Name", "", function(txt)
+    if selectedBranch and txt ~= "" then
+        LoomDesigner.RenameBranch(selectedBranch, txt)
+        selectedBranch = txt
+        applyAuthoringAndPreview()
+        renderBranchLibrary()
+        renderBranchTree()
     end
     renameBox.Parent.Visible = false
 end)
 renameBox.Parent.Visible = false
-renameBox.Parent.LayoutOrder = 3
 
-local pendingProfileName = ""
-local newProfileBox: TextBox? = nil
-if secProfilesLib and secProfilesLib.Parent then
-    newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
-        local st = LoomDesigner.GetState()
-        local name = (txt ~= "" and txt) or pendingProfileName
-        LoomDesigner.CreateProfile(name)
-        st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
-        st.activeProfileName = name
-        selectedProfile = name
-        if newProfileBox and newProfileBox.Parent then
-            newProfileBox.Parent.Visible = false
-        end
-        pendingProfileName = ""
-        commitAndRebuild()
-        renderProfiles()
-        renderProfileEditor()
-        renderAssignments()
-        task.defer(function()
-            local btn = listFrame:FindFirstChild(name)
-            if btn then
-                local abs = btn.AbsolutePosition
-                local rootAbs = listFrame.AbsolutePosition
-                listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
-            end
-        end)
-    end)
-    if newProfileBox.Parent then
-        newProfileBox.Parent.Visible = false
-        newProfileBox.Parent.LayoutOrder = 3
-    end
+local function newBranch()
+    local branches = LoomDesigner.GetBranches()
+    local i = 1
+    while branches["branch"..i] do i += 1 end
+    local name = "branch"..i
+    LoomDesigner.CreateBranch(name, {kind = "straight"})
+    selectedBranch = name
+    applyAuthoringAndPreview()
+    updateStatus()
+    renderBranchLibrary()
 end
 
-local function newProfile()
-    local st = LoomDesigner.GetState()
+local function duplicateBranch()
+    if not selectedBranch then return end
+    local branches = LoomDesigner.GetBranches()
+    local base = selectedBranch .. "Copy"
     local i = 1
-    while st.savedProfiles["profile"..i] do i += 1 end
-    pendingProfileName = "profile"..i
-    if newProfileBox then
-        newProfileBox.Text = pendingProfileName
-        if newProfileBox.Parent then
-            newProfileBox.Parent.Visible = true
-            newProfileBox:CaptureFocus()
-        end
-    end
-end
-
-local function duplicateProfile()
-    if not selectedProfile then return end
-    local st = LoomDesigner.GetState()
-    local base = selectedProfile .. "Copy"
-    local i = 1
-    while st.savedProfiles[base..i] do i += 1 end
-    local src = LoomConfigUtil.deepCopy(st.savedProfiles[selectedProfile])
+    while branches[base..i] do i += 1 end
     local name = base..i
-    LoomDesigner.CreateProfile(name, LoomConfigUtil.deepCopy(src))
-    st.profileDrafts[name] = LoomConfigUtil.deepCopy(src)
-    st.activeProfileName = name
-    selectedProfile = name
-    commitAndRebuild()
-    renderAssignments()
+    LoomDesigner.CreateBranch(name, branches[selectedBranch])
+    selectedBranch = name
+    applyAuthoringAndPreview()
+    renderBranchLibrary()
 end
 
-local function renameProfile()
-    if not selectedProfile then return end
-    renameBox.Text = selectedProfile
+local function renameBranch()
+    if not selectedBranch then return end
+    renameBox.Text = selectedBranch
     renameBox.Parent.Visible = true
 end
 
-local function deleteProfile()
-    if not selectedProfile then return end
-    local st = LoomDesigner.GetState()
-    LoomDesigner.DeleteProfile(selectedProfile)
-    st.profileDrafts[selectedProfile] = nil
-    if st.activeProfileName == selectedProfile then
-        st.activeProfileName = nil
-    end
-    selectedProfile = nil
-    commitAndRebuild()
-    renderAssignments()
+local function deleteBranch()
+    if not selectedBranch then return end
+    LoomDesigner.DeleteBranch(selectedBranch)
+    selectedBranch = nil
+    applyAuthoringAndPreview()
+    updateStatus()
+    renderBranchLibrary()
+    renderBranchTree()
 end
 
-makeBtn(buttonsRow, "New", newProfile)
-makeBtn(buttonsRow, "Duplicate", duplicateProfile)
-makeBtn(buttonsRow, "Rename", renameProfile)
-makeBtn(buttonsRow, "Delete", deleteProfile)
+makeBtn(branchButtonsRow, "New", newBranch)
+makeBtn(branchButtonsRow, "Duplicate", duplicateBranch)
+makeBtn(branchButtonsRow, "Rename", renameBranch)
+makeBtn(branchButtonsRow, "Delete", deleteBranch)
 
-local profileEditor = Instance.new("Frame")
-profileEditor.BackgroundTransparency = 1
-profileEditor.Size = UDim2.new(1,0,0,0)
-profileEditor.AutomaticSize = Enum.AutomaticSize.Y
-profileEditor.Parent = secProfilesLib
-profileEditor.LayoutOrder = 4
-
--- Child authoring helpers ---------------------------------------------------
-local CHILD_PLACEMENTS = {"tip","junction","along","radial","spiral"}
-local CHILD_ROTATIONS = {"upright","inherit","custom"}
-
-local function createChildRow(parent: Instance, popupHost: Frame, child: table,
-        profileNames: {string}, commit: ()->(), remove: ()->(), rerender: ()->())
-    local frame = Instance.new("Frame")
-    frame.BackgroundTransparency = 1
-    frame.Size = UDim2.new(1,0,0,0)
-    frame.AutomaticSize = Enum.AutomaticSize.Y
-    frame.Parent = parent
-
-    dropdown(frame, popupHost, "Profile", profileNames,
-        table.find(profileNames, child.name) or 1, function(opt)
-            child.name = opt
-            commit()
-        end)
-
-    labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
-        child.count = tonumber(txt) or 1
-        commit()
-    end)
-
-    dropdown(frame, popupHost, "Placement", CHILD_PLACEMENTS,
-        table.find(CHILD_PLACEMENTS, child.placement) or 1, function(opt)
-            child.placement = opt
-            commit()
-        end)
-
-    local rotIndex
-    if type(child.rotation) == "table" then
-        rotIndex = table.find(CHILD_ROTATIONS, "custom")
-    else
-        rotIndex = table.find(CHILD_ROTATIONS, child.rotation)
+renderBranchLibrary = function()
+    for _, c in ipairs(branchList:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
     end
-    dropdown(frame, popupHost, "Rotation", CHILD_ROTATIONS, rotIndex or 1,
-        function(opt)
-            if opt == "custom" then
-                child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
-            else
-                child.rotation = opt
-            end
-            commit()
-            rerender()
-        end)
-
-    if type(child.rotation) == "table" then
-        labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
-            child.rotation.pitch = tonumber(txt) or 0
-            commit()
-        end)
-        labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
-            child.rotation.yaw = tonumber(txt) or 0
-            commit()
-        end)
-        labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
-            child.rotation.roll = tonumber(txt) or 0
-            commit()
-        end)
-    end
-
-    local delBtn = makeBtn(frame, "Remove", function()
-        remove()
-    end)
-    delBtn.Size = UDim2.new(0,80,0,24)
-end
-
-local function renderChildrenSection(parent: Instance, popupHost: Frame, draft: table, commit: ()->())
-    local section = makeSection(parent, "Children")
-
-    local function render()
-        for _, c in ipairs(section:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-
-        local names = {}
-        for name in pairs(LoomDesigner.GetState().savedProfiles) do
-            table.insert(names, name)
-        end
-        table.sort(names)
-
-        draft.children = draft.children or {}
-        for i, child in ipairs(draft.children) do
-            createChildRow(section, popupHost, child, names, commit, function()
-                table.remove(draft.children, i)
-                render()
-                commit()
-            end, render)
-        end
-
-        local addBtn = makeBtn(section, "Add Child", function()
-            local name = names[1]
-            if name then
-                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
-                render()
-                commit()
-            end
-        end)
-        addBtn.Size = UDim2.new(0,100,0,24)
-    end
-
-    render()
-    return section
-end
-
--- render functions ---------------------------------------------------------
-commitAndRebuild = function()
-    local st = LoomDesigner.GetState()
-    local active = st.activeProfileName
-    local draft = active and st.profileDrafts and st.profileDrafts[active]
-    if active and draft then
-        st.profileDrafts[active] = draft
-        LoomDesigner.CommitProfileEdit(active, draft)
-    end
-    LoomDesigner.ApplyAuthoring()
-    LoomDesigner.RebuildPreview(nil)
-end
-
-renderProfileEditor = function()
-    for _, c in ipairs(profileEditor:GetChildren()) do c:Destroy() end
-    if not selectedProfile then return end
-    local st = LoomDesigner.GetState()
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0,6)
-    layout.Parent = profileEditor
-    commitErrorLabel = Instance.new("TextLabel")
-    commitErrorLabel.TextColor3 = Color3.fromRGB(255,100,100)
-    commitErrorLabel.BackgroundTransparency = 1
-    commitErrorLabel.Size = UDim2.new(1,0,0,20)
-    commitErrorLabel.TextXAlignment = Enum.TextXAlignment.Left
-    commitErrorLabel.Visible = false
-    commitErrorLabel.Parent = profileEditor
-    st.activeProfileName = selectedProfile
-    st.profileDrafts = st.profileDrafts or {}
-    local draft = st.profileDrafts[selectedProfile]
-    if not draft then
-        draft = LoomConfigUtil.deepCopy(st.savedProfiles[selectedProfile] or {})
-        st.profileDrafts[selectedProfile] = draft
-    end
-
-    local function commit()
-    commitAndRebuild()
-    renderAssignments()
-    end
-
-    local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
-    dropdown(profileEditor, popupHost, "Kind", kinds, table.find(kinds, draft.kind) or 1, function(opt)
-        draft.kind = string.lower(opt)
-        commit()
-        renderProfileEditor()
-    end)
-
-    local function numBox(label, field)
-        bindNumberField(profileEditor, label,
-            function() return draft[field] end,
-            function(v) draft[field] = v end,
-            commit)
-    end
-
-    numBox("Amplitude", "amplitudeDeg")
-    numBox("Frequency", "frequency")
-    numBox("Curvature", "curvature")
-    numBox("Roll Bias", "rollBias")
-    numBox("Child Inherit", "childInherit")
-    if draft.kind == "zigzag" then numBox("Zigzag Every", "zigzagEvery") end
-    if draft.kind == "sigmoid" then numBox("Sigmoid K", "sigmoidK"); numBox("Sigmoid Mid", "sigmoidMid") end
-    if draft.kind == "chaotic" then numBox("Chaotic R", "chaoticR") end
-
-    local modes = {"uniform","triangular","normal","biased"}
-    dropdown(profileEditor, popupHost, "SegMode", modes, table.find(modes, draft.segmentCountMode) or 1, function(opt)
-        draft.segmentCountMode = opt
-        commit()
-        renderProfileEditor()
-    end)
-
-    local errLabel = Instance.new("TextLabel")
-    errLabel.BackgroundTransparency = 1
-    errLabel.TextColor3 = Color3.fromRGB(255,120,120)
-    errLabel.TextXAlignment = Enum.TextXAlignment.Left
-    errLabel.Size = UDim2.new(1,0,0,20)
-    errLabel.Parent = profileEditor
-
-    local function validate()
-        errLabel.Text = ""
-        if draft.segmentCountMin and draft.segmentCountMax and draft.segmentCountMin > draft.segmentCountMax then
-            errLabel.Text = "min>max"
-        end
-        if draft.segmentCountMode == "normal" and draft.segmentCountSd and draft.segmentCountSd < 0 then
-            errLabel.Text = "sd<0"
-        end
-        if draft.segmentCountMode == "biased" and draft.segmentCountBias and draft.segmentCountBias <= 0 then
-            errLabel.Text = "bias<=0"
-        end
-    end
-
-    local function segNum(label, field)
-        bindNumberField(profileEditor, label,
-            function() return draft[field] end,
-            function(v) draft[field] = v; validate() end,
-            commit)
-    end
-
-    segNum("Segment Count", "segmentCount")
-    segNum("SegCount Min", "segmentCountMin")
-    segNum("SegCount Max", "segmentCountMax")
-    if draft.segmentCountMode == "triangular" then segNum("Mode N", "segmentCountModeN") end
-    if draft.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
-    if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
-
-    renderChildrenSection(profileEditor, popupHost, draft, commit)
-    validate()
-end
-
-renderProfiles = function()
-    for _, c in ipairs(listFrame:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
-    local st = LoomDesigner.GetState()
-    local hasProfiles = false
-    for name, _ in pairs(st.savedProfiles) do
-        hasProfiles = true
+    local branches = LoomDesigner.GetBranches()
+    local names = {}
+    for n in pairs(branches) do table.insert(names, n) end
+    table.sort(names)
+    for _, name in ipairs(names) do
         local btn = Instance.new("TextButton")
         btn.Name = name
-        btn.Size = UDim2.new(0,180,0,24)
+        btn.Size = UDim2.new(1,0,0,20)
+        btn.BackgroundColor3 = (name == selectedBranch) and Color3.fromRGB(70,70,110) or Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
-        btn.ZIndex = listFrame.ZIndex + 1
+        btn.TextXAlignment = Enum.TextXAlignment.Left
         btn.Text = name
-        if name == st.activeProfileName then
-            btn.BackgroundColor3 = Color3.fromRGB(70,70,100)
-            btn.Font = Enum.Font.SourceSansBold
-            btn.BorderSizePixel = 2
-            btn.BorderColor3 = Color3.fromRGB(80,120,200)
-            btn.BackgroundColor3 = Color3.fromRGB(60,60,60)
-        else
-            btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-            btn.Font = Enum.Font.SourceSans
-            btn.BorderSizePixel = 0
-            btn.BorderColor3 = Color3.fromRGB(0,0,0)
-        end
-        btn.Parent = listFrame
-
+        btn.Parent = branchList
         btn.MouseButton1Click:Connect(function()
-            selectedProfile = name
-            st.activeProfileName = name
-            st.profileDrafts = st.profileDrafts or {}
-            st.profileDrafts[name] = st.profileDrafts[name] or LoomConfigUtil.deepCopy(st.savedProfiles[name])
-            renderProfiles()
-            renderProfileEditor()
+            selectedBranch = name
+            LoomDesigner.EditBranch(name, {})
+            applyAuthoringAndPreview()
+            renderBranchLibrary()
+            renderBranchTree()
         end)
     end
-    if not hasProfiles then
-        profileLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        profileLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-        selectedProfile = nil
+end
 
-        local help = Instance.new("TextLabel")
-        help.Text = "No profiles yet. Create one to get started."
-        help.BackgroundTransparency = 1
-        help.TextColor3 = Color3.fromRGB(200,200,200)
-        help.TextXAlignment = Enum.TextXAlignment.Center
-        help.Size = UDim2.new(0,200,0,20)
-        help.Parent = listFrame
-
-        local createBtn = Instance.new("TextButton")
-        createBtn.Text = "Create Profile"
-        createBtn.Size = UDim2.new(0,180,0,24)
-        createBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-        createBtn.TextColor3 = Color3.new(1,1,1)
-        createBtn.ZIndex = listFrame.ZIndex + 1
-        createBtn.Parent = listFrame
-        createBtn.MouseButton1Click:Connect(function()
-            newProfile()
-        end)
-    else
-        profileLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-        profileLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+-- Branch Tree ----------------------------------------------------------------
+renderBranchTree = function()
+    for _, c in ipairs(secBranchTree:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
     end
-    renderProfileEditor()
-end
-
-renderProfiles()
-
--- re-render UI automatically when the saved profiles table changes
-do
-    local state = LoomDesigner.GetState()
-    state.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", state.savedProfiles, function()
-        task.defer(function()
-            renderProfiles()
-            if renderAssignments then
-                renderAssignments()
-            end
-            updateStatus()
-        end)
-    end))
-    st.branchAssignments = select(1, FlowTrace.watchTable("ui.branchAssignments", st.branchAssignments, function()
-        task.defer(function()
-            updateStatus()
-            if renderAssignments then
-                renderAssignments()
-            end
-        end)
-    end))
-end
-
--- Assignments ---------------------------------------------------------------
-local function renderAssignments()
-    for _, c in ipairs(secAssign:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
-    local st = LoomDesigner.GetState()
+    local branches = LoomDesigner.GetBranches()
     local names = {}
-    for n in pairs(st.savedProfiles) do table.insert(names, n) end
+    for n in pairs(branches) do table.insert(names, n) end
     table.sort(names)
 
-    local trunkFrame = Instance.new("Frame")
-    trunkFrame.BackgroundTransparency = 1
-    trunkFrame.Size = UDim2.new(1,0,0,0)
-    trunkFrame.AutomaticSize = Enum.AutomaticSize.Y
-    trunkFrame.Parent = secAssign
-
-    if #names == 0 then
-        local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
-        btn.Active = false
-        btn.AutoButtonColor = false
-        updateStatus()
-        local msg = Instance.new("TextLabel")
-        msg.Text = "Create a profile first"
-        msg.TextColor3 = Color3.fromRGB(200,200,200)
-        msg.BackgroundTransparency = 1
-        msg.Size = UDim2.new(1,0,0,18)
-        msg.Parent = secAssign
-        return
-    end
-
-    if not st.branchAssignments.trunkProfile
-        or st.branchAssignments.trunkProfile == ""
-        or not st.savedProfiles[st.branchAssignments.trunkProfile] then
-        st.branchAssignments.trunkProfile = names[1]
-    end
-
-    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
-    local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
-    dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
-        st.branchAssignments.trunkProfile = opt
-        updateStatus()
-        pcall(function()
-            plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
-        end)
+    local assignments = LoomDesigner.GetAssignments()
+    local trunkIdx = table.find(names, assignments.trunk) or 1
+    dropdown(secBranchTree, popupHost, "Trunk", names, trunkIdx, function(opt)
+        LoomDesigner.SetTrunk(opt)
         applyAuthoringAndPreview()
-        renderAssignments()
+        updateStatus()
+        renderBranchTree()
     end)
 
-    -- Count branches for limits
-    local countsByDepth: {[number]: number} = {}
-    local visitedCount = {}
-    local function countNode(name: string, depth: number)
-        local prof = st.savedProfiles[name]
-        if not prof or visitedCount[name] then return end
-        visitedCount[name] = true
-        countsByDepth[depth] = (countsByDepth[depth] or 0) + 1
-        if prof.children then
-            for _, child in ipairs(prof.children) do
-                countNode(child.name, depth+1)
-            end
-        end
-        visitedCount[name] = nil
-    end
-    countNode(st.branchAssignments.trunkProfile, 0)
-
-    local totalBranches = 0
-    for d, c in pairs(countsByDepth) do if d > 0 then totalBranches += c end end
-    local depthCaps = st.branchAssignments.depthCaps or {}
-    local maxDepth = 0
-    for d in pairs(countsByDepth) do if d > maxDepth then maxDepth = d end end
-    for d in pairs(depthCaps) do if d > maxDepth then maxDepth = d end end
-    local depthExceeded = {}
-    for d, c in pairs(countsByDepth) do
-        if depthCaps[d] and c > depthCaps[d] then depthExceeded[d] = true end
-    end
-    local globalExceeded = st.branchAssignments.branchCap and st.branchAssignments.branchCap > 0 and totalBranches > st.branchAssignments.branchCap
-
-    local capBox = labeledTextBox(secAssign, "Branch Cap", tostring(st.branchAssignments.branchCap or 0), function(txt)
-        local n = tonumber(txt)
-        if n then
-            st.branchAssignments.branchCap = math.max(0, math.floor(n))
-            applyAuthoringAndPreview()
-        end
-    end)
-    local capLabel = capBox.Parent:FindFirstChildOfClass("TextLabel")
-    if globalExceeded then capLabel.TextColor3 = Color3.fromRGB(255,120,120) end
-
-    local globalInfo = Instance.new("TextLabel")
-    globalInfo.BackgroundTransparency = 1
-    globalInfo.TextColor3 = globalExceeded and Color3.fromRGB(255,120,120) or Color3.fromRGB(200,200,200)
-    globalInfo.Size = UDim2.new(1,0,0,18)
-    globalInfo.TextXAlignment = Enum.TextXAlignment.Left
-    globalInfo.Text = string.format("Total branches: %d/%s", totalBranches, st.branchAssignments.branchCap or "-")
-    globalInfo.Parent = secAssign
-
-    st.branchAssignments.depthCaps = depthCaps
-    for d = 1, maxDepth do
-        local box = labeledTextBox(secAssign, string.format("Depth %d Cap", d), tostring(depthCaps[d] or ""), function(txt)
-            local n = tonumber(txt)
-            if n then
-                depthCaps[d] = math.max(0, math.floor(n))
-            else
-                depthCaps[d] = nil
-            end
-            applyAuthoringAndPreview()
-            renderAssignments()
-        end)
-        local lab = box.Parent:FindFirstChildOfClass("TextLabel")
-        if depthExceeded[d] then lab.TextColor3 = Color3.fromRGB(255,120,120) end
-
-        local info = Instance.new("TextLabel")
-        info.BackgroundTransparency = 1
-        info.Size = UDim2.new(1,0,0,18)
-        info.TextXAlignment = Enum.TextXAlignment.Left
-        info.TextColor3 = depthExceeded[d] and Color3.fromRGB(255,120,120) or Color3.fromRGB(200,200,200)
-        info.Text = string.format("Depth %d branches: %d/%s", d, countsByDepth[d] or 0, depthCaps[d] or "-")
-        info.Parent = secAssign
-    end
-
-    local tree = Instance.new("Frame")
-    tree.BackgroundTransparency = 1
-    tree.Size = UDim2.new(1,0,0,0)
-    tree.AutomaticSize = Enum.AutomaticSize.Y
-    tree.Parent = secAssign
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Parent = tree
-
-    local visited = {}
-    local function renderNode(name, depth)
-        local row = Instance.new("TextButton")
-
-        row.Name = name
+    for i, child in ipairs(assignments.children) do
+        local row = Instance.new("Frame")
         row.Size = UDim2.new(1,0,0,20)
         row.BackgroundTransparency = 1
-        row.Parent = tree
-
-        local pad = Instance.new("UIPadding")
-        pad.PaddingLeft = UDim.new(0, depth * 16)
-        pad.Parent = row
-
-        local expandBtn = Instance.new("TextButton")
-        expandBtn.Size = UDim2.fromOffset(16,20)
-        expandBtn.BackgroundTransparency = 1
-        expandBtn.TextColor3 = Color3.new(1,1,1)
-        expandBtn.Text = expanded and "-" or "+"
-        expandBtn.Visible = hasChildren
-        expandBtn.Parent = row
-        expandBtn.MouseButton1Click:Connect(function()
-            nodeExpanded[name] = not expanded
-            renderAssignments()
+        row.Parent = secBranchTree
+        local lab = Instance.new("TextLabel")
+        lab.Size = UDim2.new(1,-80,1,0)
+        lab.BackgroundTransparency = 1
+        lab.TextColor3 = Color3.fromRGB(200,200,200)
+        lab.TextXAlignment = Enum.TextXAlignment.Left
+        lab.Text = string.format("%s -> %s (%s x%d)", child.parent, child.child, child.placement, child.count)
+        lab.Parent = row
+        local del = makeBtn(row, "Remove", function()
+            LoomDesigner.RemoveChild(i)
+            applyAuthoringAndPreview()
+            renderBranchTree()
         end)
-
-        local labelBtn = Instance.new("TextButton")
-        labelBtn.Size = UDim2.new(1,-16,1,0)
-        labelBtn.Position = UDim2.new(0,16,0,0)
-        labelBtn.BackgroundColor3 = (name == selectedProfile) and Color3.fromRGB(70,70,110) or Color3.fromRGB(48,48,48)
-        local txtColor = Color3.new(1,1,1)
-        if depthExceeded[depth] or (depth == 0 and globalExceeded) then
-            txtColor = Color3.fromRGB(255,120,120)
-        end
-        labelBtn.TextColor3 = txtColor
-        labelBtn.TextXAlignment = Enum.TextXAlignment.Left
-        labelBtn.Text = name
-        labelBtn.Parent = row
-        labelBtn.MouseButton1Click:Connect(function()
-            selectedProfile = name
-            st.activeProfileName = name
-            st.profileDrafts = st.profileDrafts or {}
-            st.profileDrafts[name] = st.profileDrafts[name] or LoomConfigUtil.deepCopy(st.savedProfiles[name])
-            renderProfiles()
-            renderProfileEditor()
-            renderAssignments()
-            local btn = listFrame:FindFirstChild(name)
-            if btn then
-                local abs = btn.AbsolutePosition
-                local rootAbs = scroll.AbsolutePosition
-                scroll.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
-            end
-        end)
-
-        if not prof then
-            labelBtn.TextColor3 = Color3.fromRGB(255,120,120)
-            return
-        end
-
-        if visited[name] then
-            local cyc = Instance.new("TextLabel")
-            cyc.BackgroundTransparency = 1
-            cyc.TextColor3 = Color3.fromRGB(255,120,120)
-            cyc.TextXAlignment = Enum.TextXAlignment.Left
-            cyc.Size = UDim2.new(1,0,0,20)
-            cyc.Text = string.rep("    ", depth+1) .. "(cycle)"
-            cyc.Parent = tree
-            return
-        end
-        visited[name] = true
-
-        if prof.children and expanded then
-            for _, child in ipairs(prof.children) do
-                local childName = child.name
-                if st.savedProfiles[childName] then
-                    renderNode(childName, depth+1)
-                else
-                    local warn = Instance.new("TextLabel")
-                    warn.Size = UDim2.new(1,0,0,20)
-                    warn.BackgroundTransparency = 1
-                    warn.TextXAlignment = Enum.TextXAlignment.Left
-                    warn.TextColor3 = Color3.fromRGB(255,120,120)
-                    warn.Text = string.rep("    ", depth+1) .. childName .. " (missing)"
-                    warn.Parent = tree
-                end
-            end
-        end
-        visited[name] = nil
+        del.Position = UDim2.new(1,-80,0,0)
     end
 
-    renderNode(st.branchAssignments.trunkProfile, 0)
+    local parentBox = labeledTextBox(secBranchTree, "Parent", "", function() end)
+    local childBox = labeledTextBox(secBranchTree, "Child", "", function() end)
+    local addBtn = makeBtn(secBranchTree, "Add Child", function()
+        if parentBox.Text ~= "" and childBox.Text ~= "" then
+            LoomDesigner.AddChild(parentBox.Text, childBox.Text, "tip", 1)
+            applyAuthoringAndPreview()
+            renderBranchTree()
+        end
+    end)
+    addBtn.Size = UDim2.new(0,100,0,24)
 end
 
-renderAssignments()
-
+renderBranchLibrary()
+renderBranchTree()
 -- Models -------------------------------------------------------------------
 local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
