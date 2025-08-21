@@ -568,25 +568,7 @@ function GrowthVisualizer.Render(container, loomState)
     end
     branchDepthMax = branchDepthMax or 0
 
-    local function traverse(chainId, depth, profileName, startCF)
-        local prof = profileOverride or profiles[profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
-        prof = GrowthProfiles.clampProfile(prof)
-        local res = buildChain(segOut, chainId, depth, baseSeed, startCF, prof, cfg, overrides)
-        chainMap[chainId] = { id = chainId, depth = depth, profileName = profileName, startCF = startCF, segCount = res.segCount }
-        local segRefs = res.segRefs
-        local segCount = res.segCount
-
-        local fills
-        if designFull then
-            fills = {}
-            for i = 1, segCount do fills[i] = 1 end
-        else
-            fills = computeSegmentFill(segCount, loomState.g or 0)
-        end
-        for i = 1, segCount do
-            segRefs[i].fill = fills[i]
-        end
-
+    local function resolveChildren(prof, profileName)
         local children = prof.children
         if type(children) == "table" and not (children[1] and children[1].name) then
             local flat = {}
@@ -622,51 +604,76 @@ function GrowthVisualizer.Render(container, loomState)
             end
             prof.depthRules = nil
         end
+        return children
+    end
 
-        if children and depth < branchDepthMax then
-            local lastSeg = segRefs[segCount]
-            local parentRot = startCF.Rotation
-            local basePos = startCF.Position
-            for pIdx, pick in ipairs(children) do
-                local count = pick.count or 1
-                local intCount = math.floor(count)
-                local extra = count - intCount
-                local placement = pick.placement or "tip"
-                local orient
-                if type(pick.rotation) == "table" then
-                    orient = pick.rotation
-                elseif pick.rotation == "upright" then
-                    orient = {pitch = 0, yaw = 0, roll = 0}
+    local function spawnChildBranches(chainId, children, depth, startCF, segRefs, segCount)
+        if not children or depth >= branchDepthMax then return end
+        local lastSeg = segRefs[segCount]
+        local parentRot = startCF.Rotation
+        local basePos = startCF.Position
+        for pIdx, pick in ipairs(children) do
+            local count = pick.count or 1
+            local intCount = math.floor(count)
+            local extra = count - intCount
+            local placement = pick.placement or "tip"
+            local orient
+            if type(pick.rotation) == "table" then
+                orient = pick.rotation
+            elseif pick.rotation == "upright" then
+                orient = {pitch = 0, yaw = 0, roll = 0}
+            else
+                orient = {}
+            end
+            local function spawnOne()
+                local posCF
+                if placement == "tip" and lastSeg then
+                    local tipCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
+                    posCF = CFrame.new(tipCF.Position) * parentRot
                 else
-                    orient = {}
+                    posCF = CFrame.new(basePos) * parentRot
                 end
-                local function spawnOne()
-                    local posCF
-                    if placement == "tip" and lastSeg then
-                        local tipCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
-                        posCF = CFrame.new(tipCF.Position) * parentRot
-                    else
-                        posCF = CFrame.new(basePos) * parentRot
-                    end
-                    local startHere = posCF * CFrame.Angles(
-                        math.rad(orient.pitch or 0),
-                        math.rad(orient.yaw or 0),
-                        math.rad(orient.roll or 0)
-                    )
-                    nextId = nextId + 1
-                    traverse(nextId, depth + 1, pick.name, startHere)
-                end
-                for _ = 1, intCount do
+                local startHere = posCF * CFrame.Angles(
+                    math.rad(orient.pitch or 0),
+                    math.rad(orient.yaw or 0),
+                    math.rad(orient.roll or 0)
+                )
+                nextId = nextId + 1
+                traverse(nextId, depth + 1, pick.name, startHere)
+            end
+            for _ = 1, intCount do
+                spawnOne()
+            end
+            if extra > 0 then
+                local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
+                if rngPick:NextNumber() < extra then
                     spawnOne()
-                end
-                if extra > 0 then
-                    local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
-                    if rngPick:NextNumber() < extra then
-                        spawnOne()
-                    end
                 end
             end
         end
+    end
+
+    local function traverse(chainId, depth, profileName, startCF)
+        local prof = profileOverride or profiles[profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
+        prof = GrowthProfiles.clampProfile(prof)
+        local res = buildChain(segOut, chainId, depth, baseSeed, startCF, prof, cfg, overrides)
+        chainMap[chainId] = { id = chainId, depth = depth, profileName = profileName, startCF = startCF, segCount = res.segCount }
+        local segRefs = res.segRefs
+        local segCount = res.segCount
+
+        local fills
+        if designFull then
+            fills = {}
+            for i = 1, segCount do fills[i] = 1 end
+        else
+            fills = computeSegmentFill(segCount, loomState.g or 0)
+        end
+        for i = 1, segCount do
+            segRefs[i].fill = fills[i]
+        end
+
+        local children = resolveChildren(prof, profileName)
+        spawnChildBranches(chainId, children, depth, startCF, segRefs, segCount)
     end
 
     traverse(1, 0, trunkName, CFrame.new())
