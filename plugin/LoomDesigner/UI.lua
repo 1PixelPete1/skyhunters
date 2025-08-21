@@ -254,11 +254,18 @@ layout.Parent = scroll
 
 local st = LoomDesigner.GetState()
 local status = Instance.new("TextLabel")
-status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments and st.branchAssignments.trunkProfile or "-")
 status.TextColor3 = Color3.fromRGB(160,200,255)
 status.BackgroundTransparency = 1
 status.Size = UDim2.new(1,0,0,18)
+status.Font = Enum.Font.SourceSansSemibold
 status.Parent = scroll
+
+local function updateStatus()
+    local st = LoomDesigner.GetState()
+    local trunk = st.branchAssignments and st.branchAssignments.trunkProfile or "-"
+    status.Text = string.format("Trunk: %s   Seed: %s", trunk, tostring(st.baseSeed))
+end
+updateStatus()
 
 local spawnBtn = Instance.new("TextButton")
 spawnBtn.Size = UDim2.new(0,180,0,26)
@@ -796,30 +803,34 @@ renameBox.Parent.LayoutOrder = 3
 
 local pendingProfileName = ""
 local newProfileBox: TextBox? = nil
-newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
-    local st = LoomDesigner.GetState()
-    local name = (txt ~= "" and txt) or pendingProfileName
-    LoomDesigner.CreateProfile(name)
-    st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
-    st.activeProfileName = name
-    selectedProfile = name
-    if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
-    pendingProfileName = ""
-    commitAndRebuild()
-    renderProfiles()
-    renderProfileEditor()
-    task.defer(function()
-        local btn = listFrame:FindFirstChild(name)
-        if btn then
-            local abs = btn.AbsolutePosition
-            local rootAbs = listFrame.AbsolutePosition
-            listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
+if secProfilesLib and secProfilesLib.Parent then
+    newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
+        local st = LoomDesigner.GetState()
+        local name = (txt ~= "" and txt) or pendingProfileName
+        LoomDesigner.CreateProfile(name)
+        st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
+        st.activeProfileName = name
+        selectedProfile = name
+        if newProfileBox and newProfileBox.Parent then
+            newProfileBox.Parent.Visible = false
         end
+        pendingProfileName = ""
+        commitAndRebuild()
+        renderProfiles()
+        renderProfileEditor()
+        task.defer(function()
+            local btn = listFrame:FindFirstChild(name)
+            if btn then
+                local abs = btn.AbsolutePosition
+                local rootAbs = listFrame.AbsolutePosition
+                listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
+            end
+        end)
     end)
-end)
-if newProfileBox and newProfileBox.Parent then
-    newProfileBox.Parent.Visible = false
-    newProfileBox.Parent.LayoutOrder = 3
+    if newProfileBox.Parent then
+        newProfileBox.Parent.Visible = false
+        newProfileBox.Parent.LayoutOrder = 3
+    end
 end
 
 local function newProfile()
@@ -881,12 +892,120 @@ profileEditor.AutomaticSize = Enum.AutomaticSize.Y
 profileEditor.Parent = secProfilesLib
 profileEditor.LayoutOrder = 4
 
+-- Child authoring helpers ---------------------------------------------------
+local CHILD_PLACEMENTS = {"tip","junction","along","radial","spiral"}
+local CHILD_ROTATIONS = {"upright","inherit","custom"}
+
+local function createChildRow(parent: Instance, popupHost: Frame, child: table,
+        profileNames: {string}, commit: ()->(), remove: ()->(), rerender: ()->())
+    local frame = Instance.new("Frame")
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(1,0,0,0)
+    frame.AutomaticSize = Enum.AutomaticSize.Y
+    frame.Parent = parent
+
+    dropdown(frame, popupHost, "Profile", profileNames,
+        table.find(profileNames, child.name) or 1, function(opt)
+            child.name = opt
+            commit()
+        end)
+
+    labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
+        child.count = tonumber(txt) or 1
+        commit()
+    end)
+
+    dropdown(frame, popupHost, "Placement", CHILD_PLACEMENTS,
+        table.find(CHILD_PLACEMENTS, child.placement) or 1, function(opt)
+            child.placement = opt
+            commit()
+        end)
+
+    local rotIndex
+    if type(child.rotation) == "table" then
+        rotIndex = table.find(CHILD_ROTATIONS, "custom")
+    else
+        rotIndex = table.find(CHILD_ROTATIONS, child.rotation)
+    end
+    dropdown(frame, popupHost, "Rotation", CHILD_ROTATIONS, rotIndex or 1,
+        function(opt)
+            if opt == "custom" then
+                child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
+            else
+                child.rotation = opt
+            end
+            commit()
+            rerender()
+        end)
+
+    if type(child.rotation) == "table" then
+        labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
+            child.rotation.pitch = tonumber(txt) or 0
+            commit()
+        end)
+        labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
+            child.rotation.yaw = tonumber(txt) or 0
+            commit()
+        end)
+        labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
+            child.rotation.roll = tonumber(txt) or 0
+            commit()
+        end)
+    end
+
+    local delBtn = makeBtn(frame, "Remove", function()
+        remove()
+    end)
+    delBtn.Size = UDim2.new(0,80,0,24)
+end
+
+local function renderChildrenSection(parent: Instance, popupHost: Frame, draft: table, commit: ()->())
+    local section = makeSection(parent, "Children")
+
+    local function render()
+        for _, c in ipairs(section:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+
+        local names = {}
+        for name in pairs(LoomDesigner.GetState().savedProfiles) do
+            table.insert(names, name)
+        end
+        table.sort(names)
+
+        draft.children = draft.children or {}
+        for i, child in ipairs(draft.children) do
+            createChildRow(section, popupHost, child, names, commit, function()
+                table.remove(draft.children, i)
+                render()
+                commit()
+            end, render)
+        end
+
+        local addBtn = makeBtn(section, "Add Child", function()
+            local name = names[1]
+            if name then
+                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
+                render()
+                commit()
+            end
+        end)
+        addBtn.Size = UDim2.new(0,100,0,24)
+    end
+
+    render()
+    return section
+end
+
 -- render functions ---------------------------------------------------------
 commitAndRebuild = function()
     local st = LoomDesigner.GetState()
     local active = st.activeProfileName
     local draft = active and st.profileDrafts and st.profileDrafts[active]
-    LoomDesigner.CommitProfileEdit(active, draft)
+    if active and draft then
+        st.profileDrafts[active] = draft
+        LoomDesigner.CommitProfileEdit(active, draft)
+    end
     LoomDesigner.ApplyAuthoring()
     LoomDesigner.RebuildPreview(nil)
 end
@@ -899,6 +1018,13 @@ renderProfileEditor = function()
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Padding = UDim.new(0,6)
     layout.Parent = profileEditor
+    commitErrorLabel = Instance.new("TextLabel")
+    commitErrorLabel.TextColor3 = Color3.fromRGB(255,100,100)
+    commitErrorLabel.BackgroundTransparency = 1
+    commitErrorLabel.Size = UDim2.new(1,0,0,20)
+    commitErrorLabel.TextXAlignment = Enum.TextXAlignment.Left
+    commitErrorLabel.Visible = false
+    commitErrorLabel.Parent = profileEditor
     st.activeProfileName = selectedProfile
     st.profileDrafts = st.profileDrafts or {}
     local draft = st.profileDrafts[selectedProfile]
@@ -975,86 +1101,7 @@ renderProfileEditor = function()
     if draft.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
     if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
 
-    local childSec = makeSection(profileEditor, "Children")
-    local PLACEMENTS = {"tip","junction","along","radial","spiral"}
-    local ROTATIONS = {"upright","inherit","custom"}
-    local function renderChildren()
-        for _, c in ipairs(childSec:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-        local names = {}
-        for name in pairs(LoomDesigner.GetState().savedProfiles) do
-            table.insert(names, name)
-        end
-        table.sort(names)
-        draft.children = draft.children or {}
-        for i, child in ipairs(draft.children) do
-            local frame = Instance.new("Frame")
-            frame.BackgroundTransparency = 1
-            frame.Size = UDim2.new(1,0,0,0)
-            frame.AutomaticSize = Enum.AutomaticSize.Y
-            frame.Parent = childSec
-
-            dropdown(frame, popupHost, "Profile", names, table.find(names, child.name) or 1, function(opt)
-                child.name = opt
-                commit()
-            end)
-            labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
-                child.count = tonumber(txt) or 1
-                commit()
-            end)
-            dropdown(frame, popupHost, "Placement", PLACEMENTS, table.find(PLACEMENTS, child.placement) or 1, function(opt)
-                child.placement = opt
-                commit()
-            end)
-            local rotIndex
-            if type(child.rotation) == "table" then
-                rotIndex = table.find(ROTATIONS, "custom")
-            else
-                rotIndex = table.find(ROTATIONS, child.rotation)
-            end
-            dropdown(frame, popupHost, "Rotation", ROTATIONS, rotIndex or 1, function(opt)
-                if opt == "custom" then
-                    child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
-                else
-                    child.rotation = opt
-                end
-                commit()
-                renderChildren()
-            end)
-            if type(child.rotation) == "table" then
-                labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
-                    child.rotation.pitch = tonumber(txt) or 0
-                    commit()
-                end)
-                labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
-                    child.rotation.yaw = tonumber(txt) or 0
-                    commit()
-                end)
-                labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
-                    child.rotation.roll = tonumber(txt) or 0
-                    commit()
-                end)
-            end
-            local delBtn = makeBtn(frame, "Remove", function()
-                table.remove(draft.children, i)
-                renderChildren()
-                commit()
-            end)
-            delBtn.Size = UDim2.new(0,80,0,24)
-        end
-        local addBtn = makeBtn(childSec, "Add Child", function()
-            draft.children = draft.children or {}
-            local name = names[1]
-            if name then
-                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
-                renderChildren()
-                commit()
-            end
-        end)
-        addBtn.Size = UDim2.new(0,100,0,24)
-    end
-    renderChildren()
+    renderChildrenSection(profileEditor, popupHost, draft, commit)
     validate()
 end
 
@@ -1067,15 +1114,16 @@ renderProfiles = function()
         local btn = Instance.new("TextButton")
         btn.Name = name
         btn.Size = UDim2.new(0,180,0,24)
-        btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
         btn.ZIndex = listFrame.ZIndex + 1
         btn.Text = name
         if name == st.activeProfileName then
+            btn.BackgroundColor3 = Color3.fromRGB(70,70,100)
             btn.Font = Enum.Font.SourceSansBold
             btn.BorderSizePixel = 2
             btn.BorderColor3 = Color3.fromRGB(80,120,200)
         else
+            btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
             btn.Font = Enum.Font.SourceSans
             btn.BorderSizePixel = 0
         end
@@ -1124,10 +1172,17 @@ renderProfiles()
 
 -- re-render UI automatically when the saved profiles table changes
 do
-    local st = LoomDesigner.GetState()
-    st.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", st.savedProfiles, function()
+    local state = LoomDesigner.GetState()
+    state.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", state.savedProfiles, function()
         task.defer(function()
             renderProfiles()
+            renderAssignments()
+            updateStatus()
+        end)
+    end))
+    st.branchAssignments = select(1, FlowTrace.watchTable("ui.branchAssignments", st.branchAssignments, function()
+        task.defer(function()
+            updateStatus()
             renderAssignments()
         end)
     end))
@@ -1151,7 +1206,7 @@ local function renderAssignments()
         local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
         btn.Active = false
         btn.AutoButtonColor = false
-        status.Text = string.format("Seed: %s   Trunk: -", tostring(st.baseSeed))
+        updateStatus()
         local msg = Instance.new("TextLabel")
         msg.Text = "Create a profile first"
         msg.TextColor3 = Color3.fromRGB(200,200,200)
@@ -1165,11 +1220,11 @@ local function renderAssignments()
         st.branchAssignments.trunkProfile = names[1]
     end
 
-    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
+    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")=
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
     dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
-        status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), opt)
+        updateStatus()
         pcall(function()
             plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
         end)
@@ -1388,12 +1443,12 @@ local function renderModels()
     local accessoryRow: Frame? = nil
 
     local function tryAdd(ref)
-        local inst, err = ModelResolver.ResolveOne(ref)
-        if inst then
+        local resolved = ModelResolver.ResolveOne(ref)
+        if typeof(resolved) == "Instance" then
             table.insert(st.modelLibrary, ref)
             renderModels()
         else
-            warnLabel.Text = err or "Asset not found"
+            warnLabel.Text = resolved or "Asset not found"
             warnLabel.Visible = true
 
             if accessoryRow then accessoryRow:Destroy(); accessoryRow = nil end
@@ -1448,12 +1503,15 @@ local function renderModels()
         row.Size = UDim2.new(1,0,0,24)
         row.BackgroundTransparency = 1
         row.Parent = secModels
-        local inst, msg = ModelResolver.ResolveOne(ref)
+        local resolved = ModelResolver.ResolveOne(ref)
         local refText = (typeof(ref) == "Instance") and ref.Name or tostring(ref)
         local nameText
-        if inst then
+        local inst = nil
+        if typeof(resolved) == "Instance" then
+            inst = resolved
             nameText = string.format("%s (%s)", refText, inst.Name)
         else
+            local msg = resolved
             nameText = string.format("%s (%s)", refText, msg or "unresolved")
         end
         if inst then
@@ -1534,7 +1592,8 @@ local function renderModels()
         local list = st.modelsByDepth[depth] or {}
         local filtered = {}
         for _, ref in ipairs(list) do
-            if ModelResolver.ResolveOne(ref) then
+            local r = ModelResolver.ResolveOne(ref)
+            if typeof(r) == "Instance" then
                 table.insert(filtered, ref)
             end
         end
@@ -1565,7 +1624,8 @@ local function renderModels()
             row.Parent = df
             dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
                 local cleaned = tostring(opt):gsub("^%s*(.-)%s*$","%1")
-                if ModelResolver.ResolveOne(cleaned) then
+                local r = ModelResolver.ResolveOne(cleaned)
+                if typeof(r) == "Instance" then
                     list[i] = cleaned
                     LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
                 end
@@ -1594,7 +1654,8 @@ local function renderModels()
         local addBtn = makeBtn(df, "Add", function()
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            if ModelResolver.ResolveOne(ref) then
+            local r = ModelResolver.ResolveOne(ref)
+            if typeof(r) == "Instance" then
                 st.modelsByDepth[depth] = list
                 table.insert(list, ref)
                 renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
@@ -1671,22 +1732,22 @@ local function renderDecorations()
             errLabel.Visible = false
 
             local btn = dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
-                local inst2, err2 = ModelResolver.ResolveOne(opt)
-                if inst2 then
+                local res2 = ModelResolver.ResolveOne(opt)
+                if typeof(res2) == "Instance" then
                     deco.models[i] = opt
                     currentRef = opt
                     errLabel.Visible = false
                     LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
                 else
-                    errLabel.Text = err2 or "unresolved"
+                    errLabel.Text = res2 or "unresolved"
                     errLabel.Visible = true
                     btn.Text = (typeof(currentRef) == "Instance") and currentRef.Name or tostring(currentRef)
                 end
             end)
 
-            local inst, msg = ModelResolver.ResolveOne(ref)
-            if not inst then
-                errLabel.Text = msg or "unresolved"
+            local res = ModelResolver.ResolveOne(ref)
+            if typeof(res) ~= "Instance" then
+                errLabel.Text = res or "unresolved"
                 errLabel.Visible = true
             end
             errLabel.Parent = modelsFrame
@@ -1708,13 +1769,13 @@ local function renderDecorations()
             deco.models = deco.models or {}
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            local inst, msg = ModelResolver.ResolveOne(ref)
-            if inst then
+            local res3 = ModelResolver.ResolveOne(ref)
+            if typeof(res3) == "Instance" then
                 table.insert(deco.models, ref)
                 renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
             else
                 local warn = Instance.new("TextLabel")
-                warn.Text = msg or "unresolved"
+                warn.Text = res3 or "unresolved"
                 warn.TextColor3 = Color3.fromRGB(255,100,100)
                 warn.BackgroundTransparency = 1
                 warn.Size = UDim2.new(1,0,0,20)

@@ -28,7 +28,7 @@ end
 function ModelResolver.ResolveOne(ref)
     if typeof(ref) == "Instance" then
         if ref:IsA("Model") or ref:IsA("Folder") or ref:IsA("BasePart") or ref:IsA("Accessory") then
-            return ref:Clone(), nil
+            return ref:Clone()
         end
         local wrap = Instance.new("Model")
         wrap.Name = ref.Name
@@ -36,7 +36,7 @@ function ModelResolver.ResolveOne(ref)
         c.Parent = wrap
         local pp = c:IsA("BasePart") and c or wrap:FindFirstChildWhichIsA("BasePart", true)
         if pp then (wrap :: any).PrimaryPart = pp end
-        return wrap, nil
+        return wrap
     elseif type(ref) == "string" then
         local folder = getModelsFolder()
         local wanted = tostring(ref):gsub("^%s*(.-)%s*$", "%1")
@@ -52,7 +52,7 @@ function ModelResolver.ResolveOne(ref)
             end
             if m then
                 if m:IsA("Model") then
-                    return m:Clone(), nil
+                    return m:Clone()
                 else
                     -- wrap non-Model as a Model so downstream always receives a Model
                     local wrap = Instance.new("Model")
@@ -61,7 +61,7 @@ function ModelResolver.ResolveOne(ref)
                     c.Parent = wrap
                     local pp = c:IsA("BasePart") and c or wrap:FindFirstChildWhichIsA("BasePart", true)
                     if pp then (wrap :: any).PrimaryPart = pp end
-                    return wrap, nil
+                    return wrap
                 end
             end
         end
@@ -76,27 +76,27 @@ function ModelResolver.ResolveOne(ref)
         local msg = ("ModelResolver: missing model '%s' in %s; have: [%s]")
             :format(wanted, where, table.concat(have, ", "))
         warn(msg)
-        return nil, msg
+        return msg
     elseif type(ref) == "number" then
         local cached = _assetCache[ref]
         if cached then
-            return cached:Clone(), nil
+            return cached:Clone()
         end
         local ok, got = pcall(game.GetObjects, game, string.format("rbxassetid://%s", tostring(ref)))
         if ok and got and got[1] then
             local inst = got[1]
             if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("BasePart") then
                 _assetCache[ref] = inst
-                return inst:Clone(), nil
+                return inst:Clone()
             end
         end
         local msg = ("ModelResolver: failed to load asset id %s"):format(tostring(ref))
         warn(msg)
-        return nil, msg
+        return msg
     else
         local msg = ("ModelResolver: unsupported ref type %s"):format(type(ref))
         warn(msg)
-        return nil, msg
+        return msg
     end
 end
 
@@ -105,7 +105,7 @@ function ModelResolver.ResolveFromList(list, opts)
     if not list or #list == 0 then
         local msg = "ModelResolver: empty list"
         warn(msg)
-        return nil, msg
+        return msg
     end
     local pick
     if opts and type(opts.select) == "function" then

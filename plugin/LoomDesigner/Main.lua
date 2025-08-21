@@ -255,6 +255,26 @@ local function normalizeChildren(prof, name)
                                 prof.children = {}
                         end
                 end
+                for i, pick in ipairs(prof.children) do
+                        if type(pick) == "string" then
+                                prof.children[i] = {
+                                        name = pick,
+                                        count = 1,
+                                        placement = "tip",
+                                        rotation = "upright",
+                                }
+                        elseif type(pick) == "table" then
+                                pick.name = pick.name or pick[1]
+                                pick.count = pick.count or 1
+                                pick.placement = pick.placement or "tip"
+                                if pick.rotation == nil then
+                                        pick.rotation = "upright"
+                                end
+                                prof.children[i] = pick
+                        else
+                                prof.children[i] = nil
+                        end
+                end
         else
                 prof.children = {}
         end
@@ -271,13 +291,15 @@ function ensureTrunk(st, newProfileName)
                 normalizeChildren(prof, n)
         end
        st.branchAssignments = st.branchAssignments or {}
-       st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
+       -- only wrap once; retain existing proxy if present
+       if getmetatable(st.branchAssignments) == nil then
+               st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
+       end
        local trunk = st.branchAssignments.trunkProfile
-        if trunk == nil or trunk == "" then
-                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
-        elseif first and not st.savedProfiles[trunk] then
-                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
-        end
+       local fallback = newProfileName or first or "trunk"
+       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
+               st.branchAssignments.trunkProfile = fallback
+       end
 end
 
 -- Wrap local helpers for traceable entry/exit
@@ -314,13 +336,9 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
        end
 
-       st.branchAssignments = st.branchAssignments or {}
-       local trunk = st.branchAssignments.trunkProfile
-       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
-                st.branchAssignments.trunkProfile = draftName
-       end
+ensureTrunk(st, draftName)
 
-       if _commitTimer then task.cancel(_commitTimer) end
+if _commitTimer then task.cancel(_commitTimer) end
 
        -- Apply authoring after updating LoomConfig and trunk
        local f = LoomDesigner.ApplyAuthoring
@@ -366,7 +384,7 @@ end
 
 -- simple profile helpers ----------------------------------------------------
 function LoomDesigner.CreateProfile(name: string, profile)
-        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1, children = {} }
         normalizeChildren(profile, name)
         state.savedProfiles[name] = profile
         ensureTrunk(state, name)
