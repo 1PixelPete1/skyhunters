@@ -112,6 +112,7 @@ state = select(1, FT.watchTable("state", state))
 state.savedProfiles = select(1, FT.watchTable("state.savedProfiles", state.savedProfiles))
 state.profileDrafts = select(1, FT.watchTable("state.profileDrafts", state.profileDrafts))
 state.overrides = select(1, FT.watchTable("state.overrides", state.overrides))
+state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
 
 local function hashToInt(s)
         s = tostring(s)
@@ -153,13 +154,13 @@ function LoomDesigner.Start(plugin)
         -- Bootstrap one profile if none exist
         if FT.branch("Start.hasProfiles", next(state.savedProfiles or {}) ~= nil,
                 {count = (state.savedProfiles and #state.savedProfiles)}) then
-                ensureTrunk(state)
+               ensureTrunk(state, state.activeProfileName)
         else
                 LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
                 state.profileDrafts = state.profileDrafts or {}
                 state.profileDrafts["profile1"] = DC(state.savedProfiles["profile1"])
                 state.activeProfileName = "profile1"
-                ensureTrunk(state)
+               ensureTrunk(state, state.activeProfileName)
                 LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
                 FT.check("Start.created", {active = state.activeProfileName})
         end
@@ -225,8 +226,9 @@ function ensureTrunk(st, newProfileName)
                         prof.children = {}
                 end
         end
-        st.branchAssignments = st.branchAssignments or {}
-        local trunk = st.branchAssignments.trunkProfile
+       st.branchAssignments = st.branchAssignments or {}
+       st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
+       local trunk = st.branchAssignments.trunkProfile
         if trunk == nil or trunk == "" then
                 st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
         elseif first and not st.savedProfiles[trunk] then
@@ -250,13 +252,17 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                 draftTable.children = DC(draftTable.children or {})
                 st.savedProfiles[draftName] = DC(draftTable)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
-        end
-        local trunk = st.branchAssignments and st.branchAssignments.trunkProfile
-        if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
-                st.branchAssignments = st.branchAssignments or {}
-                st.branchAssignments.trunkProfile = st.activeProfileName
-        end
-        ensureTrunk(st)
+       end
+       st.branchAssignments = st.branchAssignments or {}
+       local trunk = st.branchAssignments.trunkProfile
+       if trunk == nil or trunk == "" then
+               st.branchAssignments.trunkProfile = draftName
+               trunk = draftName
+       end
+       if st.savedProfiles[trunk] == nil then
+               st.branchAssignments.trunkProfile = st.activeProfileName
+       end
+       ensureTrunk(st, st.activeProfileName)
 
         if _commitTimer then task.cancel(_commitTimer) end
         _commitTimer = task.delay(0.1, function()
@@ -291,7 +297,7 @@ function LoomDesigner.DeleteProfile(name: string)
         state.savedProfiles[name] = nil
         if state.profileDrafts then state.profileDrafts[name] = nil end
         if state.activeProfileName == name then state.activeProfileName = nil end
-        ensureTrunk(state)
+       ensureTrunk(state, state.activeProfileName)
 end
 
 function LoomDesigner.RenameProfile(oldName: string, newName: string)
@@ -337,7 +343,7 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
-        ensureTrunk(state)
+       ensureTrunk(state, state.activeProfileName)
         local cfgId = resolveConfigId(LoomConfigs, state.configId)
         if not cfgId then return end
         state.configId = cfgId
@@ -378,7 +384,8 @@ function LoomDesigner.ImportAuthoring()
                         prof.children = {}
                 end
         end
-        state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
+       state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
+       state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
         local models = cfg.models or {}
         state.modelsByDepth = deepCopy(models.byDepth or {})
         if models.decorations then
