@@ -79,22 +79,5 @@ branchAssignments = {
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
 
-## Trunk Selection Flow
 
-```
-          [UI.lua]
-      (Trunk dropdown)
-             |
-             v
-state.branchAssignments.trunkProfile
-             |
-             v
-    Main.ensureTrunk()
-             |
-             v
-   validated trunk name
-             |
-             v
-      [UI.lua]
-    (status display)
 ```
