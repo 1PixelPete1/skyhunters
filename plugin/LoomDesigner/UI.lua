@@ -86,7 +86,7 @@ btn.Parent = parent
 end
 
 -- Overlay-safe dropdown: mounts popup to popupHost
-local function dropdown(parent: Instance, popupHost: Frame, label: string, options: {string}, defaultIndex: number, onSelect: (string)->())
+local function dropdown(parent: Instance, popupHost: Frame, label: string, options: {any}, defaultIndex: number, onSelect: (any)->())
 local row = Instance.new("Frame")
 row.Size = UDim2.new(1, 0, 0, 26)
 row.BackgroundTransparency = 1
@@ -100,8 +100,16 @@ lab.TextXAlignment = Enum.TextXAlignment.Left
 lab.Size = UDim2.new(0, 150, 1, 0)
 lab.Parent = row
 
+local function toStr(opt: any): string
+    if typeof(opt) == "Instance" then
+        return opt.Name
+    else
+        return tostring(opt)
+    end
+end
+
 local btn = Instance.new("TextButton")
-btn.Text = options[defaultIndex] or "Select…"
+btn.Text = options[defaultIndex] and toStr(options[defaultIndex]) or "Select…"
 btn.Size = UDim2.new(1, -160, 1, 0)
 btn.Position = UDim2.new(0, 155, 0, 0)
 btn.BackgroundColor3 = Color3.fromRGB(42,42,42)
@@ -138,20 +146,20 @@ list.Padding = UDim.new(0, 2)
 list.SortOrder = Enum.SortOrder.LayoutOrder
 
 for _, opt in ipairs(options) do
-local item = Instance.new("TextButton")
-item.Text = opt
-item.Size = UDim2.new(1, -4, 0, 20)
-item.Position = UDim2.fromOffset(2, 0)
-item.BackgroundColor3 = Color3.fromRGB(50,50,50)
-item.TextColor3 = Color3.new(1,1,1)
-item.ZIndex = 1002
-item.Parent = popup
+    local item = Instance.new("TextButton")
+    item.Text = toStr(opt)
+    item.Size = UDim2.new(1, -4, 0, 20)
+    item.Position = UDim2.fromOffset(2, 0)
+    item.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    item.TextColor3 = Color3.new(1,1,1)
+    item.ZIndex = 1002
+    item.Parent = popup
 
-item.MouseButton1Click:Connect(function()
-btn.Text = opt
-onSelect(opt)
-closePopup()
-end)
+    item.MouseButton1Click:Connect(function()
+    btn.Text = toStr(opt)
+    onSelect(opt)
+    closePopup()
+    end)
 end
 end)
 
@@ -1227,6 +1235,8 @@ local function renderModels()
     warnLabel.Visible = false
     warnLabel.Parent = secModels
 
+    local accessoryRow: Frame? = nil
+
     local function tryAdd(ref)
         local inst, err = ModelResolver.ResolveOne(ref)
         if inst then
@@ -1235,6 +1245,29 @@ local function renderModels()
         else
             warnLabel.Text = err or "Asset not found"
             warnLabel.Visible = true
+
+            if accessoryRow then accessoryRow:Destroy(); accessoryRow = nil end
+            local plr = game:GetService("Players").LocalPlayer
+            local opts = {}
+            if plr and plr.Character then
+                for _, ch in ipairs(plr.Character:GetChildren()) do
+                    if ch:IsA("Accessory") then table.insert(opts, ch.Name) end
+                end
+            end
+            if #opts > 0 then
+                accessoryRow = Instance.new("Frame")
+                accessoryRow.Size = UDim2.new(1,0,0,26)
+                accessoryRow.BackgroundTransparency = 1
+                accessoryRow.Parent = secModels
+                dropdown(accessoryRow, popupHost, "Use Accessory", opts, 1, function(opt)
+                    if plr and plr.Character then
+                        local acc = plr.Character:FindFirstChild(opt)
+                        if acc and acc:IsA("Accessory") then
+                            tryAdd(acc)
+                        end
+                    end
+                end)
+            end
         end
     end
 
@@ -1266,11 +1299,12 @@ local function renderModels()
         row.BackgroundTransparency = 1
         row.Parent = secModels
         local inst, msg = ModelResolver.ResolveOne(ref)
+        local refText = (typeof(ref) == "Instance") and ref.Name or tostring(ref)
         local nameText
         if inst then
-            nameText = string.format("%s (%s)", tostring(ref), inst.Name)
+            nameText = string.format("%s (%s)", refText, inst.Name)
         else
-            nameText = string.format("%s (%s)", tostring(ref), msg or "unresolved")
+            nameText = string.format("%s (%s)", refText, msg or "unresolved")
         end
         if inst then
             local preview = Instance.new("ViewportFrame")
@@ -1477,10 +1511,36 @@ local function renderDecorations()
             row.Size = UDim2.new(1,0,0,26)
             row.BackgroundTransparency = 1
             row.Parent = modelsFrame
-            dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
-                deco.models[i] = opt
-                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+
+            local currentRef = ref
+            local errLabel = Instance.new("TextLabel")
+            errLabel.TextColor3 = Color3.fromRGB(255,100,100)
+            errLabel.BackgroundTransparency = 1
+            errLabel.Size = UDim2.new(1,0,0,20)
+            errLabel.TextXAlignment = Enum.TextXAlignment.Left
+            errLabel.Visible = false
+
+            local btn = dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
+                local inst2, err2 = ModelResolver.ResolveOne(opt)
+                if inst2 then
+                    deco.models[i] = opt
+                    currentRef = opt
+                    errLabel.Visible = false
+                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                else
+                    errLabel.Text = err2 or "unresolved"
+                    errLabel.Visible = true
+                    btn.Text = (typeof(currentRef) == "Instance") and currentRef.Name or tostring(currentRef)
+                end
             end)
+
+            local inst, msg = ModelResolver.ResolveOne(ref)
+            if not inst then
+                errLabel.Text = msg or "unresolved"
+                errLabel.Visible = true
+            end
+            errLabel.Parent = modelsFrame
+
             local del = Instance.new("TextButton")
             del.Text = "X"
             del.Size = UDim2.new(0,24,0,24)
@@ -1498,8 +1558,19 @@ local function renderDecorations()
             deco.models = deco.models or {}
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            table.insert(deco.models, ref)
-            renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            local inst, msg = ModelResolver.ResolveOne(ref)
+            if inst then
+                table.insert(deco.models, ref)
+                renderDecorations(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            else
+                local warn = Instance.new("TextLabel")
+                warn.Text = msg or "unresolved"
+                warn.TextColor3 = Color3.fromRGB(255,100,100)
+                warn.BackgroundTransparency = 1
+                warn.Size = UDim2.new(1,0,0,20)
+                warn.TextXAlignment = Enum.TextXAlignment.Left
+                warn.Parent = modelsFrame
+            end
         end)
         addModelBtn.Size = UDim2.new(0,100,0,24)
         local hasLib = (#st.modelLibrary > 0)
