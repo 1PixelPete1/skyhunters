@@ -785,7 +785,7 @@ renameBox.Parent.Visible = false
 renameBox.Parent.LayoutOrder = 3
 
 local pendingProfileName = ""
-local newProfileBox
+local newProfileBox: TextBox? = nil
 newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     local st = LoomDesigner.GetState()
     local name = (txt ~= "" and txt) or pendingProfileName
@@ -798,6 +798,14 @@ newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     commitAndRebuild()
     renderProfiles()
     renderProfileEditor()
+    task.defer(function()
+        local btn = listFrame:FindFirstChild(name)
+        if btn then
+            local abs = btn.AbsolutePosition
+            local rootAbs = listFrame.AbsolutePosition
+            listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
+        end
+    end)
 end)
 if newProfileBox and newProfileBox.Parent then
     newProfileBox.Parent.Visible = false
@@ -809,9 +817,13 @@ local function newProfile()
     local i = 1
     while st.savedProfiles["profile"..i] do i += 1 end
     pendingProfileName = "profile"..i
-    newProfileBox.Text = pendingProfileName
-    newProfileBox.Parent.Visible = true
-    newProfileBox:CaptureFocus()
+    if newProfileBox then
+        newProfileBox.Text = pendingProfileName
+        if newProfileBox.Parent then
+            newProfileBox.Parent.Visible = true
+        end
+        newProfileBox:CaptureFocus()
+    end
 end
 
 local function duplicateProfile()
@@ -1044,14 +1056,22 @@ renderProfiles = function()
         end)
     end
     if not hasProfiles then
+        profileLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        profileLayout.VerticalAlignment = Enum.VerticalAlignment.Center
         selectedProfile = nil
-        local hint = Instance.new("TextLabel")
-        hint.Text = "Click 'New' to add your first profile"
-        hint.TextColor3 = Color3.fromRGB(255,180,80)
-        hint.BackgroundTransparency = 1
-        hint.Size = UDim2.new(1,0,0,20)
-        hint.ZIndex = listFrame.ZIndex + 1
-        hint.Parent = listFrame
+        local createBtn = Instance.new("TextButton")
+        createBtn.Text = "Create Profile"
+        createBtn.Size = UDim2.new(0,180,0,24)
+        createBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+        createBtn.TextColor3 = Color3.new(1,1,1)
+        createBtn.ZIndex = listFrame.ZIndex + 1
+        createBtn.Parent = listFrame
+        createBtn.MouseButton1Click:Connect(function()
+            newProfile()
+        end)
+    else
+        profileLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+        profileLayout.VerticalAlignment = Enum.VerticalAlignment.Top
     end
     renderProfileEditor()
 end
