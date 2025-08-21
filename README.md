@@ -78,3 +78,25 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+### GrowthVisualizer recursion
+
+```
+trunk
+├─ branchA (count=2, placement=tip, rotation=upright)
+└─ branchB (count=1, placement=junction, rotation=inherit)
+
+LoomDesigner.Main
+  profiles[name]
+    children -> { {name, count, placement, rotation}, ... }
+
+GrowthVisualizer.Render
+  traverse(chainId, depth, profileName, startCF)
+    ├─ buildChain(...)
+    ├─ resolveChildren(profileName)
+    └─ spawnChildBranches(...)
+        └─ traverse(...)  -- recursion
+```
+
+The visualiser resolves each profile's children and spawns new chains until
+`branchDepthMax` is reached.
