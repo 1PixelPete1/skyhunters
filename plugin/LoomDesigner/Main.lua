@@ -101,7 +101,7 @@ local state = {
         savedProfiles = {},
         profileDrafts = {},
         activeProfileName = nil,
-        branchAssignments = { trunkProfile = "", perDepth = {}, spacingN = {}, maxPerDepth = {} },
+        branchAssignments = { trunkProfile = "" },
         modelLibrary = {},
         modelsByDepth = {},
         decoLibrary = {},
@@ -219,8 +219,13 @@ local _commitTimer: thread? = nil
 function ensureTrunk(st)
         st.savedProfiles = st.savedProfiles or {}
         local first
-        for n in pairs(st.savedProfiles) do first = first or n end
-        st.branchAssignments = st.branchAssignments or { trunkProfile = first or "trunk", perDepth = {}, spacingN = {}, maxPerDepth = {} }
+        for n, prof in pairs(st.savedProfiles) do
+                first = first or n
+                if type(prof) == "table" and prof.children == nil then
+                        prof.children = {}
+                end
+        end
+        st.branchAssignments = st.branchAssignments or { trunkProfile = first or "trunk" }
         local trunk = st.branchAssignments.trunkProfile
         if (trunk == nil) or (trunk == "") or (first and not st.savedProfiles[trunk]) then
                 st.branchAssignments.trunkProfile = first or "trunk"
@@ -240,6 +245,7 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         local k = tostring(draftTable.kind):lower()
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
+                draftTable.children = DC(draftTable.children or {})
                 st.savedProfiles[draftName] = DC(draftTable)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
         end
@@ -268,7 +274,9 @@ end
 
 -- simple profile helpers ----------------------------------------------------
 function LoomDesigner.CreateProfile(name: string, profile)
-        state.savedProfiles[name] = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+        profile.children = profile.children or {}
+        state.savedProfiles[name] = profile
         ensureTrunk(state)
 end
 
@@ -358,7 +366,12 @@ function LoomDesigner.ImportAuthoring()
         local cfg = LoomConfigs[state.configId]
         if not cfg then return end
         state.savedProfiles = deepCopy(cfg.profiles or {})
-        state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile="", perDepth={}, spacingN={}, maxPerDepth={}})
+        for _, prof in pairs(state.savedProfiles) do
+                if type(prof) == "table" and prof.children == nil then
+                        prof.children = {}
+                end
+        end
+        state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
         local models = cfg.models or {}
         state.modelsByDepth = deepCopy(models.byDepth or {})
         if models.decorations then
