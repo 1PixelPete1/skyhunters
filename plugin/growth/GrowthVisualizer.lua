@@ -554,8 +554,7 @@ function GrowthVisualizer.Render(container, loomState)
         trunkName = "trunk"
     end
 
-    local chains = { {id = 1, depth = 0, profileName = trunkName, startCF = CFrame.new()} }
-    local chainMap = { [1] = chains[1] }
+    local chainMap = {}
     local nextId = 1
     local baseSeed = loomState.baseSeed or 0
 
@@ -569,13 +568,11 @@ function GrowthVisualizer.Render(container, loomState)
     end
     branchDepthMax = branchDepthMax or 0
 
-    for cIndex = 1, #chains do
-        local chain = chains[cIndex]
-        local prof = profileOverride or profiles[chain.profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
+    local function traverse(chainId, depth, profileName, startCF)
+        local prof = profileOverride or profiles[profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
         prof = GrowthProfiles.clampProfile(prof)
-        local res = buildChain(segOut, chain.id, chain.depth, baseSeed, chain.startCF, prof, cfg, overrides)
-        chain.segCount = res.segCount
-        chainMap[chain.id] = chain
+        local res = buildChain(segOut, chainId, depth, baseSeed, startCF, prof, cfg, overrides)
+        chainMap[chainId] = { id = chainId, depth = depth, profileName = profileName, startCF = startCF, segCount = res.segCount }
         local segRefs = res.segRefs
         local segCount = res.segCount
 
@@ -590,12 +587,46 @@ function GrowthVisualizer.Render(container, loomState)
             segRefs[i].fill = fills[i]
         end
 
-        local depth = chain.depth
         local children = prof.children
+        if type(children) == "table" and not (children[1] and children[1].name) then
+            local flat = {}
+            for _, list in pairs(children) do
+                if type(list) == "table" then
+                    for _, pick in ipairs(list) do
+                        table.insert(flat, pick)
+                    end
+                end
+            end
+            if #flat > 0 then
+                warn(string.format("[GrowthVisualizer] profile '%s' uses legacy depth rules; flattening", tostring(profileName)))
+                children = flat
+                prof.children = flat
+            else
+                children = nil
+            end
+        end
+        if prof.depthRules then
+            local flat = {}
+            for _, list in pairs(prof.depthRules) do
+                if type(list) == "table" then
+                    for _, pick in ipairs(list) do
+                        table.insert(flat, pick)
+                    end
+                end
+            end
+            if #flat > 0 then
+                warn(string.format("[GrowthVisualizer] profile '%s' uses legacy depthRules; converting", tostring(profileName)))
+                children = children or {}
+                for _, pick in ipairs(flat) do table.insert(children, pick) end
+                prof.children = children
+            end
+            prof.depthRules = nil
+        end
+
         if children and depth < branchDepthMax then
             local lastSeg = segRefs[segCount]
-            local parentRot = chain.startCF.Rotation
-            local basePos = chain.startCF.Position
+            local parentRot = startCF.Rotation
+            local basePos = startCF.Position
             for pIdx, pick in ipairs(children) do
                 local count = pick.count or 1
                 local intCount = math.floor(count)
@@ -623,15 +654,13 @@ function GrowthVisualizer.Render(container, loomState)
                         math.rad(orient.roll or 0)
                     )
                     nextId = nextId + 1
-                    local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
-                    chains[#chains + 1] = newChain
-                    chainMap[nextId] = newChain
+                    traverse(nextId, depth + 1, pick.name, startHere)
                 end
                 for _ = 1, intCount do
                     spawnOne()
                 end
                 if extra > 0 then
-                    local rngPick = SeedUtil.rng(baseSeed, "child", chain.id, depth, pIdx)
+                    local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
                     if rngPick:NextNumber() < extra then
                         spawnOne()
                     end
@@ -639,6 +668,8 @@ function GrowthVisualizer.Render(container, loomState)
             end
         end
     end
+
+    traverse(1, 0, trunkName, CFrame.new())
 
     local matOverrides = overrides.materialization or cfg.materialization or {mode = "Model"}
     local scene = loomState.scene

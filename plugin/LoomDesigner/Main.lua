@@ -217,14 +217,58 @@ deepCopy = FT.fn("Main.deepCopy", deepCopy)
 
 local _commitTimer: thread? = nil
 
+local function normalizeChildren(prof, name)
+        if type(prof) ~= "table" then return end
+        local legacy = false
+        if prof.depthRules ~= nil then
+                local flat = {}
+                for _, list in pairs(prof.depthRules) do
+                        if type(list) == "table" then
+                                for _, pick in ipairs(list) do
+                                        table.insert(flat, pick)
+                                end
+                        end
+                end
+                if #flat > 0 then
+                        legacy = true
+                        prof.children = prof.children or {}
+                        for _, pick in ipairs(flat) do
+                                table.insert(prof.children, pick)
+                        end
+                end
+                prof.depthRules = nil
+        end
+        if type(prof.children) == "table" then
+                if not (prof.children[1] and prof.children[1].name) then
+                        local flat = {}
+                        for _, list in pairs(prof.children) do
+                                if type(list) == "table" then
+                                        for _, pick in ipairs(list) do
+                                                table.insert(flat, pick)
+                                        end
+                                end
+                        end
+                        if #flat > 0 then
+                                legacy = true
+                                prof.children = flat
+                        else
+                                prof.children = {}
+                        end
+                end
+        else
+                prof.children = {}
+        end
+        if legacy then
+                warn(string.format("[LoomDesigner] converted legacy depth rules for profile '%s'", tostring(name)))
+        end
+end
+
 function ensureTrunk(st, newProfileName)
         st.savedProfiles = st.savedProfiles or {}
         local first
         for n, prof in pairs(st.savedProfiles) do
                 first = first or n
-                if type(prof) == "table" and prof.children == nil then
-                        prof.children = {}
-                end
+                normalizeChildren(prof, n)
         end
        st.branchAssignments = st.branchAssignments or {}
        st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
@@ -249,6 +293,7 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                         local k = tostring(draftTable.kind):lower()
                         draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
                 end
+                normalizeChildren(draftTable, draftName)
                 draftTable.children = DC(draftTable.children or {})
                 st.savedProfiles[draftName] = DC(draftTable)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
@@ -315,7 +360,7 @@ end
 -- simple profile helpers ----------------------------------------------------
 function LoomDesigner.CreateProfile(name: string, profile)
         profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
-        profile.children = profile.children or {}
+        normalizeChildren(profile, name)
         state.savedProfiles[name] = profile
         ensureTrunk(state, name)
 end
@@ -406,10 +451,8 @@ function LoomDesigner.ImportAuthoring()
         local cfg = LoomConfigs[state.configId]
         if not cfg then return end
         state.savedProfiles = deepCopy(cfg.profiles or {})
-        for _, prof in pairs(state.savedProfiles) do
-                if type(prof) == "table" and prof.children == nil then
-                        prof.children = {}
-                end
+        for name, prof in pairs(state.savedProfiles) do
+                normalizeChildren(prof, name)
         end
        state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
        state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
