@@ -83,7 +83,6 @@ btn.MouseButton1Click:Connect(function()
 end)
 render()
 btn.Parent = parent
-return btn
 end
 
 -- Overlay-safe dropdown: mounts popup to popupHost
@@ -169,6 +168,7 @@ end
 end
 end
 end)
+return btn
 end
 
 local function bindNumberField(parent: Instance, label: string, get: ()->number?, setDraft: (number)->(), commit: ()->())
@@ -1073,18 +1073,36 @@ local function renderAssignments()
     local names = {}
     for n in pairs(st.savedProfiles) do table.insert(names, n) end
     table.sort(names)
-    if #names == 0 then names = {"trunk"} end
-    if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
-        st.branchAssignments.trunkProfile = names[1]
-    end
-    local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
     local trunkFrame = Instance.new("Frame")
     trunkFrame.BackgroundTransparency = 1
     trunkFrame.Size = UDim2.new(1,0,0,0)
     trunkFrame.AutomaticSize = Enum.AutomaticSize.Y
     trunkFrame.Parent = secAssign
-    dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
+    if #names == 0 then
+        st.branchAssignments.trunkProfile = nil
+        local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
+        btn.Active = false
+        btn.AutoButtonColor = false
+        status.Text = string.format("Seed: %s   Trunk: -", tostring(st.baseSeed))
+        local msg = Instance.new("TextLabel")
+        msg.Text = "Create a profile first"
+        msg.TextColor3 = Color3.fromRGB(200,200,200)
+        msg.BackgroundTransparency = 1
+        msg.Size = UDim2.new(1,0,0,18)
+        msg.Parent = secAssign
+        return
+    end
+    if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
+        st.branchAssignments.trunkProfile = names[1]
+    end
+    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
+    local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
+    local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
+        status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), opt)
+        pcall(function()
+            plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
+        end)
         LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
         renderAssignments()
     end)
