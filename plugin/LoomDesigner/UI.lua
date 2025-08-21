@@ -766,20 +766,21 @@ end)
 renameBox.Parent.Visible = false
 
 local pendingProfileName = ""
-local newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
+local newProfileBox
+newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     local st = LoomDesigner.GetState()
     local name = (txt ~= "" and txt) or pendingProfileName
     LoomDesigner.CreateProfile(name)
     st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
     st.activeProfileName = name
     selectedProfile = name
-    newProfileBox.Parent.Visible = false
+    if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
     pendingProfileName = ""
     renderProfiles()
     commitAndRebuild()
     renderProfileEditor()
 end)
-newProfileBox.Parent.Visible = false
+if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
 
 local function newProfile()
     local st = LoomDesigner.GetState()
