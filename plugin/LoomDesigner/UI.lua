@@ -976,7 +976,7 @@ renderProfileEditor = function()
 
     local childSec = makeSection(profileEditor, "Children")
     local PLACEMENTS = {"tip","junction","along","radial","spiral"}
-    local ROTATIONS = {"upright","inherit"}
+    local ROTATIONS = {"upright","inherit","custom"}
     local function renderChildren()
         for _, c in ipairs(childSec:GetChildren()) do
             if c:IsA("GuiObject") then c:Destroy() end
@@ -1006,10 +1006,35 @@ renderProfileEditor = function()
                 child.placement = opt
                 commit()
             end)
-            dropdown(frame, popupHost, "Rotation", ROTATIONS, table.find(ROTATIONS, child.rotation) or 1, function(opt)
-                child.rotation = opt
+            local rotIndex
+            if type(child.rotation) == "table" then
+                rotIndex = table.find(ROTATIONS, "custom")
+            else
+                rotIndex = table.find(ROTATIONS, child.rotation)
+            end
+            dropdown(frame, popupHost, "Rotation", ROTATIONS, rotIndex or 1, function(opt)
+                if opt == "custom" then
+                    child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
+                else
+                    child.rotation = opt
+                end
                 commit()
+                renderChildren()
             end)
+            if type(child.rotation) == "table" then
+                labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
+                    child.rotation.pitch = tonumber(txt) or 0
+                    commit()
+                end)
+                labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
+                    child.rotation.yaw = tonumber(txt) or 0
+                    commit()
+                end)
+                labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
+                    child.rotation.roll = tonumber(txt) or 0
+                    commit()
+                end)
+            end
             local delBtn = makeBtn(frame, "Remove", function()
                 table.remove(draft.children, i)
                 renderChildren()
