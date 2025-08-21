@@ -825,6 +825,10 @@ renderProfileEditor = function()
     for _, c in ipairs(profileEditor:GetChildren()) do c:Destroy() end
     if not selectedProfile then return end
     local st = LoomDesigner.GetState()
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0,6)
+    layout.Parent = profileEditor
     st.activeProfileName = selectedProfile
     st.profileDrafts = st.profileDrafts or {}
     local draft = st.profileDrafts[selectedProfile]
@@ -902,6 +906,62 @@ renderProfileEditor = function()
     if draft.segmentCountMode == "triangular" then segNum("Mode N", "segmentCountModeN") end
     if draft.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
     if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
+
+    local childSec = makeSection(profileEditor, "Children")
+    local PLACEMENTS = {"tip","junction","along","radial","spiral"}
+    local ROTATIONS = {"upright","inherit"}
+    local function renderChildren()
+        for _, c in ipairs(childSec:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        local names = {}
+        for name in pairs(LoomDesigner.GetState().savedProfiles) do
+            table.insert(names, name)
+        end
+        table.sort(names)
+        draft.children = draft.children or {}
+        for i, child in ipairs(draft.children) do
+            local frame = Instance.new("Frame")
+            frame.BackgroundTransparency = 1
+            frame.Size = UDim2.new(1,0,0,0)
+            frame.AutomaticSize = Enum.AutomaticSize.Y
+            frame.Parent = childSec
+
+            dropdown(frame, popupHost, "Profile", names, table.find(names, child.name) or 1, function(opt)
+                child.name = opt
+                commit()
+            end)
+            labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
+                child.count = tonumber(txt) or 1
+                commit()
+            end)
+            dropdown(frame, popupHost, "Placement", PLACEMENTS, table.find(PLACEMENTS, child.placement) or 1, function(opt)
+                child.placement = opt
+                commit()
+            end)
+            dropdown(frame, popupHost, "Rotation", ROTATIONS, table.find(ROTATIONS, child.rotation) or 1, function(opt)
+                child.rotation = opt
+                commit()
+            end)
+            local delBtn = makeBtn(frame, "Remove", function()
+                table.remove(draft.children, i)
+                renderChildren()
+                commit()
+            end)
+            delBtn.Size = UDim2.new(0,80,0,24)
+        end
+        local addBtn = makeBtn(childSec, "Add Child", function()
+            draft.children = draft.children or {}
+            local name = names[1]
+            if name then
+                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
+                renderChildren()
+                commit()
+            end
+        end)
+        addBtn.Size = UDim2.new(0,100,0,24)
+    end
+    renderChildren()
     validate()
 end
 
