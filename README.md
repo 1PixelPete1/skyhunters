@@ -78,3 +78,25 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+## Architecture
+
+```
+ +-----------------------+      +-----------------------+      +------------------------------+      +------------------+
+ | LoomDesigner/UI.lua   | ---> | LoomDesigner/Main.lua | ---> | growth/GrowthVisualizer.luau | ---> | (future modules) |
+ | - New/Duplicate/...   |      | - normalizeChildren() |      | - traverse()                |      +------------------+
+ | - renderChildren()    |      | - CommitProfileEdit() |      |   * buildChain()            |
+ |   edits draft.children|      |   * DC deep copy       |      |   * spawn children          |
+ +-----------------------+      | - ensureTrunk()       |      +------------------------------+
+                                +-----------------------+
+```
+
+Data structures:
+
+- `state.profileDrafts[name]` — edited by the UI and committed via `CommitProfileEdit()`.
+- `state.savedProfiles[name].children[]` — list of `{name, count, placement, rotation}`.
+- `state.branchAssignments.trunkProfile` — updated by `ensureTrunk()`.
+
+Arrows show module calls and data flow. Append new mechanics by adding blocks to the
+right and connecting through clear `-->` links.
+
