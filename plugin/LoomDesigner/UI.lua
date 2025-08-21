@@ -806,6 +806,7 @@ local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
         end
         selectedProfile = txt
         commitAndRebuild()
+        renderAssignments()
     end
     renameBox.Parent.Visible = false
 end)
@@ -829,6 +830,7 @@ if secProfilesLib and secProfilesLib.Parent then
         commitAndRebuild()
         renderProfiles()
         renderProfileEditor()
+        renderAssignments()
         task.defer(function()
             local btn = listFrame:FindFirstChild(name)
             if btn then
@@ -871,6 +873,7 @@ local function duplicateProfile()
     st.activeProfileName = name
     selectedProfile = name
     commitAndRebuild()
+    renderAssignments()
 end
 
 local function renameProfile()
@@ -889,6 +892,7 @@ local function deleteProfile()
     end
     selectedProfile = nil
     commitAndRebuild()
+    renderAssignments()
 end
 
 makeBtn(buttonsRow, "New", newProfile)
@@ -1045,7 +1049,8 @@ renderProfileEditor = function()
     end
 
     local function commit()
-        commitAndRebuild()
+    commitAndRebuild()
+    renderAssignments()
     end
 
     local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
