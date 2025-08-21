@@ -255,6 +255,26 @@ local function normalizeChildren(prof, name)
                                 prof.children = {}
                         end
                 end
+                for i, pick in ipairs(prof.children) do
+                        if type(pick) == "string" then
+                                prof.children[i] = {
+                                        name = pick,
+                                        count = 1,
+                                        placement = "tip",
+                                        rotation = "upright",
+                                }
+                        elseif type(pick) == "table" then
+                                pick.name = pick.name or pick[1]
+                                pick.count = pick.count or 1
+                                pick.placement = pick.placement or "tip"
+                                if pick.rotation == nil then
+                                        pick.rotation = "upright"
+                                end
+                                prof.children[i] = pick
+                        else
+                                prof.children[i] = nil
+                        end
+                end
         else
                 prof.children = {}
         end
@@ -364,7 +384,7 @@ end
 
 -- simple profile helpers ----------------------------------------------------
 function LoomDesigner.CreateProfile(name: string, profile)
-        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
+        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1, children = {} }
         normalizeChildren(profile, name)
         state.savedProfiles[name] = profile
         ensureTrunk(state, name)
