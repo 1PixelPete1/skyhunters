@@ -254,11 +254,18 @@ layout.Parent = scroll
 
 local st = LoomDesigner.GetState()
 local status = Instance.new("TextLabel")
-status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments and st.branchAssignments.trunkProfile or "-")
 status.TextColor3 = Color3.fromRGB(160,200,255)
 status.BackgroundTransparency = 1
 status.Size = UDim2.new(1,0,0,18)
+status.Font = Enum.Font.SourceSansSemibold
 status.Parent = scroll
+
+local function updateStatus()
+    local st = LoomDesigner.GetState()
+    local trunk = st.branchAssignments and st.branchAssignments.trunkProfile or "-"
+    status.Text = string.format("Trunk: %s   Seed: %s", trunk, tostring(st.baseSeed))
+end
+updateStatus()
 
 local spawnBtn = Instance.new("TextButton")
 spawnBtn.Size = UDim2.new(0,180,0,26)
@@ -796,30 +803,34 @@ renameBox.Parent.LayoutOrder = 3
 
 local pendingProfileName = ""
 local newProfileBox: TextBox? = nil
-newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
-    local st = LoomDesigner.GetState()
-    local name = (txt ~= "" and txt) or pendingProfileName
-    LoomDesigner.CreateProfile(name)
-    st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
-    st.activeProfileName = name
-    selectedProfile = name
-    if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
-    pendingProfileName = ""
-    commitAndRebuild()
-    renderProfiles()
-    renderProfileEditor()
-    task.defer(function()
-        local btn = listFrame:FindFirstChild(name)
-        if btn then
-            local abs = btn.AbsolutePosition
-            local rootAbs = listFrame.AbsolutePosition
-            listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
+if secProfilesLib and secProfilesLib.Parent then
+    newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
+        local st = LoomDesigner.GetState()
+        local name = (txt ~= "" and txt) or pendingProfileName
+        LoomDesigner.CreateProfile(name)
+        st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
+        st.activeProfileName = name
+        selectedProfile = name
+        if newProfileBox and newProfileBox.Parent then
+            newProfileBox.Parent.Visible = false
         end
+        pendingProfileName = ""
+        commitAndRebuild()
+        renderProfiles()
+        renderProfileEditor()
+        task.defer(function()
+            local btn = listFrame:FindFirstChild(name)
+            if btn then
+                local abs = btn.AbsolutePosition
+                local rootAbs = listFrame.AbsolutePosition
+                listFrame.CanvasPosition = Vector2.new(0, abs.Y - rootAbs.Y)
+            end
+        end)
     end)
-end)
-if newProfileBox and newProfileBox.Parent then
-    newProfileBox.Parent.Visible = false
-    newProfileBox.Parent.LayoutOrder = 3
+    if newProfileBox.Parent then
+        newProfileBox.Parent.Visible = false
+        newProfileBox.Parent.LayoutOrder = 3
+    end
 end
 
 local function newProfile()
@@ -1104,15 +1115,16 @@ renderProfiles = function()
         local btn = Instance.new("TextButton")
         btn.Name = name
         btn.Size = UDim2.new(0,180,0,24)
-        btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
         btn.ZIndex = listFrame.ZIndex + 1
         btn.Text = name
         if name == st.activeProfileName then
+            btn.BackgroundColor3 = Color3.fromRGB(70,70,100)
             btn.Font = Enum.Font.SourceSansBold
             btn.BorderSizePixel = 2
             btn.BorderColor3 = Color3.fromRGB(80,120,200)
         else
+            btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
             btn.Font = Enum.Font.SourceSans
             btn.BorderSizePixel = 0
         end
@@ -1161,10 +1173,17 @@ renderProfiles()
 
 -- re-render UI automatically when the saved profiles table changes
 do
-    local st = LoomDesigner.GetState()
-    st.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", st.savedProfiles, function()
+    local state = LoomDesigner.GetState()
+    state.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", state.savedProfiles, function()
         task.defer(function()
             renderProfiles()
+            renderAssignments()
+            updateStatus()
+        end)
+    end))
+    st.branchAssignments = select(1, FlowTrace.watchTable("ui.branchAssignments", st.branchAssignments, function()
+        task.defer(function()
+            updateStatus()
             renderAssignments()
         end)
     end))
@@ -1186,7 +1205,7 @@ local function renderAssignments()
         local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
         btn.Active = false
         btn.AutoButtonColor = false
-        status.Text = string.format("Seed: %s   Trunk: -", tostring(st.baseSeed))
+        updateStatus()
         local msg = Instance.new("TextLabel")
         msg.Text = "Create a profile first"
         msg.TextColor3 = Color3.fromRGB(200,200,200)
@@ -1198,11 +1217,11 @@ local function renderAssignments()
     if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
         st.branchAssignments.trunkProfile = names[1]
     end
-    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
+    updateStatus()
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
     local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
-        status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), opt)
+        updateStatus()
         pcall(function()
             plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
         end)
