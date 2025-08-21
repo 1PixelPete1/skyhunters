@@ -719,14 +719,20 @@ listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 listFrame.ScrollBarThickness = 8
 listFrame.LayoutOrder = 1
 listFrame.Parent = secProfilesLib
+listFrame.ZIndex = 2
 listFrame.ClipsDescendants = false
 -- ensure the list is mounted correctly and not clipped by ancestors
 task.defer(function()
     if not listFrame:IsDescendantOf(controlsHost) then
         listFrame.Parent = secProfilesLib
     end
-    local p = listFrame.Parent
-    if p then p.ClipsDescendants = false end
+    local ancestor = listFrame.Parent
+    while ancestor do
+        if ancestor:IsA("GuiObject") then
+            ancestor.ClipsDescendants = false
+        end
+        ancestor = ancestor.Parent
+    end
 end)
 
 local listPadding = Instance.new("UIPadding")
@@ -745,6 +751,7 @@ buttonsRow.Size = UDim2.new(1,0,0,26)
 buttonsRow.BackgroundTransparency = 1
 buttonsRow.LayoutOrder = 2
 buttonsRow.Parent = secProfilesLib
+buttonsRow.ZIndex = 2
 
 local function makeBtn(parent, text, cb)
     local b = Instance.new("TextButton")
@@ -752,6 +759,7 @@ local function makeBtn(parent, text, cb)
     b.BackgroundColor3 = Color3.fromRGB(48,48,48)
     b.TextColor3 = Color3.new(1,1,1)
     b.Text = text
+    b.ZIndex = (parent.ZIndex or 0) + 1
     b.Parent = parent
     b.MouseButton1Click:Connect(cb)
     return b
@@ -774,6 +782,7 @@ local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
     renameBox.Parent.Visible = false
 end)
 renameBox.Parent.Visible = false
+renameBox.Parent.LayoutOrder = 3
 
 local pendingProfileName = ""
 local newProfileBox
@@ -787,9 +796,13 @@ newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
     pendingProfileName = ""
     commitAndRebuild()
+    renderProfiles()
     renderProfileEditor()
 end)
-if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
+if newProfileBox and newProfileBox.Parent then
+    newProfileBox.Parent.Visible = false
+    newProfileBox.Parent.LayoutOrder = 3
+end
 
 local function newProfile()
     local st = LoomDesigner.GetState()
@@ -844,6 +857,7 @@ profileEditor.BackgroundTransparency = 1
 profileEditor.Size = UDim2.new(1,0,0,0)
 profileEditor.AutomaticSize = Enum.AutomaticSize.Y
 profileEditor.Parent = secProfilesLib
+profileEditor.LayoutOrder = 4
 
 -- render functions ---------------------------------------------------------
 commitAndRebuild = function()
@@ -1008,6 +1022,7 @@ renderProfiles = function()
         btn.Size = UDim2.new(0,180,0,24)
         btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
+        btn.ZIndex = listFrame.ZIndex + 1
         btn.Text = name .. ((name==selectedProfile) and " *" or "")
         if name == st.activeProfileName then
             btn.Font = Enum.Font.SourceSansBold
@@ -1035,9 +1050,8 @@ renderProfiles = function()
         hint.TextColor3 = Color3.fromRGB(255,180,80)
         hint.BackgroundTransparency = 1
         hint.Size = UDim2.new(1,0,0,20)
+        hint.ZIndex = listFrame.ZIndex + 1
         hint.Parent = listFrame
-        local createBtn = makeBtn(listFrame, "Create Profile", newProfile)
-        createBtn.Size = UDim2.new(0,160,0,24)
     end
     renderProfileEditor()
 end
