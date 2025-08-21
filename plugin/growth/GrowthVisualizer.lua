@@ -545,6 +545,11 @@ function GrowthVisualizer.Render(container, loomState)
 
     local trunkName = branchAssignments.trunkProfile or "trunk"
     if not profiles[trunkName] then
+        warn(string.format(
+            "[GrowthVisualizer] Missing profile '%s' in config '%s'; using 'trunk'",
+            tostring(trunkName),
+            tostring(loomState.configId)
+        ))
         profiles.trunk = profiles.trunk or (config.profileDefaults or {kind="curved"})
         trunkName = "trunk"
     end

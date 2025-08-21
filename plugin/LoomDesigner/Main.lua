@@ -267,7 +267,21 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
         if _commitTimer then task.cancel(_commitTimer) end
         _commitTimer = task.delay(0.1, function()
                 LoomDesigner.ApplyAuthoring()
-                LoomDesigner.RebuildPreview(nil)
+                local cfgId = state.configId
+                local trunkName = state.branchAssignments and state.branchAssignments.trunkProfile
+                local hasProfile = LoomConfigs
+                        and LoomConfigs[cfgId]
+                        and LoomConfigs[cfgId].profiles
+                        and LoomConfigs[cfgId].profiles[trunkName]
+                if hasProfile then
+                        LoomDesigner.RebuildPreview(nil)
+                else
+                        warn(string.format(
+                                "[LoomDesigner] Missing profile '%s' for config '%s'; skipping preview",
+                                tostring(trunkName),
+                                tostring(cfgId)
+                        ))
+                end
                 _commitTimer = nil
         end)
 end
