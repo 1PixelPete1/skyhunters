@@ -78,3 +78,37 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+### Module interplay and depth-based branching
+
+`Main` holds authoring state for profiles and models while exposing helpers
+such as `deepCopy`, `ensureTrunk`, and `applyAuthoring`. `UI.Build` surfaces
+those controls to the plugin, and `ModelResolver` loads model assets during
+authoring. The data flow looks like:
+
+```
+            UI.Build
+                |
+                v
+   +------------------------------+
+   |            Main              |
+   | state.savedProfiles          |
+   | state.branchAssignments      |
+   | state.modelsByDepth          |
+   | deepCopy()  ensureTrunk()    |
+   | applyAuthoring()             |
+   +------------------------------+
+                |
+                v
+         ModelResolver
+       ResolveOne()/ResolveFromList()
+
+Branch tree (branchAssignments.trunkProfile):
+depth 0: trunk
+  └─ depth 1: branchA
+      └─ depth 2: branchB
+```
+
+`branchDepthMax` caps how far the hierarchy grows. `ensureTrunk` keeps
+`branchAssignments.trunkProfile` valid, `applyAuthoring` merges state with
+configs using `deepCopy`, and `ModelResolver` pulls models for each depth.
