@@ -558,6 +558,12 @@ function GrowthVisualizer.Render(container, loomState)
 
     local profileOverride = overrides.profile
 
+    local branchDepthMax = overrides.branchDepthMax
+    if branchDepthMax == nil then
+        branchDepthMax = cfg.branchDepthMax
+    end
+    branchDepthMax = branchDepthMax or 0
+
     for cIndex = 1, #chains do
         local chain = chains[cIndex]
         local prof = profileOverride or profiles[chain.profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
@@ -581,10 +587,21 @@ function GrowthVisualizer.Render(container, loomState)
 
         local depth = chain.depth
         local rules = prof.children
-        if rules and depth < (cfg.branchDepthMax or 0) then
+        local depthRules
+        if rules then
+            depthRules = rules[depth]
+            if not depthRules and type(rules[1]) == "table" and rules[1].name then
+                depthRules = rules
+            end
+        end
+        if depthRules and depth < branchDepthMax then
             local lastSeg = segRefs[segCount]
-            for _, pick in ipairs(rules) do
+            local parentRot = chain.startCF.Rotation
+            local basePos = chain.startCF.Position
+            for pIdx, pick in ipairs(depthRules) do
                 local count = pick.count or 1
+                local intCount = math.floor(count)
+                local extra = count - intCount
                 local placement = pick.placement or "tip"
                 local orient
                 if type(pick.rotation) == "table" then
@@ -594,22 +611,32 @@ function GrowthVisualizer.Render(container, loomState)
                 else
                     orient = {}
                 end
-                local baseCF
-                if placement == "tip" and lastSeg then
-                    baseCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
-                else
-                    baseCF = chain.startCF
-                end
-                local startHere = baseCF * CFrame.Angles(
-                    math.rad(orient.pitch or 0),
-                    math.rad(orient.yaw or 0),
-                    math.rad(orient.roll or 0)
-                )
-                for _ = 1, count do
+                local function spawnOne()
+                    local posCF
+                    if placement == "tip" and lastSeg then
+                        local tipCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
+                        posCF = CFrame.new(tipCF.Position) * parentRot
+                    else
+                        posCF = CFrame.new(basePos) * parentRot
+                    end
+                    local startHere = posCF * CFrame.Angles(
+                        math.rad(orient.pitch or 0),
+                        math.rad(orient.yaw or 0),
+                        math.rad(orient.roll or 0)
+                    )
                     nextId = nextId + 1
                     local newChain = { id = nextId, depth = depth + 1, profileName = pick.name, startCF = startHere }
                     chains[#chains + 1] = newChain
                     chainMap[nextId] = newChain
+                end
+                for _ = 1, intCount do
+                    spawnOne()
+                end
+                if extra > 0 then
+                    local rngPick = SeedUtil.rng(baseSeed, "child", chain.id, depth, pIdx)
+                    if rngPick:NextNumber() < extra then
+                        spawnOne()
+                    end
                 end
             end
         end
