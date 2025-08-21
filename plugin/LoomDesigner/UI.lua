@@ -442,34 +442,6 @@ if n then
 end
 end)
 
-local function renderProfileSection()
-    for _, c in ipairs(secProfile:GetChildren()) do
-        if c:IsA("GuiObject") then c:Destroy() end
-    end
-    local st = LoomDesigner.GetState()
-    local active = st.activeProfileName
-    if not active then
-        local banner = Instance.new("TextLabel")
-        banner.Text = "Select or create a Profile in Authoring to edit."
-        banner.TextColor3 = Color3.fromRGB(255,180,80)
-        banner.BackgroundTransparency = 1
-        banner.Size = UDim2.new(1,0,0,20)
-        banner.Parent = secProfile
-    else
-        local KINDS = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
-        local draft = st.profileDrafts[active]
-        dropdown(secProfile, popupHost, "Kind", KINDS,
-            table.find(KINDS, (draft and draft.kind) or "curved") or 2,
-            function(opt)
-                draft.kind = string.lower(opt)
-                LoomDesigner.CommitProfileEdit(active, draft)
-                LoomDesigner.ApplyAuthoring()
-                LoomDesigner.RebuildPreview(nil)
-            end
-        )
-    end
-end
-renderProfileSection()
 
 -- === Segment Geometry ===
 dropdown(secGeo, popupHost, "Mode", {"Model", "Part"}, 1, function(opt)

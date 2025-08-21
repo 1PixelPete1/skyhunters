@@ -568,28 +568,23 @@ end
 -- Trace the local utility for visibility across calls
 applyAuthoring = FT.fn("Main.applyAuthoring", applyAuthoring)
 
-function LoomDesigner.ImportAuthoring()
-        local cfg = LoomConfigs[state.configId]
-        if not cfg then return end
-        state.savedProfiles = deepCopy(cfg.profiles or {})
-        for name, prof in pairs(state.savedProfiles) do
-                normalizeChildren(prof, name)
-        end
-       state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
-       state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
-        local models = cfg.models or {}
-        state.modelsByDepth = deepCopy(models.byDepth or {})
-        if models.decorations then
-                state.overrides.decorations = { enabled = true, types = deepCopy(models.decorations) }
-        else
-                state.overrides.decorations = { enabled = false, types = {} }
-        end
-        rebuildLibraries()
+function LoomDesigner.ExportAuthoring()
+        return {
+                branches = DC(newState.branches),
+                assignments = DC(newState.assignments),
+        }
 end
 
-function LoomDesigner.ExportAuthoring()
-        local cfg = applyAuthoring()
-        LoomDesigner.ExportConfig(cfg)
+function LoomDesigner.ImportAuthoring(cfg)
+        cfg = cfg or {}
+        newState.branches = DC(cfg.branches or {})
+        newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
+        newState.assignments = DC(cfg.assignments or {trunk = "", children = {}})
+        newState.assignments = select(1, FT.watchTable("newState.assignments", newState.assignments))
+        newState.assignments.children = select(
+                1,
+                FT.watchTable("newState.assignments.children", newState.assignments.children)
+        )
 end
 
 LoomDesigner.ApplyAuthoring = applyAuthoring
