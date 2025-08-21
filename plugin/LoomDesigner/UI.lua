@@ -752,19 +752,30 @@ local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
 end)
 renameBox.Parent.Visible = false
 
-local function newProfile()
+local pendingProfileName = ""
+local newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     local st = LoomDesigner.GetState()
-    local i = 1
-    while st.savedProfiles["profile"..i] do i += 1 end
-    local name = "profile"..i
+    local name = (txt ~= "" and txt) or pendingProfileName
     LoomDesigner.CreateProfile(name)
     st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
     st.activeProfileName = name
     selectedProfile = name
+    newProfileBox.Parent.Visible = false
+    pendingProfileName = ""
     renderProfiles()
     commitAndRebuild()
-    -- ensure the newly created profile is immediately editable
     renderProfileEditor()
+end)
+newProfileBox.Parent.Visible = false
+
+local function newProfile()
+    local st = LoomDesigner.GetState()
+    local i = 1
+    while st.savedProfiles["profile"..i] do i += 1 end
+    pendingProfileName = "profile"..i
+    newProfileBox.Text = pendingProfileName
+    newProfileBox.Parent.Visible = true
+    newProfileBox:CaptureFocus()
 end
 
 local function duplicateProfile()
@@ -978,6 +989,14 @@ renderProfiles = function()
         btn.BackgroundColor3 = Color3.fromRGB(48,48,48)
         btn.TextColor3 = Color3.new(1,1,1)
         btn.Text = name .. ((name==selectedProfile) and " *" or "")
+        if name == st.activeProfileName then
+            btn.Font = Enum.Font.SourceSansBold
+            btn.BorderSizePixel = 2
+            btn.BorderColor3 = Color3.fromRGB(80,120,200)
+        else
+            btn.Font = Enum.Font.SourceSans
+            btn.BorderSizePixel = 0
+        end
         btn.Parent = profileList
         btn.MouseButton1Click:Connect(function()
             selectedProfile = name
@@ -1017,7 +1036,12 @@ local function renderAssignments()
         st.branchAssignments.trunkProfile = names[1]
     end
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
-    dropdown(secAssign, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
+    local trunkFrame = Instance.new("Frame")
+    trunkFrame.BackgroundTransparency = 1
+    trunkFrame.Size = UDim2.new(1,0,0,0)
+    trunkFrame.AutomaticSize = Enum.AutomaticSize.Y
+    trunkFrame.Parent = secAssign
+    dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
         LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
     end)
