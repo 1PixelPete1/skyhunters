@@ -254,11 +254,18 @@ layout.Parent = scroll
 
 local st = LoomDesigner.GetState()
 local status = Instance.new("TextLabel")
-status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments and st.branchAssignments.trunkProfile or "-")
 status.TextColor3 = Color3.fromRGB(160,200,255)
 status.BackgroundTransparency = 1
 status.Size = UDim2.new(1,0,0,18)
+status.Font = Enum.Font.SourceSansSemibold
 status.Parent = scroll
+
+local function updateStatus()
+    local st = LoomDesigner.GetState()
+    local trunk = st.branchAssignments and st.branchAssignments.trunkProfile or "-"
+    status.Text = string.format("Trunk: %s   Seed: %s", trunk, tostring(st.baseSeed))
+end
+updateStatus()
 
 local spawnBtn = Instance.new("TextButton")
 spawnBtn.Size = UDim2.new(0,180,0,26)
@@ -1133,6 +1140,13 @@ do
         task.defer(function()
             renderProfiles()
             renderAssignments()
+            updateStatus()
+        end)
+    end))
+    st.branchAssignments = select(1, FlowTrace.watchTable("ui.branchAssignments", st.branchAssignments, function()
+        task.defer(function()
+            updateStatus()
+            renderAssignments()
         end)
     end))
 end
@@ -1153,7 +1167,7 @@ local function renderAssignments()
         local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", {"No profiles"}, 1, function() end)
         btn.Active = false
         btn.AutoButtonColor = false
-        status.Text = string.format("Seed: %s   Trunk: -", tostring(st.baseSeed))
+        updateStatus()
         local msg = Instance.new("TextLabel")
         msg.Text = "Create a profile first"
         msg.TextColor3 = Color3.fromRGB(200,200,200)
@@ -1165,11 +1179,11 @@ local function renderAssignments()
     if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
         st.branchAssignments.trunkProfile = names[1]
     end
-    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
+    updateStatus()
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
     local btn = dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
-        status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), opt)
+        updateStatus()
         pcall(function()
             plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
         end)

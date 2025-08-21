@@ -79,20 +79,5 @@ branchAssignments = {
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
 
-## LoomDesigner UI Architecture
 
-```text
-secProfilesLib
-├─ listFrame (ScrollingFrame)
-│  ├─ profile buttons*        (*activeProfileName highlighted background)
-│  └─ newProfileBox (created only when parent exists)
-├─ buttonsRow
-│  ├─ New       -> newProfile()
-│  ├─ Duplicate -> duplicateProfile()
-│  ├─ Rename    -> renameProfile()
-│  └─ Delete    -> deleteProfile()
-└─ profileEditor
-
-state.savedProfiles --[FlowTrace.watchTable]--> renderProfiles()
-state.activeProfileName ----------------------> visual cue in listFrame
 ```
