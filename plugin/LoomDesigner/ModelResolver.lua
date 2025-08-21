@@ -41,7 +41,7 @@ function ModelResolver.ResolveOne(ref)
             end
             if m then
                 if m:IsA("Model") then
-                    return m:Clone()
+                    return m:Clone(), nil
                 else
                     -- wrap non-Model as a Model so downstream always receives a Model
                     local wrap = Instance.new("Model")
@@ -50,7 +50,7 @@ function ModelResolver.ResolveOne(ref)
                     c.Parent = wrap
                     local pp = c:IsA("BasePart") and c or wrap:FindFirstChildWhichIsA("BasePart", true)
                     if pp then (wrap :: any).PrimaryPart = pp end
-                    return wrap
+                    return wrap, nil
                 end
             end
         end
@@ -62,27 +62,30 @@ function ModelResolver.ResolveOne(ref)
                 table.insert(have, string.format("%s(%s)", ch.Name, ch.ClassName))
             end
         end
-        warn(("ModelResolver: missing model '%s' in %s; have: [%s]")
-            :format(wanted, where, table.concat(have, ", ")))
-        return nil
+        local msg = ("ModelResolver: missing model '%s' in %s; have: [%s]")
+            :format(wanted, where, table.concat(have, ", "))
+        warn(msg)
+        return nil, msg
     elseif type(ref) == "number" then
         local cached = _assetCache[ref]
         if cached then
-            return cached:Clone()
+            return cached:Clone(), nil
         end
         local ok, got = pcall(game.GetObjects, game, string.format("rbxassetid://%s", tostring(ref)))
         if ok and got and got[1] then
             local inst = got[1]
             if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("BasePart") then
                 _assetCache[ref] = inst
-                return inst:Clone()
+                return inst:Clone(), nil
             end
         end
-        warn(("ModelResolver: failed to load asset id %s"):format(tostring(ref)))
-        return nil
+        local msg = ("ModelResolver: failed to load asset id %s"):format(tostring(ref))
+        warn(msg)
+        return nil, msg
     else
-        warn(("ModelResolver: unsupported ref type %s"):format(type(ref)))
-        return nil
+        local msg = ("ModelResolver: unsupported ref type %s"):format(type(ref))
+        warn(msg)
+        return nil, msg
     end
 end
 
