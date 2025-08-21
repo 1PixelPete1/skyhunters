@@ -1087,7 +1087,7 @@ local function renderAssignments()
             renderProfiles()
             renderProfileEditor()
             renderAssignments()
-            local btn = profileList:FindFirstChild(name)
+            local btn = listFrame:FindFirstChild(name)
             if btn then
                 local abs = btn.AbsolutePosition
                 local rootAbs = scroll.AbsolutePosition
