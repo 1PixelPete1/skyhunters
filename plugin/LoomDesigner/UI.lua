@@ -892,42 +892,120 @@ profileEditor.AutomaticSize = Enum.AutomaticSize.Y
 profileEditor.Parent = secProfilesLib
 profileEditor.LayoutOrder = 4
 
+-- Child authoring helpers ---------------------------------------------------
+local CHILD_PLACEMENTS = {"tip","junction","along","radial","spiral"}
+local CHILD_ROTATIONS = {"upright","inherit","custom"}
+
+local function createChildRow(parent: Instance, popupHost: Frame, child: table,
+        profileNames: {string}, commit: ()->(), remove: ()->(), rerender: ()->())
+    local frame = Instance.new("Frame")
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(1,0,0,0)
+    frame.AutomaticSize = Enum.AutomaticSize.Y
+    frame.Parent = parent
+
+    dropdown(frame, popupHost, "Profile", profileNames,
+        table.find(profileNames, child.name) or 1, function(opt)
+            child.name = opt
+            commit()
+        end)
+
+    labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
+        child.count = tonumber(txt) or 1
+        commit()
+    end)
+
+    dropdown(frame, popupHost, "Placement", CHILD_PLACEMENTS,
+        table.find(CHILD_PLACEMENTS, child.placement) or 1, function(opt)
+            child.placement = opt
+            commit()
+        end)
+
+    local rotIndex
+    if type(child.rotation) == "table" then
+        rotIndex = table.find(CHILD_ROTATIONS, "custom")
+    else
+        rotIndex = table.find(CHILD_ROTATIONS, child.rotation)
+    end
+    dropdown(frame, popupHost, "Rotation", CHILD_ROTATIONS, rotIndex or 1,
+        function(opt)
+            if opt == "custom" then
+                child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
+            else
+                child.rotation = opt
+            end
+            commit()
+            rerender()
+        end)
+
+    if type(child.rotation) == "table" then
+        labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
+            child.rotation.pitch = tonumber(txt) or 0
+            commit()
+        end)
+        labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
+            child.rotation.yaw = tonumber(txt) or 0
+            commit()
+        end)
+        labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
+            child.rotation.roll = tonumber(txt) or 0
+            commit()
+        end)
+    end
+
+    local delBtn = makeBtn(frame, "Remove", function()
+        remove()
+    end)
+    delBtn.Size = UDim2.new(0,80,0,24)
+end
+
+local function renderChildrenSection(parent: Instance, popupHost: Frame, draft: table, commit: ()->())
+    local section = makeSection(parent, "Children")
+
+    local function render()
+        for _, c in ipairs(section:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+
+        local names = {}
+        for name in pairs(LoomDesigner.GetState().savedProfiles) do
+            table.insert(names, name)
+        end
+        table.sort(names)
+
+        draft.children = draft.children or {}
+        for i, child in ipairs(draft.children) do
+            createChildRow(section, popupHost, child, names, commit, function()
+                table.remove(draft.children, i)
+                render()
+                commit()
+            end, render)
+        end
+
+        local addBtn = makeBtn(section, "Add Child", function()
+            local name = names[1]
+            if name then
+                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
+                render()
+                commit()
+            end
+        end)
+        addBtn.Size = UDim2.new(0,100,0,24)
+    end
+
+    render()
+    return section
+end
+
 -- render functions ---------------------------------------------------------
 commitAndRebuild = function()
     local st = LoomDesigner.GetState()
     local active = st.activeProfileName
     local draft = active and st.profileDrafts and st.profileDrafts[active]
-    local errors = {}
-    local function check(ref)
-        local res = ModelResolver.ResolveOne(ref)
-        if typeof(res) ~= "Instance" then
-            table.insert(errors, res)
-        end
+    if active and draft then
+        st.profileDrafts[active] = draft
+        LoomDesigner.CommitProfileEdit(active, draft)
     end
-    for _, ref in ipairs(st.modelLibrary or {}) do check(ref) end
-    for _, list in pairs(st.modelsByDepth or {}) do
-        for _, ref in ipairs(list) do check(ref) end
-    end
-    if st.overrides and st.overrides.decorations and st.overrides.decorations.types then
-        for _, deco in pairs(st.overrides.decorations.types) do
-            if deco.models then
-                for _, ref in ipairs(deco.models) do check(ref) end
-            end
-        end
-    end
-    if #errors > 0 then
-        if commitErrorLabel then
-            commitErrorLabel.Text = errors[1]
-            if #errors > 1 then
-                commitErrorLabel.Text = commitErrorLabel.Text .. string.format(" (+%d more)", #errors-1)
-            end
-            commitErrorLabel.Visible = true
-        end
-        return
-    elseif commitErrorLabel then
-        commitErrorLabel.Visible = false
-    end
-    LoomDesigner.CommitProfileEdit(active, draft)
     LoomDesigner.ApplyAuthoring()
     LoomDesigner.RebuildPreview(nil)
 end
@@ -1023,86 +1101,7 @@ renderProfileEditor = function()
     if draft.segmentCountMode == "normal" then segNum("Mean", "segmentCountMean"); segNum("Sd", "segmentCountSd") end
     if draft.segmentCountMode == "biased" then segNum("Bias", "segmentCountBias") end
 
-    local childSec = makeSection(profileEditor, "Children")
-    local PLACEMENTS = {"tip","junction","along","radial","spiral"}
-    local ROTATIONS = {"upright","inherit","custom"}
-    local function renderChildren()
-        for _, c in ipairs(childSec:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-        local names = {}
-        for name in pairs(LoomDesigner.GetState().savedProfiles) do
-            table.insert(names, name)
-        end
-        table.sort(names)
-        draft.children = draft.children or {}
-        for i, child in ipairs(draft.children) do
-            local frame = Instance.new("Frame")
-            frame.BackgroundTransparency = 1
-            frame.Size = UDim2.new(1,0,0,0)
-            frame.AutomaticSize = Enum.AutomaticSize.Y
-            frame.Parent = childSec
-
-            dropdown(frame, popupHost, "Profile", names, table.find(names, child.name) or 1, function(opt)
-                child.name = opt
-                commit()
-            end)
-            labeledTextBox(frame, "Count", tostring(child.count or 1), function(txt)
-                child.count = tonumber(txt) or 1
-                commit()
-            end)
-            dropdown(frame, popupHost, "Placement", PLACEMENTS, table.find(PLACEMENTS, child.placement) or 1, function(opt)
-                child.placement = opt
-                commit()
-            end)
-            local rotIndex
-            if type(child.rotation) == "table" then
-                rotIndex = table.find(ROTATIONS, "custom")
-            else
-                rotIndex = table.find(ROTATIONS, child.rotation)
-            end
-            dropdown(frame, popupHost, "Rotation", ROTATIONS, rotIndex or 1, function(opt)
-                if opt == "custom" then
-                    child.rotation = type(child.rotation) == "table" and child.rotation or {pitch = 0, yaw = 0, roll = 0}
-                else
-                    child.rotation = opt
-                end
-                commit()
-                renderChildren()
-            end)
-            if type(child.rotation) == "table" then
-                labeledTextBox(frame, "Pitch", tostring(child.rotation.pitch or 0), function(txt)
-                    child.rotation.pitch = tonumber(txt) or 0
-                    commit()
-                end)
-                labeledTextBox(frame, "Yaw", tostring(child.rotation.yaw or 0), function(txt)
-                    child.rotation.yaw = tonumber(txt) or 0
-                    commit()
-                end)
-                labeledTextBox(frame, "Roll", tostring(child.rotation.roll or 0), function(txt)
-                    child.rotation.roll = tonumber(txt) or 0
-                    commit()
-                end)
-            end
-            local delBtn = makeBtn(frame, "Remove", function()
-                table.remove(draft.children, i)
-                renderChildren()
-                commit()
-            end)
-            delBtn.Size = UDim2.new(0,80,0,24)
-        end
-        local addBtn = makeBtn(childSec, "Add Child", function()
-            draft.children = draft.children or {}
-            local name = names[1]
-            if name then
-                table.insert(draft.children, {name = name, count = 1, placement = "tip", rotation = "upright"})
-                renderChildren()
-                commit()
-            end
-        end)
-        addBtn.Size = UDim2.new(0,100,0,24)
-    end
-    renderChildren()
+    renderChildrenSection(profileEditor, popupHost, draft, commit)
     validate()
 end
 
