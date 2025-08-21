@@ -1,6 +1,7 @@
 --!strict
 local RequireUtil = require(script.Parent.RequireUtil)
 local LoomDesigner = require(script.Parent.Main)
+local FlowTrace = require(script.Parent.FlowTrace)
 
 local UI = {}
 
@@ -717,6 +718,15 @@ listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 listFrame.ScrollBarThickness = 8
 listFrame.LayoutOrder = 1
 listFrame.Parent = secProfilesLib
+listFrame.ClipsDescendants = false
+-- ensure the list is mounted correctly and not clipped by ancestors
+task.defer(function()
+    if not listFrame:IsDescendantOf(controlsHost) then
+        listFrame.Parent = secProfilesLib
+    end
+    local p = listFrame.Parent
+    if p then p.ClipsDescendants = false end
+end)
 
 local listPadding = Instance.new("UIPadding")
 listPadding.PaddingTop = UDim.new(0,4)
@@ -758,7 +768,6 @@ local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
             st.activeProfileName = txt
         end
         selectedProfile = txt
-        renderProfiles()
         commitAndRebuild()
     end
     renameBox.Parent.Visible = false
@@ -776,7 +785,6 @@ newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     selectedProfile = name
     if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
     pendingProfileName = ""
-    renderProfiles()
     commitAndRebuild()
     renderProfileEditor()
 end)
@@ -804,7 +812,6 @@ local function duplicateProfile()
     st.profileDrafts[name] = LoomConfigUtil.deepCopy(src)
     st.activeProfileName = name
     selectedProfile = name
-    renderProfiles()
     commitAndRebuild()
 end
 
@@ -823,7 +830,6 @@ local function deleteProfile()
         st.activeProfileName = nil
     end
     selectedProfile = nil
-    renderProfiles()
     commitAndRebuild()
 end
 
@@ -1036,6 +1042,14 @@ renderProfiles = function()
 end
 
 renderProfiles()
+
+-- re-render profiles automatically when the saved profiles table changes
+do
+    local st = LoomDesigner.GetState()
+    st.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", st.savedProfiles, function()
+        task.defer(renderProfiles)
+    end))
+end
 
 -- Assignments ---------------------------------------------------------------
 local function renderAssignments()
