@@ -6,6 +6,17 @@ local ModelResolver = require(script.Parent.ModelResolver)
 
 local UI = {}
 
+local function applyAuthoringAndPreview()
+    local apply = LoomDesigner.ApplyAuthoring
+    if type(apply) == "function" then
+        apply()
+    end
+    local rebuild = LoomDesigner.RebuildPreview
+    if type(rebuild) == "function" then
+        rebuild(nil)
+    end
+end
+
 local function makeSection(parent: Instance, title: string): Frame
 local sec = Instance.new("Frame")
 sec.BackgroundTransparency = 1
@@ -1178,14 +1189,18 @@ do
     state.savedProfiles = select(1, FlowTrace.watchTable("ui.savedProfiles", state.savedProfiles, function()
         task.defer(function()
             renderProfiles()
-            renderAssignments()
+            if renderAssignments then
+                renderAssignments()
+            end
             updateStatus()
         end)
     end))
     st.branchAssignments = select(1, FlowTrace.watchTable("ui.branchAssignments", st.branchAssignments, function()
         task.defer(function()
             updateStatus()
-            renderAssignments()
+            if renderAssignments then
+                renderAssignments()
+            end
         end)
     end))
 end
@@ -1218,11 +1233,13 @@ local function renderAssignments()
         return
     end
 
-    if not st.branchAssignments.trunkProfile or st.branchAssignments.trunkProfile == "" then
+    if not st.branchAssignments.trunkProfile
+        or st.branchAssignments.trunkProfile == ""
+        or not st.savedProfiles[st.branchAssignments.trunkProfile] then
         st.branchAssignments.trunkProfile = names[1]
     end
 
-    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")=
+    status.Text = string.format("Seed: %s   Trunk: %s", tostring(st.baseSeed), st.branchAssignments.trunkProfile or "-")
     local defaultIdx = table.find(names, st.branchAssignments.trunkProfile) or 1
     dropdown(trunkFrame, popupHost, "Trunk Profile", names, defaultIdx, function(opt)
         st.branchAssignments.trunkProfile = opt
@@ -1230,7 +1247,7 @@ local function renderAssignments()
         pcall(function()
             plugin:SendNotification({Title = "Trunk set to " .. opt, Text = ""})
         end)
-        LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        applyAuthoringAndPreview()
         renderAssignments()
     end)
 
@@ -1267,7 +1284,7 @@ local function renderAssignments()
         local n = tonumber(txt)
         if n then
             st.branchAssignments.branchCap = math.max(0, math.floor(n))
-            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            applyAuthoringAndPreview()
         end
     end)
     local capLabel = capBox.Parent:FindFirstChildOfClass("TextLabel")
@@ -1290,7 +1307,7 @@ local function renderAssignments()
             else
                 depthCaps[d] = nil
             end
-            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            applyAuthoringAndPreview()
             renderAssignments()
         end)
         local lab = box.Parent:FindFirstChildOfClass("TextLabel")
