@@ -1074,6 +1074,22 @@ local function renderAssignments()
         renderAssignments()
     end)
 
+    labeledTextBox(secAssign, "Branch Cap", tostring(st.branchAssignments.branchCap or 2), function(txt)
+        local n = tonumber(txt)
+        if n then
+            st.branchAssignments.branchCap = math.max(0, math.floor(n))
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end
+    end)
+
+    labeledTextBox(secAssign, "Max per Depth", tostring(st.branchAssignments.maxPerDepth or 2), function(txt)
+        local n = tonumber(txt)
+        if n then
+            st.branchAssignments.maxPerDepth = math.max(0, math.floor(n))
+            LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+        end
+    end)
+
     local tree = Instance.new("Frame")
     tree.BackgroundTransparency = 1
     tree.Size = UDim2.new(1,0,0,0)

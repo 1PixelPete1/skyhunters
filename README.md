@@ -19,18 +19,21 @@ For more help, check out [the Rojo documentation](https://rojo.space/docs).
 ## Branching
 
 The growth system uses **branch assignments** to control which profiles spawn at each depth.
+Depth `0` represents the trunk; each generation of branches increases the depth by one.
 
 ### Existing depth-driven rules
 
 - **`perDepth`** – list of profile choices for each depth. At depth `n`, the system selects from `perDepth[n]` using weighted chances.
 - **`spacingN`** – minimum number of segments between branches at depth `n`.
 - **`maxPerDepth`** – maximum branches that may spawn at depth `n`.
+- **`branchCap`** – global limit on branch count across all depths (defaults to 2).
 
 Example:
 
 ```lua
 branchAssignments = {
   trunkProfile = "trunk",
+  branchCap = 2,
   perDepth = {
     [1] = { {name = "branchA", chance = 0.7}, {name = "branchB", chance = 0.3} },
     [2] = { {name = "twig", chance = 1.0} }
@@ -39,6 +42,8 @@ branchAssignments = {
   maxPerDepth = { [1] = 4 }
 }
 ```
+
+`spacingN` and `maxPerDepth` work together: `spacingN[n]` enforces a minimum gap between branch origins at depth `n`, while `maxPerDepth[n]` caps how many branches may appear at that depth. Once the global `branchCap` is reached, no additional branches spawn. By default the system permits two branches unless these values are overridden.
 
 ### Upcoming hierarchical model
 
