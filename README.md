@@ -78,3 +78,23 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+## Plugin Model Resolution Flow
+
+The LoomDesigner plugin validates models before committing profile changes. The
+UI sends each referenced model to `ModelResolver.ResolveOne` and reacts based on
+the result:
+
+```
+[Profile Editor]
+      |
+      v
+[ModelResolver.ResolveOne]
+      |
+      +-- model instance --> commit -> ApplyAuthoring -> Preview
+      |
+      +-- error string --> UI warning (commit blocked)
+```
+
+This feedback loop prevents profiles from being saved with unresolved model
+references and surfaces any error messages directly in the editor.
