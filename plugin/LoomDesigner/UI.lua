@@ -236,6 +236,43 @@ scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 scroll.CanvasSize = UDim2.new(0,0,0,0)
 scroll.Parent = controlsHost
 
+emptyOverlay = Instance.new("Frame")
+emptyOverlay.BackgroundTransparency = 1
+emptyOverlay.Size = UDim2.fromScale(1,1)
+emptyOverlay.ZIndex = 1000
+emptyOverlay.Visible = false
+emptyOverlay.Parent = controlsHost
+
+local overlayContent = Instance.new("Frame")
+overlayContent.AnchorPoint = Vector2.new(0.5,0.5)
+overlayContent.Position = UDim2.fromScale(0.5,0.5)
+overlayContent.BackgroundTransparency = 1
+overlayContent.AutomaticSize = Enum.AutomaticSize.XY
+overlayContent.Parent = emptyOverlay
+
+local overlayLayout = Instance.new("UIListLayout")
+overlayLayout.Padding = UDim.new(0,8)
+overlayLayout.FillDirection = Enum.FillDirection.Vertical
+overlayLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+overlayLayout.SortOrder = Enum.SortOrder.LayoutOrder
+overlayLayout.Parent = overlayContent
+
+local overlayText = Instance.new("TextLabel")
+overlayText.Text = "Click to start designing"
+overlayText.BackgroundTransparency = 1
+overlayText.TextColor3 = Color3.fromRGB(200,200,200)
+overlayText.AutomaticSize = Enum.AutomaticSize.XY
+overlayText.LayoutOrder = 1
+overlayText.Parent = overlayContent
+
+overlayBtn = Instance.new("TextButton")
+overlayBtn.Text = "Create Profile"
+overlayBtn.Size = UDim2.new(0,160,0,30)
+overlayBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+overlayBtn.TextColor3 = Color3.new(1,1,1)
+overlayBtn.LayoutOrder = 2
+overlayBtn.Parent = overlayContent
+
 local layout = Instance.new("UIListLayout")
 layout.Padding = UDim.new(0, 10)
 layout.FillDirection = Enum.FillDirection.Vertical
@@ -295,6 +332,9 @@ local selectedProfile: string? = nil
 local renderProfiles
 local renderProfileEditor
 local commitAndRebuild
+local newProfile
+local emptyOverlay
+local overlayBtn
 
 -- Config dropdown (list from LoomConfigs keys)
 local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
@@ -756,7 +796,7 @@ local function makeBtn(parent, text, cb)
     return b
 end
 
-local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
+local renameBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
     if selectedProfile and txt ~= "" then
         local st = LoomDesigner.GetState()
         LoomDesigner.RenameProfile(selectedProfile, txt)
@@ -769,36 +809,33 @@ local renameBox = labeledTextBox(secProfilesLib, "New Name", "", function(txt)
         end
         selectedProfile = txt
         commitAndRebuild()
+        renderProfiles()
     end
     renameBox.Parent.Visible = false
 end)
 renameBox.Parent.Visible = false
 
-local pendingProfileName = ""
-local newProfileBox
-newProfileBox = labeledTextBox(secProfilesLib, "Profile Name", "", function(txt)
-    local st = LoomDesigner.GetState()
-    local name = (txt ~= "" and txt) or pendingProfileName
-    LoomDesigner.CreateProfile(name)
-    st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
-    st.activeProfileName = name
-    selectedProfile = name
-    if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
-    pendingProfileName = ""
-    commitAndRebuild()
-    renderProfileEditor()
-end)
-if newProfileBox and newProfileBox.Parent then newProfileBox.Parent.Visible = false end
-
 local function newProfile()
     local st = LoomDesigner.GetState()
     local i = 1
     while st.savedProfiles["profile"..i] do i += 1 end
-    pendingProfileName = "profile"..i
-    newProfileBox.Text = pendingProfileName
-    newProfileBox.Parent.Visible = true
-    newProfileBox:CaptureFocus()
+    local name = "profile"..i
+    LoomDesigner.CreateProfile(name)
+    st.profileDrafts[name] = LoomConfigUtil.deepCopy(st.savedProfiles[name])
+    st.activeProfileName = name
+    selectedProfile = name
+    commitAndRebuild()
+    renderProfiles()
+    renderProfileEditor()
+    renameBox.Text = name
+    renameBox.Parent.Visible = true
+    renameBox:CaptureFocus()
 end
+
+overlayBtn.MouseButton1Click:Connect(function()
+    emptyOverlay.Visible = false
+    newProfile()
+end)
 
 local function duplicateProfile()
     if not selectedProfile then return end
@@ -833,7 +870,7 @@ local function deleteProfile()
     commitAndRebuild()
 end
 
-makeBtn(buttonsRow, "New", newProfile)
+makeBtn(buttonsRow, "Create", newProfile)
 makeBtn(buttonsRow, "Duplicate", duplicateProfile)
 makeBtn(buttonsRow, "Rename", renameProfile)
 makeBtn(buttonsRow, "Delete", deleteProfile)
@@ -1029,15 +1066,8 @@ renderProfiles = function()
     end
     if not hasProfiles then
         selectedProfile = nil
-        local hint = Instance.new("TextLabel")
-        hint.Text = "Click 'New' to add your first profile"
-        hint.TextColor3 = Color3.fromRGB(255,180,80)
-        hint.BackgroundTransparency = 1
-        hint.Size = UDim2.new(1,0,0,20)
-        hint.Parent = listFrame
-        local createBtn = makeBtn(listFrame, "Create Profile", newProfile)
-        createBtn.Size = UDim2.new(0,160,0,24)
     end
+    emptyOverlay.Visible = not hasProfiles
     renderProfileEditor()
 end
 
