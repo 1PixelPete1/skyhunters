@@ -255,7 +255,9 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
        end
        if _commitTimer then task.cancel(_commitTimer) end
 
-       local merged = applyAuthoring()
+       local f = LoomDesigner.ApplyAuthoring
+       assert(type(f) == "function", "ApplyAuthoring missing")
+       local merged = f()
        if not merged then
                warn(string.format("[LoomDesigner] Failed to merge profile '%s'; trunk unchanged", tostring(draftName)))
                return
@@ -270,7 +272,9 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
        end
 
        _commitTimer = task.delay(0.1, function()
-               local cfg = applyAuthoring()
+               local f = LoomDesigner.ApplyAuthoring
+               assert(type(f) == "function", "ApplyAuthoring missing")
+               local cfg = f()
                if not cfg then
                        warn(string.format("[LoomDesigner] Failed to merge profile '%s'; skipping preview", tostring(draftName)))
                        _commitTimer = nil
