@@ -91,7 +91,11 @@ end
 
 -- Pick an entry from { "nameA", "nameB", ... } (or asset ids)
 function ModelResolver.ResolveFromList(list, opts)
-    if not list or #list == 0 then return nil end
+    if not list or #list == 0 then
+        local msg = "ModelResolver: empty list"
+        warn(msg)
+        return nil, msg
+    end
     local pick
     if opts and type(opts.select) == "function" then
         pick = opts.select(list)

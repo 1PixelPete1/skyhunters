@@ -1233,6 +1233,7 @@ local function renderModels()
             table.insert(st.modelLibrary, ref)
             renderModels()
         else
+            warnLabel.Text = err or "Asset not found"
             warnLabel.Visible = true
         end
     end
@@ -1264,8 +1265,13 @@ local function renderModels()
         row.Size = UDim2.new(1,0,0,24)
         row.BackgroundTransparency = 1
         row.Parent = secModels
-        local inst = ModelResolver.ResolveOne(ref)
-        local nameText = inst and string.format("%s (%s)", tostring(ref), inst.Name) or tostring(ref)
+        local inst, msg = ModelResolver.ResolveOne(ref)
+        local nameText
+        if inst then
+            nameText = string.format("%s (%s)", tostring(ref), inst.Name)
+        else
+            nameText = string.format("%s (%s)", tostring(ref), msg or "unresolved")
+        end
         if inst then
             local preview = Instance.new("ViewportFrame")
             preview.Size = UDim2.new(0,24,1,0)
@@ -1342,6 +1348,14 @@ local function renderModels()
     table.sort(depths, depthLess)
     for _, depth in ipairs(depths) do
         local list = st.modelsByDepth[depth] or {}
+        local filtered = {}
+        for _, ref in ipairs(list) do
+            if ModelResolver.ResolveOne(ref) then
+                table.insert(filtered, ref)
+            end
+        end
+        list = filtered
+        st.modelsByDepth[depth] = list
         local df = Instance.new("Frame")
         df.BackgroundTransparency = 1
         df.Size = UDim2.new(1,0,0,0)
@@ -1366,8 +1380,11 @@ local function renderModels()
             row.BackgroundTransparency = 1
             row.Parent = df
             dropdown(row, popupHost, "", st.modelLibrary, table.find(st.modelLibrary, ref) or 1, function(opt)
-                list[i] = tostring(opt):gsub("^%s*(.-)%s*$","%1")
-                LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                local cleaned = tostring(opt):gsub("^%s*(.-)%s*$","%1")
+                if ModelResolver.ResolveOne(cleaned) then
+                    list[i] = cleaned
+                    LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+                end
             end)
             local up = makeBtn(row, "^", function()
                 if i>1 then list[i],list[i-1]=list[i-1],list[i]; renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil) end
@@ -1393,9 +1410,11 @@ local function renderModels()
         local addBtn = makeBtn(df, "Add", function()
             local ref = st.modelLibrary[1]
             if ref == nil then return end
-            st.modelsByDepth[depth] = list
-            table.insert(list, ref)
-            renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            if ModelResolver.ResolveOne(ref) then
+                st.modelsByDepth[depth] = list
+                table.insert(list, ref)
+                renderModels(); LoomDesigner.ApplyAuthoring(); LoomDesigner.RebuildPreview(nil)
+            end
         end)
         addBtn.Size = UDim2.new(0,60,0,24)
         local hasLib = (#st.modelLibrary > 0)
