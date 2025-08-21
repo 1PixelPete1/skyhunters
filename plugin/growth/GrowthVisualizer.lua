@@ -591,19 +591,12 @@ function GrowthVisualizer.Render(container, loomState)
         end
 
         local depth = chain.depth
-        local rules = prof.children
-        local depthRules
-        if rules then
-            depthRules = rules[depth]
-            if not depthRules and type(rules[1]) == "table" and rules[1].name then
-                depthRules = rules
-            end
-        end
-        if depthRules and depth < branchDepthMax then
+        local children = prof.children
+        if children and depth < branchDepthMax then
             local lastSeg = segRefs[segCount]
             local parentRot = chain.startCF.Rotation
             local basePos = chain.startCF.Position
-            for pIdx, pick in ipairs(depthRules) do
+            for pIdx, pick in ipairs(children) do
                 local count = pick.count or 1
                 local intCount = math.floor(count)
                 local extra = count - intCount

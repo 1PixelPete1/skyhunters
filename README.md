@@ -18,75 +18,28 @@ For more help, check out [the Rojo documentation](https://rojo.space/docs).
 
 ## Branching
 
-The growth system uses **branch assignments** to control which profiles spawn at each depth.
-Depth `0` represents the trunk; each generation of branches increases the depth by one.
-
-### Existing depth-driven rules
-
-- **`perDepth`** – list of profile choices for each depth. At depth `n`, the system selects from `perDepth[n]` using weighted chances.
-- **`spacingN`** – minimum number of segments between branches at depth `n`.
-- **`maxPerDepth`** – maximum branches that may spawn at depth `n`.
-- **`branchCap`** – global limit on branch count across all depths (defaults to 2).
-
-Example:
+Growth profiles can declare their own children. Each profile's `children` field is
+an array of entries describing which profiles to spawn and how to place them.
 
 ```lua
+profiles = {
+  trunk = {
+    kind = "curved",
+    children = {
+      { name = "branchA", count = 2, placement = "tip", rotation = "upright" },
+      { name = "branchB", count = 1, placement = "junction", rotation = "inherit" },
+    },
+  },
+  branchA = { kind = "zigzag" },
+  branchB = { kind = "straight" },
+}
+
 branchAssignments = {
   trunkProfile = "trunk",
   branchCap = 2,
-  perDepth = {
-    [1] = { {name = "branchA", chance = 0.7}, {name = "branchB", chance = 0.3} },
-    [2] = { {name = "twig", chance = 1.0} }
-  },
-  spacingN = { [1] = 3, [2] = 2 },
-  maxPerDepth = { [1] = 4 }
 }
 ```
 
-`spacingN` and `maxPerDepth` work together: `spacingN[n]` enforces a minimum gap between branch origins at depth `n`, while `maxPerDepth[n]` caps how many branches may appear at that depth. Once the global `branchCap` is reached, no additional branches spawn. By default the system permits two branches unless these values are overridden.
-
-### Upcoming hierarchical model
-
-Planned work will replace depth arrays with a hierarchical tree where each branch declares its children. Rules cascade from parent to child unless overridden.
-
-```lua
-branchAssignments = {
-  trunkProfile = "trunk",
-  branches = {
-    {
-      name = "branchA",
-      children = {
-        { name = "twig", chance = 1.0 }
-      }
-    },
-    { name = "branchB" }
-  }
-}
-```
-
-This model supports complex growth patterns and is intended for future expansion.
-
-### Assignments UI
-
-The plugin's Assignments panel will evolve from a depth-driven layout to a hierarchical tree.
-
-#### Current UI
-
-```mermaid
-flowchart TD
-    depth1[Depth 1\nperDepth[1]] --> spacing1[spacingN[1]]
-    depth1 --> max1[maxPerDepth[1]]
-    depth2[Depth 2\nperDepth[2]]
-```
-
-#### Planned UI
-
-```mermaid
-graph TD
-    Trunk[Trunk Profile]
-    Trunk --> A[Branch A]
-    A --> Twig[Twig]
-    Trunk --> B[Branch B]
-```
-
-These diagrams illustrate the transition from depth-based controls to a nested hierarchy.
+Each child entry specifies a profile `name`, spawn `count`, and optional `placement`
+and `rotation`. The `GrowthVisualizer` walks this hierarchy, spawning branches
+according to the rules of each parent profile.

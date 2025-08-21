@@ -369,7 +369,7 @@ local function applyAuthoring()
         end
 
         local authored = {
-                profiles = state.savedProfiles,
+               profiles = DC(state.savedProfiles),
                 branchAssignments = state.branchAssignments,
                 models = {
                         byDepth = state.modelsByDepth,
