@@ -78,3 +78,19 @@ branchAssignments = {
 
 In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
 Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
+
+### LoomDesigner UI Flow
+
+```
+LoomDesigner.UI
+└─ Profile Editor
+   └─ Children section
+      ├─ [Add Child] / [Remove]
+      └─ count, placement, rotation fields
+            ↓
+state.profileDrafts[profile].children
+            ↓
+Main.CommitProfileEdit()
+   ├─ ApplyAuthoring()
+   └─ RebuildPreview()
+```
