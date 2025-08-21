@@ -253,37 +253,46 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                 st.savedProfiles[draftName] = DC(draftTable)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
        end
+       if _commitTimer then task.cancel(_commitTimer) end
+
+       local merged = applyAuthoring()
+       if not merged then
+               warn(string.format("[LoomDesigner] Failed to merge profile '%s'; trunk unchanged", tostring(draftName)))
+               return
+       end
+
        st.branchAssignments = st.branchAssignments or {}
        local trunk = st.branchAssignments.trunkProfile
        if trunk == nil or trunk == "" then
                st.branchAssignments.trunkProfile = draftName
-               trunk = draftName
-       end
-       if st.savedProfiles[trunk] == nil then
+       elseif st.savedProfiles[trunk] == nil then
                st.branchAssignments.trunkProfile = st.activeProfileName
        end
-       ensureTrunk(st, st.activeProfileName)
 
-        if _commitTimer then task.cancel(_commitTimer) end
-        _commitTimer = task.delay(0.1, function()
-                LoomDesigner.ApplyAuthoring()
-                local cfgId = state.configId
-                local trunkName = state.branchAssignments and state.branchAssignments.trunkProfile
-                local hasProfile = LoomConfigs
-                        and LoomConfigs[cfgId]
-                        and LoomConfigs[cfgId].profiles
-                        and LoomConfigs[cfgId].profiles[trunkName]
-                if hasProfile then
-                        LoomDesigner.RebuildPreview(nil)
-                else
-                        warn(string.format(
-                                "[LoomDesigner] Missing profile '%s' for config '%s'; skipping preview",
-                                tostring(trunkName),
-                                tostring(cfgId)
-                        ))
-                end
-                _commitTimer = nil
-        end)
+       _commitTimer = task.delay(0.1, function()
+               local cfg = applyAuthoring()
+               if not cfg then
+                       warn(string.format("[LoomDesigner] Failed to merge profile '%s'; skipping preview", tostring(draftName)))
+                       _commitTimer = nil
+                       return
+               end
+               local cfgId = state.configId
+               local trunkName = state.branchAssignments and state.branchAssignments.trunkProfile
+               local hasProfile = LoomConfigs
+                       and LoomConfigs[cfgId]
+                       and LoomConfigs[cfgId].profiles
+                       and LoomConfigs[cfgId].profiles[trunkName]
+               if hasProfile then
+                       LoomDesigner.RebuildPreview(nil)
+               else
+                       warn(string.format(
+                               "[LoomDesigner] Missing profile '%s' for config '%s'; skipping preview",
+                               tostring(trunkName),
+                               tostring(cfgId)
+                       ))
+               end
+               _commitTimer = nil
+       end)
 end
 
 function LoomDesigner.SetOverrides(overrides)
@@ -357,7 +366,6 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
-       ensureTrunk(state, state.activeProfileName)
         local cfgId = resolveConfigId(LoomConfigs, state.configId)
         if not cfgId then return end
         state.configId = cfgId
@@ -383,6 +391,7 @@ local function applyAuthoring()
         local merged = LoomConfigUtil.mergeConfig(base, authored)
 
         LoomConfigs[cfgId] = merged
+       ensureTrunk(state, state.activeProfileName)
         return merged
 end
 
