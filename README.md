@@ -43,3 +43,38 @@ branchAssignments = {
 Each child entry specifies a profile `name`, spawn `count`, and optional `placement`
 and `rotation`. The `GrowthVisualizer` walks this hierarchy, spawning branches
 according to the rules of each parent profile.
+
+### Depth progression
+
+Branches track how far they are from the trunk using a `depth` counter. The
+trunk starts at depth `0` and each child increases this depth by `1`.
+`branchDepthMax` limits how deep the hierarchy can grow.
+
+Profiles can provide different child rules for each depth by indexing the
+`children` table with the parent's depth:
+
+```lua
+profiles = {
+  trunk = {
+    kind = "curved",
+    children = {
+      [0] = { -- depth 0 parents spawn branches at depth 1
+        { name = "branchA", count = 2 },
+      },
+      [1] = { -- depth 1 parents spawn branches at depth 2
+        { name = "branchB", count = 1 },
+      },
+    },
+  },
+  branchA = { kind = "zigzag" },
+  branchB = { kind = "straight" },
+}
+
+branchAssignments = {
+  trunkProfile = "trunk",
+  branchCap = 2,
+}
+```
+
+In this example, the trunk (depth 0) grows two `branchA` chains at depth 1.
+Each `branchA` then follows the `[1]` rules, producing one `branchB` at depth 2.
