@@ -291,13 +291,15 @@ function ensureTrunk(st, newProfileName)
                 normalizeChildren(prof, n)
         end
        st.branchAssignments = st.branchAssignments or {}
-       st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
+       -- only wrap once; retain existing proxy if present
+       if getmetatable(st.branchAssignments) == nil then
+               st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
+       end
        local trunk = st.branchAssignments.trunkProfile
-        if trunk == nil or trunk == "" then
-                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
-        elseif first and not st.savedProfiles[trunk] then
-                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
-        end
+       local fallback = newProfileName or first or "trunk"
+       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
+               st.branchAssignments.trunkProfile = fallback
+       end
 end
 
 -- Wrap local helpers for traceable entry/exit
@@ -334,13 +336,9 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
        end
 
-       st.branchAssignments = st.branchAssignments or {}
-       local trunk = st.branchAssignments.trunkProfile
-       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
-                st.branchAssignments.trunkProfile = draftName
-       end
+ensureTrunk(st, draftName)
 
-       if _commitTimer then task.cancel(_commitTimer) end
+if _commitTimer then task.cancel(_commitTimer) end
 
        -- Apply authoring after updating LoomConfig and trunk
        local f = LoomDesigner.ApplyAuthoring
