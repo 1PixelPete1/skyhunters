@@ -312,7 +312,6 @@ end)
 updateSpawnLabel()
 
 -- === Sections ===
-local secConfig   = makeSection(scroll, "Branch Config")
 local secSeed     = makeSection(scroll, "Seed / Randomness")
 local secGrowth   = makeSection(scroll, "Growth Progression")
 local secSeg      = makeSection(scroll, "Segment Overrides")
@@ -332,29 +331,6 @@ local selectedBranch: string? = nil
 local renderBranchLibrary
 local renderBranchTree
 
--- Config dropdown (list from LoomConfigs keys)
-local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-local LoomConfigUtil = require(game.ReplicatedStorage.looms.LoomConfigUtil)
-
-local function listConfigIds()
-    local ids = {}
-    for k, v in pairs(LoomConfigs) do
-        if type(v) == "table" then table.insert(ids, k) end
-    end
-    table.sort(ids)
-    return ids
-end
-
-local configIds = listConfigIds()
-
-dropdown(secConfig, popupHost, "Config", configIds, 1, function(id)
-    if type(LoomConfigs[id]) ~= "table" then
-        warn("[LoomDesigner] Ignoring non-table config key: " .. tostring(id))
-    else
-        LoomDesigner.SetConfigId(id)
-        LoomDesigner.RebuildPreview(nil)
-    end
-end)
 
 local seedLabel
 local seedBox = labeledTextBox(secSeed, "Seed", tostring(LoomDesigner.GetSeed()), function(txt)
