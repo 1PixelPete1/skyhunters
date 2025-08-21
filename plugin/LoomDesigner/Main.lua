@@ -216,7 +216,7 @@ deepCopy = FT.fn("Main.deepCopy", deepCopy)
 
 local _commitTimer: thread? = nil
 
-function ensureTrunk(st)
+function ensureTrunk(st, newProfileName)
         st.savedProfiles = st.savedProfiles or {}
         local first
         for n, prof in pairs(st.savedProfiles) do
@@ -225,10 +225,12 @@ function ensureTrunk(st)
                         prof.children = {}
                 end
         end
-        st.branchAssignments = st.branchAssignments or { trunkProfile = first or "trunk" }
+        st.branchAssignments = st.branchAssignments or {}
         local trunk = st.branchAssignments.trunkProfile
-        if (trunk == nil) or (trunk == "") or (first and not st.savedProfiles[trunk]) then
-                st.branchAssignments.trunkProfile = first or "trunk"
+        if trunk == nil or trunk == "" then
+                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
+        elseif first and not st.savedProfiles[trunk] then
+                st.branchAssignments.trunkProfile = newProfileName or first or "trunk"
         end
 end
 
@@ -248,6 +250,11 @@ function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
                 draftTable.children = DC(draftTable.children or {})
                 st.savedProfiles[draftName] = DC(draftTable)
                 FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
+        end
+        local trunk = st.branchAssignments and st.branchAssignments.trunkProfile
+        if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
+                st.branchAssignments = st.branchAssignments or {}
+                st.branchAssignments.trunkProfile = st.activeProfileName
         end
         ensureTrunk(st)
 
@@ -277,7 +284,7 @@ function LoomDesigner.CreateProfile(name: string, profile)
         profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1 }
         profile.children = profile.children or {}
         state.savedProfiles[name] = profile
-        ensureTrunk(state)
+        ensureTrunk(state, name)
 end
 
 function LoomDesigner.DeleteProfile(name: string)
