@@ -2,6 +2,7 @@
 local RequireUtil = require(script.Parent.RequireUtil)
 local LoomDesigner = require(script.Parent.Main)
 local FlowTrace = require(script.Parent.FlowTrace)
+local ModelResolver = require(script.Parent.ModelResolver)
 
 local UI = {}
 
@@ -1185,16 +1186,36 @@ local function renderModels()
     libLabel.TextXAlignment = Enum.TextXAlignment.Left
     libLabel.Parent = secModels
 
+    local warnLabel = Instance.new("TextLabel")
+    warnLabel.Text = "Asset not found"
+    warnLabel.TextColor3 = Color3.fromRGB(255,100,100)
+    warnLabel.BackgroundTransparency = 1
+    warnLabel.Size = UDim2.new(1,0,0,20)
+    warnLabel.TextXAlignment = Enum.TextXAlignment.Left
+    warnLabel.Visible = false
+    warnLabel.Parent = secModels
+
+    local function tryAdd(ref)
+        local inst, err = ModelResolver.ResolveOne(ref)
+        if inst then
+            table.insert(st.modelLibrary, ref)
+            renderModels()
+        else
+            warnLabel.Visible = true
+        end
+    end
+
     labeledTextBox(secModels, "Add by Name", "", function(txt)
         if txt ~= "" then
             local cleaned = (tostring(txt):gsub("^%s*(.-)%s*$","%1"))
-            table.insert(st.modelLibrary, cleaned)
-            renderModels()
+            tryAdd(cleaned)
         end
     end)
     labeledTextBox(secModels, "Add AssetId", "", function(txt)
         local n = tonumber(txt)
-        if n then table.insert(st.modelLibrary, n); renderModels() end
+        if n then
+            tryAdd(n)
+        end
     end)
 
     if #st.modelLibrary == 0 then
@@ -1211,12 +1232,40 @@ local function renderModels()
         row.Size = UDim2.new(1,0,0,24)
         row.BackgroundTransparency = 1
         row.Parent = secModels
+        local inst = ModelResolver.ResolveOne(ref)
+        local nameText = inst and string.format("%s (%s)", tostring(ref), inst.Name) or tostring(ref)
+        if inst then
+            local preview = Instance.new("ViewportFrame")
+            preview.Size = UDim2.new(0,24,1,0)
+            preview.BackgroundTransparency = 1
+            preview.Parent = row
+            local cam = Instance.new("Camera")
+            cam.Parent = preview
+            preview.CurrentCamera = cam
+            local model
+            if inst:IsA("Model") then
+                model = inst
+            else
+                model = Instance.new("Model")
+                inst.Parent = model
+            end
+            model:PivotTo(CFrame.new())
+            local _, size = model:GetBoundingBox()
+            local s = math.max(size.X, size.Y, size.Z)
+            cam.CFrame = CFrame.new(Vector3.new(s, s, s), Vector3.new())
+            model.Parent = preview
+        end
         local lab = Instance.new("TextLabel")
-        lab.Text = tostring(ref)
+        lab.Text = nameText
         lab.BackgroundTransparency = 1
         lab.TextColor3 = Color3.fromRGB(200,200,200)
-        lab.Size = UDim2.new(1,-30,1,0)
         lab.TextXAlignment = Enum.TextXAlignment.Left
+        if inst then
+            lab.Size = UDim2.new(1,-54,1,0)
+            lab.Position = UDim2.new(0,30,0,0)
+        else
+            lab.Size = UDim2.new(1,-30,1,0)
+        end
         lab.Parent = row
         local del = Instance.new("TextButton")
         del.Text = "X"
