@@ -840,9 +840,7 @@ renderProfileEditor = function()
     end
 
     local function commit()
-        LoomDesigner.CommitProfileEdit(selectedProfile, draft)
-        LoomDesigner.ApplyAuthoring()
-        LoomDesigner.RebuildPreview(nil)
+        commitAndRebuild()
     end
 
     local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
