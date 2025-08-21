@@ -114,6 +114,23 @@ state.profileDrafts = select(1, FT.watchTable("state.profileDrafts", state.profi
 state.overrides = select(1, FT.watchTable("state.overrides", state.overrides))
 state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
 
+-- independent branch design + assignment state for migration
+local newState = {
+    baseSeed = 12345,
+    g = 50,
+    branches = {},
+    assignments = {
+        trunk = "",
+        children = {},
+    },
+}
+
+-- watch newState tables for trace logging
+newState = select(1, FT.watchTable("newState", newState))
+newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
+newState.assignments = select(1, FT.watchTable("newState.assignments", newState.assignments))
+newState.assignments.children = select(1, FT.watchTable("newState.assignments.children", newState.assignments.children))
+
 local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
@@ -413,6 +430,54 @@ function LoomDesigner.RenameProfile(oldName: string, newName: string)
                 end
                 LoomDesigner.CommitProfileEdit(newName, state.profileDrafts and state.profileDrafts[newName] or state.savedProfiles[newName])
         end
+end
+
+-- branch layout helpers -----------------------------------------------------
+function LoomDesigner.CreateBranch(name: string, design)
+        design = design or { kind = "straight" }
+        newState.branches[name] = DC(design)
+end
+
+function LoomDesigner.DeleteBranch(name: string)
+        newState.branches[name] = nil
+        if newState.assignments.trunk == name then
+                newState.assignments.trunk = ""
+        end
+        for i = #newState.assignments.children, 1, -1 do
+                local a = newState.assignments.children[i]
+                if a.parent == name or a.child == name then
+                        table.remove(newState.assignments.children, i)
+                end
+        end
+end
+
+function LoomDesigner.RenameBranch(oldName: string, newName: string)
+        if newState.branches[oldName] then
+                newState.branches[newName] = newState.branches[oldName]
+                newState.branches[oldName] = nil
+                if newState.assignments.trunk == oldName then
+                        newState.assignments.trunk = newName
+                end
+                for _, a in ipairs(newState.assignments.children) do
+                        if a.parent == oldName then a.parent = newName end
+                        if a.child == oldName then a.child = newName end
+                end
+        end
+end
+
+function LoomDesigner.EditBranch(name: string, patch)
+        local branch = newState.branches[name]
+        if branch and patch then
+                deepMerge(branch, patch)
+        end
+end
+
+function LoomDesigner.GetBranches()
+        local copy = {}
+        for k, v in pairs(newState.branches) do
+                copy[k] = v
+        end
+        return copy
 end
 
 -- export/import -------------------------------------------------------------
