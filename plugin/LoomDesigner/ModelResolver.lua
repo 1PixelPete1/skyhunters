@@ -26,7 +26,18 @@ local function getModelsFolder()
 end
 
 function ModelResolver.ResolveOne(ref)
-    if type(ref) == "string" then
+    if typeof(ref) == "Instance" then
+        if ref:IsA("Model") or ref:IsA("Folder") or ref:IsA("BasePart") or ref:IsA("Accessory") then
+            return ref:Clone(), nil
+        end
+        local wrap = Instance.new("Model")
+        wrap.Name = ref.Name
+        local c = ref:Clone()
+        c.Parent = wrap
+        local pp = c:IsA("BasePart") and c or wrap:FindFirstChildWhichIsA("BasePart", true)
+        if pp then (wrap :: any).PrimaryPart = pp end
+        return wrap, nil
+    elseif type(ref) == "string" then
         local folder = getModelsFolder()
         local wanted = tostring(ref):gsub("^%s*(.-)%s*$", "%1")
         if folder then
