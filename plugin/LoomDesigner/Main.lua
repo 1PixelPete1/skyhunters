@@ -23,7 +23,7 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
-local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs
     or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
 if not LoomConfigs then
     FT.warn("LC.missing", "could not resolve looms/LoomConfigs; using stub")
@@ -80,18 +80,6 @@ newState.assignments = select(1, FT.watchTable("newState.assignments", newState.
 newState.assignments.children = select(1, FT.watchTable("newState.assignments.children", newState.assignments.children))
 newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
 
-ensureTrunk = function()
-        if next(newState.branches) == nil then
-                newState.branches["branch1"] = {kind = "straight"}
-                newState.assignments.trunk = "branch1"
-        elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
-                for name in pairs(newState.branches) do
-                        newState.assignments.trunk = name
-                        break
-                end
-        end
-end
-
 local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
@@ -111,13 +99,16 @@ end
 function LoomDesigner.Start(plugin)
         print("LoomDesigner plugin started", plugin)
 
-        -- read optional tag filter from plugin settings then init tracer
+        -- read optional tag filter and enable flag from plugin settings then init tracer
         local tagAllow
+        local enabled = false
         if plugin and plugin.GetSetting then
                 local ok, tags = pcall(plugin.GetSetting, plugin, "ld.ft.tags")
                 if ok then tagAllow = tags end
+                local okEnabled, en = pcall(plugin.GetSetting, plugin, "ld.ft.enabled")
+                if okEnabled then enabled = en end
         end
-        FT.init({enabled = true, tagAllow = tagAllow, maxStr = 160})
+        FT.init({enabled = enabled, tagAllow = tagAllow, maxStr = 160})
 
         -- checkpoint at start: do we have a GrowthVisualizer module?
         FT.check("Start.begin", {hasGV = GrowthVisualizer ~= nil})
@@ -130,7 +121,10 @@ function LoomDesigner.Start(plugin)
         end
 
         -- ensure a default branch exists for editing
-        ensureTrunk()
+        if next(newState.branches) == nil then
+                newState.branches["branch1"] = {kind = "straight"}
+                newState.assignments.trunk = "branch1"
+        end
 
         return newState
 end
@@ -320,28 +314,8 @@ function LoomDesigner.ExportAuthoring()
         }
 end
 
-function LoomDesigner.ImportAuthoring(cfg, reset)
+function LoomDesigner.ImportAuthoring(cfg)
         cfg = cfg or {}
-        if reset ~= false then
-                newState.modelsByDepth = {}
-                newState.modelLibrary = {}
-                newState.overrides = {
-                        materialization = { mode = "Model" },
-                        rotationRules = {},
-                        decorations = { enabled = false, types = {} },
-                }
-        end
-        if cfg.models and cfg.models.byDepth then
-                newState.modelsByDepth = DC(cfg.models.byDepth)
-        end
-        if cfg.overrides then
-                newState.overrides = DC(cfg.overrides)
-        end
-        newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
-        newState.overrides = select(1, FT.watchTable("newState.overrides", newState.overrides))
-        rebuildLibraries()
-        newState.modelLibrary = select(1, FT.watchTable("newState.modelLibrary", newState.modelLibrary))
-
         newState.branches = DC(cfg.branches or {})
         newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
         newState.assignments = DC(cfg.assignments or {trunk = "", children = {}})
@@ -350,8 +324,15 @@ function LoomDesigner.ImportAuthoring(cfg, reset)
                 1,
                 FT.watchTable("newState.assignments.children", newState.assignments.children)
         )
-        ensureTrunk()
-
+        if next(newState.branches) == nil then
+                newState.branches["branch1"] = {kind = "straight"}
+                newState.assignments.trunk = "branch1"
+        elseif not newState.assignments.trunk or newState.assignments.trunk == "" then
+                for name in pairs(newState.branches) do
+                        newState.assignments.trunk = name
+                        break
+                end
+        end
 end
 
 LoomDesigner.ApplyAuthoring = applyAuthoring
@@ -422,12 +403,13 @@ local function renderBranch(name, depth)
 end
 
 function LoomDesigner.RebuildPreview(_container)
-       ensureTrunk()
-
-       -- clear any stale preview configs from previous runs
-       for id in pairs(LoomConfigs) do
-               if type(id) == "string" and id:match("^__ld_preview_") then
-                       LoomConfigs[id] = nil
+       if next(newState.branches) == nil then
+               newState.branches["branch1"] = {kind = "straight"}
+               newState.assignments.trunk = "branch1"
+       elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
+               for name in pairs(newState.branches) do
+                       newState.assignments.trunk = name
+                       break
                end
        end
 
