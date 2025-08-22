@@ -417,7 +417,7 @@ local function getVisual(loomUid)
     return v
 end
 
-local function renderSegments(scene, cfg, segments)
+local function renderSegments(scene, cfg, segments, chainMap)
     if not scene or not scene.Spawn then
         return
     end
@@ -429,6 +429,7 @@ local function renderSegments(scene, cfg, segments)
         else
             size = Vector3.new(seg.thickness, seg.length, seg.thickness)
         end
+        local branchName = (chainMap and chainMap[seg.chainId] and chainMap[seg.chainId].profileName) or "trunk"
         scene.Spawn({
             class = "Part",
             shape = shape,
@@ -439,6 +440,12 @@ local function renderSegments(scene, cfg, segments)
             anchored = true,
             canCollide = false,
             name = "Segment",
+            attributes = {
+                BranchName = branchName,
+                ChainId = seg.chainId,
+                Depth = seg.depth or 0,
+                Index = seg.index or 1,
+            },
         })
     end
 end
@@ -696,6 +703,7 @@ function GrowthVisualizer.Render(container, loomState)
                 else
                     size = Vector3.new(seg.thickness, seg.length, seg.thickness)
                 end
+                local branchName = (chainMap[seg.chainId] and chainMap[seg.chainId].profileName) or "trunk"
                 scene.Spawn({
                     class = "Part",
                     shape = shape,
@@ -706,6 +714,12 @@ function GrowthVisualizer.Render(container, loomState)
                     anchored = true,
                     canCollide = false,
                     name = "Segment",
+                    attributes = {
+                        BranchName = branchName,
+                        ChainId = seg.chainId,
+                        Depth = seg.depth or 0,
+                        Index = seg.index or 1,
+                    },
                 })
             end
             for _, seg in ipairs(segOut) do
@@ -721,13 +735,23 @@ function GrowthVisualizer.Render(container, loomState)
                     inst = scene.ResolveModel(list, { select = function(L) return L[idx] end })
                 end
                 if inst then
-                    scene.Spawn({ instance = inst, cframe = seg.cframe })
+                    local branchName = (chainMap[seg.chainId] and chainMap[seg.chainId].profileName) or "trunk"
+                    scene.Spawn({
+                        instance = inst,
+                        cframe = seg.cframe,
+                        attributes = {
+                            BranchName = branchName,
+                            ChainId = seg.chainId,
+                            Depth = seg.depth or 0,
+                            Index = seg.index or 1,
+                        },
+                    })
                 else
                     spawnPart(seg)
                 end
             end
         else
-            renderSegments(scene, partCfg, segOut)
+            renderSegments(scene, partCfg, segOut, chainMap)
         end
 
         placeDecorations(scene, baseSeed, segOut, config, overrides, partCfg)
