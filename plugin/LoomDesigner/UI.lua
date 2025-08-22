@@ -25,6 +25,51 @@ local KIND_FIELDS = {
     },
 }
 
+local GLOBAL_FIELDS = {
+    {
+        kind = "number",
+        label = "Base Seed",
+        get = function()
+            return LoomDesigner.GetSeed and LoomDesigner.GetSeed()
+        end,
+        set = function(v)
+            if LoomDesigner.SetSeed then LoomDesigner.SetSeed(v) end
+        end,
+    },
+    {
+        kind = "number",
+        label = "Segment Count",
+        get = function()
+            return GrowthStylesCore.GetParam("segmentCount")
+        end,
+        set = function(v)
+            GrowthStylesCore.SetParam("segmentCount", v)
+        end,
+    },
+    {
+        kind = "dropdown",
+        label = "Rotation Rules",
+        options = {"auto","accumulate","absolute"},
+        get = function()
+            if LoomDesigner.GetRotationContinuity then
+                local mode = LoomDesigner.GetRotationContinuity()
+                if mode == "accumulate" then return 2 end
+                if mode == "absolute" then return 3 end
+            end
+            return 1
+        end,
+        set = function(opt)
+            if LoomDesigner.SetRotationContinuity then
+                if opt == "auto" then
+                    LoomDesigner.SetRotationContinuity(nil)
+                else
+                    LoomDesigner.SetRotationContinuity(opt)
+                end
+            end
+        end,
+    },
+}
+
 local function makeList(parent: Instance): Frame
     local frame = Instance.new("Frame")
     frame.BackgroundTransparency = 1
@@ -163,14 +208,27 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     modeBtn.Size = UDim2.new(0,160,0,24)
     modeBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
     modeBtn.TextColor3 = Color3.new(1,1,1)
+    modeBtn.LayoutOrder = 1
     modeBtn.Parent = container
+
+    local helperLabel = Instance.new("TextLabel")
+    helperLabel.BackgroundTransparency = 1
+    helperLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    helperLabel.Text = "Create or select a branch to edit."
+    helperLabel.Size = UDim2.new(1,0,0,24)
+    helperLabel.LayoutOrder = 5
+    helperLabel.Parent = container
+
+    local branchControls = makeList(container)
+    branchControls.LayoutOrder = 6
+    branchControls.Visible = false
 
     local kinds = LoomDesigner and LoomDesigner.SUPPORTED_KIND_LIST
     if type(kinds) ~= "table" or #kinds == 0 then
         kinds = FALLBACK_KINDS
     end
 
-    local paramsFrame = makeList(container)
+    local paramsFrame = makeList(branchControls)
 
     local function renderFields()
         for _,c in ipairs(paramsFrame:GetChildren()) do
@@ -186,9 +244,22 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
                 end)
             end
         end
+        for _,entry in ipairs(GLOBAL_FIELDS) do
+            if entry.kind == "number" then
+                numberField(paramsFrame, entry.label, entry.get(), function(v)
+                    entry.set(v)
+                    GrowthStylesCore.ApplyPreview()
+                end)
+            elseif entry.kind == "dropdown" then
+                labeledDropdown(paramsFrame, popupHost, entry.label, entry.options, entry.get(), function(opt)
+                    entry.set(opt)
+                    GrowthStylesCore.ApplyPreview()
+                end)
+            end
+        end
     end
 
-    labeledDropdown(container, popupHost, "Kind", kinds, 1, function(opt)
+    labeledDropdown(branchControls, popupHost, "Kind", kinds, 1, function(opt)
         GrowthStylesCore.SetKind(opt)
         renderFields()
         GrowthStylesCore.ApplyPreview()
@@ -196,6 +267,35 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
 
     renderFields()
     GrowthStylesCore.ApplyPreview()
+
+    local delBtn = Instance.new("TextButton")
+    delBtn.Text = "Delete Branch"
+    delBtn.Size = UDim2.new(0,160,0,24)
+    delBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    delBtn.TextColor3 = Color3.new(1,1,1)
+    delBtn.Parent = branchControls
+
+    local trunkBtn = Instance.new("TextButton")
+    trunkBtn.Text = "Set as Trunk"
+    trunkBtn.Size = UDim2.new(0,160,0,24)
+    trunkBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    trunkBtn.TextColor3 = Color3.new(1,1,1)
+    trunkBtn.Parent = branchControls
+
+    local attachBtn = Instance.new("TextButton")
+    attachBtn.Text = "Attach Child"
+    attachBtn.Size = UDim2.new(0,160,0,24)
+    attachBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    attachBtn.TextColor3 = Color3.new(1,1,1)
+    attachBtn.Parent = branchControls
+
+    local applyBtn = Instance.new("TextButton")
+    applyBtn.Text = "Apply to Trunk"
+    applyBtn.Size = UDim2.new(0,160,0,24)
+    applyBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    applyBtn.TextColor3 = Color3.new(1,1,1)
+    applyBtn.Visible = false
+    applyBtn.Parent = branchControls
 
     local started = false
     local function ensureStart()
@@ -235,10 +335,10 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
         branchDropdownBtn = labeledDropdown(container, popupHost, "Branch", names, defaultIndex, function(opt)
             selectedBranch = opt
+            updateBranchUI()
         end)
         selectedBranch = names[defaultIndex]
     end
-    refreshBranchDropdown()
 
     local addBtn = Instance.new("TextButton")
     addBtn.Text = "Add Branch"
@@ -262,12 +362,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         refreshBranchDropdown(name)
     end)
 
-    local delBtn = Instance.new("TextButton")
-    delBtn.Text = "Delete Branch"
-    delBtn.Size = UDim2.new(0,160,0,24)
-    delBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    delBtn.TextColor3 = Color3.new(1,1,1)
-    delBtn.Parent = container
     delBtn.MouseButton1Click:Connect(function()
         ensureStart()
         if selectedBranch and LoomDesigner.DeleteBranch then
@@ -277,12 +371,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
-    local trunkBtn = Instance.new("TextButton")
-    trunkBtn.Text = "Set as Trunk"
-    trunkBtn.Size = UDim2.new(0,160,0,24)
-    trunkBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    trunkBtn.TextColor3 = Color3.new(1,1,1)
-    trunkBtn.Parent = container
     trunkBtn.MouseButton1Click:Connect(function()
         ensureStart()
         if selectedBranch and LoomDesigner.SetTrunk then
@@ -294,12 +382,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
-    local attachBtn = Instance.new("TextButton")
-    attachBtn.Text = "Attach Child"
-    attachBtn.Size = UDim2.new(0,160,0,24)
-    attachBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    attachBtn.TextColor3 = Color3.new(1,1,1)
-    attachBtn.Parent = container
     attachBtn.MouseButton1Click:Connect(function()
         ensureStart()
         if selectedBranch and LoomDesigner.AddChild then
@@ -314,14 +396,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             end
         end
     end)
-
-    local applyBtn = Instance.new("TextButton")
-    applyBtn.Text = "Apply to Trunk"
-    applyBtn.Size = UDim2.new(0,160,0,24)
-    applyBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    applyBtn.TextColor3 = Color3.new(1,1,1)
-    applyBtn.Visible = false
-    applyBtn.Parent = container
 
     applyBtn.MouseButton1Click:Connect(function()
         ensureStart()
@@ -353,6 +427,56 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         if LoomDesigner.ApplyAuthoringAndPreview then
             LoomDesigner.ApplyAuthoringAndPreview(nil)
         end
+    end)
+
+    local addBtn = Instance.new("TextButton")
+    addBtn.Text = "Add Branch"
+    addBtn.Size = UDim2.new(0,160,0,24)
+    addBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    addBtn.TextColor3 = Color3.new(1,1,1)
+    addBtn.LayoutOrder = 3
+    addBtn.Parent = container
+    addBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local hadNone = not next(branches)
+        local i = 1
+        local name = "branch" .. i
+        while branches[name] do
+            i += 1
+            name = "branch" .. i
+        end
+        if LoomDesigner.CreateBranch then
+            LoomDesigner.CreateBranch(name, { kind = "straight" })
+        end
+        LoomDesigner.RebuildPreview()
+        refreshBranchDropdown(hadNone and name or nil)
+    end)
+
+    local quickBtn = Instance.new("TextButton")
+    quickBtn.Text = "New Branch + Author"
+    quickBtn.Size = UDim2.new(0,160,0,24)
+    quickBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    quickBtn.TextColor3 = Color3.new(1,1,1)
+    quickBtn.LayoutOrder = 4
+    quickBtn.Parent = container
+    quickBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local i = 1
+        local name = "branch" .. i
+        while branches[name] do
+            i += 1
+            name = "branch" .. i
+        end
+        if LoomDesigner.CreateBranch then
+            LoomDesigner.CreateBranch(name, { kind = "straight" })
+        end
+        LoomDesigner.RebuildPreview()
+        refreshBranchDropdown(name)
+        authoring = true
+        modeBtn.Text = "Mode: Authoring"
+        applyBtn.Visible = true
     end)
 
     modeBtn.MouseButton1Click:Connect(function()

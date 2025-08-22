@@ -9,6 +9,7 @@ This guide outlines how to access the plugin's `Main` module from the Roblox Stu
 
 ```lua
 -- Require the plugin folder (init.lua delegates to Main)
+
 local pluginFolder = plugin:WaitForChild("LoomDesigner")
 local LD = require(pluginFolder)
 
@@ -46,5 +47,25 @@ Render the current authoring state in the workspace:
 LD.RebuildPreview()
 ```
 
+### Additional Controls
+
+The UI exposes fields for base seed, segment count, and rotation rules. These can also be driven from the command bar:
+
+```lua
+-- Set deterministic seed used by the preview
+LD.SetSeed(12345)
+
+-- Override the number of segments rendered in the preview
+local GSC = require(pluginFolder.GrowthStylesCore)
+GSC.SetParam("segmentCount", 12)
+
+-- Choose how segment rotations accumulate ("accumulate" or "absolute")
+LD.SetRotationContinuity("absolute")
+```
+
 These snippets can be run directly from the command bar for quick iteration without opening the plugin UI.
+
+## Plugin UI Branch Creation
+
+The plugin's UI hides authoring controls until a branch is chosen. Use **Add Branch** to create a branch while staying in the current mode, or **New Branch + Author** to create a branch and immediately switch into authoring mode for it. When no branches exist, the first one you create is selected automatically.
 

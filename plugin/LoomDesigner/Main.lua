@@ -151,6 +151,18 @@ function LoomDesigner.SetGrowthPercent(g)
         newState.g = g
 end
 
+function LoomDesigner.SetRotationContinuity(mode)
+        if mode == nil or mode == "" then
+                newState.overrides.rotationRules.continuity = nil
+        else
+                newState.overrides.rotationRules.continuity = mode
+        end
+end
+
+function LoomDesigner.GetRotationContinuity()
+        return newState.overrides.rotationRules.continuity
+end
+
 local function deepMerge(dst, src)
         for k, v in pairs(src) do
                 if type(v) == "table" and type(dst[k]) == "table" then
