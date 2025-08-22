@@ -49,3 +49,7 @@ LD.RebuildPreview()
 
 These snippets can be run directly from the command bar for quick iteration without opening the plugin UI.
 
+## Plugin UI Branch Creation
+
+The plugin's UI hides authoring controls until a branch is chosen. Use **Add Branch** to create a branch while staying in the current mode, or **New Branch + Author** to create a branch and immediately switch into authoring mode for it. When no branches exist, the first one you create is selected automatically.
+
