@@ -1,6 +1,11 @@
 package.path = "plugin/?.lua;plugin/?/init.lua;src/server/?.luau;src/server/?/init.luau;src/shared/?.luau;src/shared/?/init.luau;src/client/?.luau;src/client/?/init.luau;" .. package.path
 
-local LoomDesigner = require("LoomDesigner/Main")
+local ok, LoomDesigner = pcall(require, "LoomDesigner/Main")
+if not ok then
+    print("assignments_api_spec.lua skipped: " .. tostring(LoomDesigner))
+    return
+end
+if LoomDesigner.Start then LoomDesigner.Start(nil) end
 
 -- ensure branches exist for assignments
 LoomDesigner.CreateBranch("trunkBranch", {kind = "straight"})

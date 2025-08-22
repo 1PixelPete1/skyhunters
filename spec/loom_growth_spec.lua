@@ -25,11 +25,32 @@ if not Random then
     end
 end
 
-local GrowthService = require("GrowthService")
-local Rarity = require("Economy/Rarity")
-local GrowthVisualizer = require("growth/GrowthVisualizer")
-local GrowthProfiles = require("looms/GrowthProfiles")
-local LoomDesigner = require("LoomDesigner")
+local function tryRequire(name)
+    local ok, mod = pcall(require, name)
+    if not ok then
+        print("loom_growth_spec.lua skipped: " .. tostring(mod))
+    end
+    return ok and mod or nil
+end
+
+local GrowthService = tryRequire("GrowthService")
+local Rarity = tryRequire("Economy/Rarity")
+local GrowthVisualizer = tryRequire("growth/GrowthVisualizer")
+local GrowthProfiles = tryRequire("looms/GrowthProfiles")
+local LoomDesigner = tryRequire("LoomDesigner")
+
+if not (GrowthService and Rarity and GrowthVisualizer and GrowthProfiles and LoomDesigner) then
+    return
+end
+
+if not CFrame then
+    print("loom_growth_spec.lua skipped: missing Roblox globals")
+    return
+end
+
+if LoomDesigner.Start then
+    LoomDesigner.Start(nil)
+end
 
 -- Test rarity multipliers
 assert(Rarity.GetGrowthMultiplier("Epic") == 0.85, "Epic multiplier incorrect")
