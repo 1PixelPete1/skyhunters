@@ -47,6 +47,22 @@ Render the current authoring state in the workspace:
 LD.RebuildPreview()
 ```
 
+### Additional Controls
+
+The UI exposes fields for base seed, segment count, and rotation rules. These can also be driven from the command bar:
+
+```lua
+-- Set deterministic seed used by the preview
+LD.SetSeed(12345)
+
+-- Override the number of segments rendered in the preview
+local GSC = require(pluginFolder.GrowthStylesCore)
+GSC.SetParam("segmentCount", 12)
+
+-- Choose how segment rotations accumulate ("accumulate" or "absolute")
+LD.SetRotationContinuity("absolute")
+```
+
 These snippets can be run directly from the command bar for quick iteration without opening the plugin UI.
 
 ## Plugin UI Branch Creation

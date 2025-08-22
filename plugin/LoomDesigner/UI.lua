@@ -25,6 +25,51 @@ local KIND_FIELDS = {
     },
 }
 
+local GLOBAL_FIELDS = {
+    {
+        kind = "number",
+        label = "Base Seed",
+        get = function()
+            return LoomDesigner.GetSeed and LoomDesigner.GetSeed()
+        end,
+        set = function(v)
+            if LoomDesigner.SetSeed then LoomDesigner.SetSeed(v) end
+        end,
+    },
+    {
+        kind = "number",
+        label = "Segment Count",
+        get = function()
+            return GrowthStylesCore.GetParam("segmentCount")
+        end,
+        set = function(v)
+            GrowthStylesCore.SetParam("segmentCount", v)
+        end,
+    },
+    {
+        kind = "dropdown",
+        label = "Rotation Rules",
+        options = {"auto","accumulate","absolute"},
+        get = function()
+            if LoomDesigner.GetRotationContinuity then
+                local mode = LoomDesigner.GetRotationContinuity()
+                if mode == "accumulate" then return 2 end
+                if mode == "absolute" then return 3 end
+            end
+            return 1
+        end,
+        set = function(opt)
+            if LoomDesigner.SetRotationContinuity then
+                if opt == "auto" then
+                    LoomDesigner.SetRotationContinuity(nil)
+                else
+                    LoomDesigner.SetRotationContinuity(opt)
+                end
+            end
+        end,
+    },
+}
+
 local function makeList(parent: Instance): Frame
     local frame = Instance.new("Frame")
     frame.BackgroundTransparency = 1
@@ -194,6 +239,19 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             for _,entry in ipairs(defs) do
                 numberField(paramsFrame, entry.label, GrowthStylesCore.GetParam(entry.key), function(v)
                     GrowthStylesCore.SetParam(entry.key, v)
+                    GrowthStylesCore.ApplyPreview()
+                end)
+            end
+        end
+        for _,entry in ipairs(GLOBAL_FIELDS) do
+            if entry.kind == "number" then
+                numberField(paramsFrame, entry.label, entry.get(), function(v)
+                    entry.set(v)
+                    GrowthStylesCore.ApplyPreview()
+                end)
+            elseif entry.kind == "dropdown" then
+                labeledDropdown(paramsFrame, popupHost, entry.label, entry.options, entry.get(), function(opt)
+                    entry.set(opt)
                     GrowthStylesCore.ApplyPreview()
                 end)
             end
