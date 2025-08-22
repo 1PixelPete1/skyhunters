@@ -396,10 +396,20 @@ local function renderBranch(name, depth)
                        end
                end
        end
+
+       -- remove preview config after render to avoid leaks
+       LoomConfigs[cfgId] = nil
 end
 
 function LoomDesigner.RebuildPreview(_container)
        ensureTrunk()
+
+       -- clear any stale preview configs from previous runs
+       for id in pairs(LoomConfigs) do
+               if type(id) == "string" and id:match("^__ld_preview_") then
+                       LoomConfigs[id] = nil
+               end
+       end
 
        local parent = ensurePreviewParent()
        clearExistingPreview(parent)
