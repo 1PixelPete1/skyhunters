@@ -236,10 +236,12 @@ end
 
 -- assignments API ------------------------------------------------------------
 function LoomDesigner.SetTrunk(name: string)
+        FT.log("Main.SetTrunk", "trunk=%s", tostring(name))
         newState.assignments.trunk = name
 end
 
 function LoomDesigner.AddChild(parent: string, child: string, placement: string, count: number)
+        FT.log("Main.AddChild", "parent=%s child=%s placement=%s count=%s", tostring(parent), tostring(child), tostring(placement), tostring(count))
         table.insert(newState.assignments.children, {
                 parent = parent,
                 child = child,
@@ -266,6 +268,28 @@ function LoomDesigner.GetAssignments()
 end
 
 -- export/import -------------------------------------------------------------
+function LoomDesigner.AddModel(depth: number, ref)
+        local d = math.floor(depth or 0)
+        local list = newState.modelsByDepth[d]
+        if not list then
+                list = {}
+                newState.modelsByDepth[d] = list
+        end
+        table.insert(list, ref)
+        FT.log("Main.AddModel", "depth=%d ref=%s", d, tostring(ref))
+end
+
+function LoomDesigner.GetModels()
+        local copy = {}
+        for depth, list in pairs(newState.modelsByDepth) do
+                copy[depth] = {}
+                for i, ref in ipairs(list) do
+                        copy[depth][i] = ref
+                end
+        end
+        return copy
+end
+
 local function rebuildLibraries()
         newState.modelLibrary = {}
         for _, list in pairs(newState.modelsByDepth) do
@@ -364,6 +388,9 @@ end
 LoomDesigner.ApplyAuthoring = applyAuthoring
 
 function LoomDesigner.ApplyAuthoringAndPreview(container)
+        local branchCount = 0
+        for _ in pairs(newState.branches) do branchCount += 1 end
+        FT.log("Main.ApplyAuthoringAndPreview", "trunk=%s branches=%d", tostring(newState.assignments.trunk), branchCount)
         local a = LoomDesigner.ApplyAuthoring
         local r = LoomDesigner.RebuildPreview
         if type(a) == "function" then a() end
