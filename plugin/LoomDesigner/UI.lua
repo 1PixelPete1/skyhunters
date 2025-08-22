@@ -332,6 +332,7 @@ local selectedBranch: string? = nil
 local renderBranchLibrary
 local renderBranchDetails
 local renderBranchTree
+local renderBranchDetail
 
 
 local seedLabel
@@ -718,6 +719,7 @@ local renameBox = labeledTextBox(secBranchLib, "New Name", "", function(txt)
         renderBranchLibrary()
         renderBranchDetails()
         renderBranchTree()
+        renderBranchDetail()
     end
     renameBox.Parent.Visible = false
 end)
@@ -765,6 +767,7 @@ local function deleteBranch()
     renderBranchLibrary()
     renderBranchDetails()
     renderBranchTree()
+    renderBranchDetail()
 end
 
 makeBtn(branchButtonsRow, "New", newBranch)
@@ -796,6 +799,7 @@ renderBranchLibrary = function()
             renderBranchLibrary()
             renderBranchDetails()
             renderBranchTree()
+            renderBranchDetail()
         end)
     end
 end
@@ -895,6 +899,7 @@ end
 renderBranchLibrary()
 renderBranchDetails()
 renderBranchTree()
+renderBranchDetail()
 -- Models -------------------------------------------------------------------
 local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end

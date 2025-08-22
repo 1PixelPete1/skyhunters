@@ -23,8 +23,12 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
-local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
-LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs
+    or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
+if not LoomConfigs then
+    FT.warn("LC.missing", "could not resolve looms/LoomConfigs; using stub")
+    LoomConfigs = {}
+end
 
 -- Forward declare so we can use local deepCopy inside DC even if it’s defined later
 local deepCopy
@@ -393,6 +397,9 @@ local function renderBranch(name, depth)
                        end
                end
        end
+
+       -- remove preview config after render to avoid leaks
+       LoomConfigs[cfgId] = nil
 end
 
 function LoomDesigner.RebuildPreview(_container)
