@@ -23,7 +23,7 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
-local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
     or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
 if not LoomConfigs then
     FT.warn("LC.missing", "could not resolve looms/LoomConfigs; using stub")
@@ -314,28 +314,63 @@ function LoomDesigner.ExportAuthoring()
         }
 end
 
-function LoomDesigner.ImportAuthoring(cfg)
+function LoomDesigner.ImportAuthoring(cfg, reset)
         cfg = cfg or {}
-        newState.branches = DC(cfg.branches or {})
-        newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
-        newState.assignments = DC(cfg.assignments or {trunk = "", children = {}})
+
+        -- default reset ON
+        if reset == nil or reset then
+                newState.modelLibrary  = {}
+                newState.modelsByDepth = {}
+                newState.overrides     = {
+                        materialization = { mode = "Model" },
+                        rotationRules   = {},
+                        decorations     = { enabled = false, types = {} },
+                }
+        end
+
+        -- models / overrides from cfg
+        if cfg.models and cfg.models.byDepth then
+                newState.modelsByDepth = DC(cfg.models.byDepth)
+        end
+        if cfg.overrides then
+                newState.overrides = DC(cfg.overrides)
+        end
+
+        -- reattach watchers & rebuild libraries
+        newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
+        newState.overrides     = select(1, FT.watchTable("newState.overrides",     newState.overrides))
+        rebuildLibraries()
+        newState.modelLibrary  = select(1, FT.watchTable("newState.modelLibrary",  newState.modelLibrary))
+
+        -- branches / assignments
+        newState.branches    = DC(cfg.branches or {})
+        newState.branches    = select(1, FT.watchTable("newState.branches", newState.branches))
+        newState.assignments = DC(cfg.assignments or { trunk = "", children = {} })
         newState.assignments = select(1, FT.watchTable("newState.assignments", newState.assignments))
-        newState.assignments.children = select(
-                1,
-                FT.watchTable("newState.assignments.children", newState.assignments.children)
-        )
+        newState.assignments.children =
+                select(1, FT.watchTable("newState.assignments.children", newState.assignments.children))
+
+        -- ensure valid trunk
         if next(newState.branches) == nil then
-                newState.branches["branch1"] = {kind = "straight"}
+                newState.branches["branch1"] = { kind = "straight" }
                 newState.assignments.trunk = "branch1"
-        elseif not newState.assignments.trunk or newState.assignments.trunk == "" then
-                for name in pairs(newState.branches) do
-                        newState.assignments.trunk = name
-                        break
-                end
+        elseif not newState.assignments.trunk
+                or newState.assignments.trunk == ""
+                or not newState.branches[newState.assignments.trunk] then
+                for name in pairs(newState.branches) do newState.assignments.trunk = name; break end
         end
 end
 
 LoomDesigner.ApplyAuthoring = applyAuthoring
+
+function LoomDesigner.ApplyAuthoringAndPreview(container)
+        local a = LoomDesigner.ApplyAuthoring
+        local r = LoomDesigner.RebuildPreview
+        if type(a) == "function" then a() end
+        if type(r) == "function" then r(container) end
+end
+
+LoomDesigner.applyAuthoringAndPreview = LoomDesigner.ApplyAuthoringAndPreview
 
 function LoomDesigner.Reseed()
         newState.baseSeed = LoomDesigner.RandomizeSeed()

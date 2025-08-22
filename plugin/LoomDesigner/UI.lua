@@ -7,13 +7,11 @@ local ModelResolver = require(script.Parent.ModelResolver)
 local UI = {}
 
 local function applyAuthoringAndPreview()
-    local apply = LoomDesigner.ApplyAuthoring
-    if type(apply) == "function" then
-        apply()
-    end
-    local rebuild = LoomDesigner.RebuildPreview
-    if type(rebuild) == "function" then
-        rebuild(nil)
+    if LoomDesigner.ApplyAuthoringAndPreview then
+        LoomDesigner.ApplyAuthoringAndPreview(nil)
+    else
+        if LoomDesigner.ApplyAuthoring then LoomDesigner.ApplyAuthoring() end
+        if LoomDesigner.RebuildPreview then LoomDesigner.RebuildPreview(nil) end
     end
 end
 
@@ -332,7 +330,6 @@ local selectedBranch: string? = nil
 local renderBranchLibrary
 local renderBranchDetails
 local renderBranchTree
-local renderBranchDetail
 
 
 local seedLabel
@@ -719,7 +716,6 @@ local renameBox = labeledTextBox(secBranchLib, "New Name", "", function(txt)
         renderBranchLibrary()
         renderBranchDetails()
         renderBranchTree()
-        renderBranchDetail()
     end
     renameBox.Parent.Visible = false
 end)
@@ -767,7 +763,6 @@ local function deleteBranch()
     renderBranchLibrary()
     renderBranchDetails()
     renderBranchTree()
-    renderBranchDetail()
 end
 
 makeBtn(branchButtonsRow, "New", newBranch)
@@ -799,7 +794,6 @@ renderBranchLibrary = function()
             renderBranchLibrary()
             renderBranchDetails()
             renderBranchTree()
-            renderBranchDetail()
         end)
     end
 end
@@ -810,17 +804,18 @@ renderBranchDetails = function()
         if c:IsA("GuiObject") then c:Destroy() end
     end
     if not selectedBranch then return end
-    local branch = LoomDesigner.GetBranches()[selectedBranch]
+    local branches = LoomDesigner.GetBranches and LoomDesigner.GetBranches() or {}
+    local branch = branches[selectedBranch]
     if not branch then return end
 
     -- kind dropdown
-    local kinds = LoomDesigner.SUPPORTED_KIND_LIST
+    local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
     local idx = table.find(kinds, branch.kind) or 1
     dropdown(secBranchDetails, popupHost, "Kind", kinds, idx, function(opt)
         LoomDesigner.EditBranch(selectedBranch, {kind = opt})
-        branch = LoomDesigner.GetBranches()[selectedBranch]
-        renderBranchDetails()
         applyAuthoringAndPreview()
+        branch = (LoomDesigner.GetBranches and LoomDesigner.GetBranches() or {})[selectedBranch]
+        renderBranchDetails()
     end)
 
     -- helper for numeric fields
@@ -899,7 +894,6 @@ end
 renderBranchLibrary()
 renderBranchDetails()
 renderBranchTree()
-renderBranchDetail()
 -- Models -------------------------------------------------------------------
 local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
