@@ -192,6 +192,7 @@ local function numberField(parent: Instance, label: string, value: number?, onCo
         local v = tonumber(box.Text)
         if v then onCommit(v) end
     end)
+    return box
 end
 
 function UI.Build(_widget: PluginGui, plugin: Plugin, where)
@@ -309,15 +310,12 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end
 
+    -- ensure default branch exists before building branch controls
+    ensureStart()
+
     local selectedBranch: string? = nil
     local branchDropdownBtn: TextButton? = nil
-
-    local function updateBranchUI()
-        branchControls.Visible = selectedBranch ~= nil
-        helperLabel.Visible = not selectedBranch
-    end
-
-    local function refreshBranchDropdown(selectName: string?)
+    local function refreshBranchDropdown(selectName)
         ensureStart()
         if branchDropdownBtn then branchDropdownBtn.Parent:Destroy() end
         local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
@@ -326,7 +324,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             table.insert(names, name)
         end
         table.sort(names)
-        local defaultIndex = 0
+        local defaultIndex = 1
         if selectName then
             for i,n in ipairs(names) do
                 if n == selectName then
@@ -334,25 +332,35 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
                     break
                 end
             end
-            selectedBranch = selectName
-        elseif selectedBranch then
-            for i,n in ipairs(names) do
-                if n == selectedBranch then
-                    defaultIndex = i
-                    break
-                end
-            end
-            if defaultIndex == 0 then selectedBranch = nil end
         end
         branchDropdownBtn = labeledDropdown(container, popupHost, "Branch", names, defaultIndex, function(opt)
             selectedBranch = opt
             updateBranchUI()
         end)
-        branchDropdownBtn.Parent.LayoutOrder = 2
-        updateBranchUI()
+        selectedBranch = names[defaultIndex]
     end
 
-    refreshBranchDropdown()
+    local addBtn = Instance.new("TextButton")
+    addBtn.Text = "Add Branch"
+    addBtn.Size = UDim2.new(0,160,0,24)
+    addBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    addBtn.TextColor3 = Color3.new(1,1,1)
+    addBtn.Parent = container
+    addBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local i = 1
+        local name = "branch" .. i
+        while branches[name] do
+            i += 1
+            name = "branch" .. i
+        end
+        if LoomDesigner.CreateBranch then
+            LoomDesigner.CreateBranch(name, { kind = "straight" })
+        end
+        LoomDesigner.RebuildPreview()
+        refreshBranchDropdown(name)
+    end)
 
     delBtn.MouseButton1Click:Connect(function()
         ensureStart()
@@ -366,8 +374,11 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     trunkBtn.MouseButton1Click:Connect(function()
         ensureStart()
         if selectedBranch and LoomDesigner.SetTrunk then
+            print("[UI] SetTrunk", selectedBranch)
             LoomDesigner.SetTrunk(selectedBranch)
             LoomDesigner.RebuildPreview()
+        else
+            warn("[UI] SetTrunk: no branch selected")
         end
     end)
 
@@ -377,8 +388,11 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
             local trunk = assignments.trunk
             if trunk and trunk ~= "" and trunk ~= selectedBranch then
+                print("[UI] AttachChild", trunk, selectedBranch)
                 LoomDesigner.AddChild(trunk, selectedBranch)
                 LoomDesigner.RebuildPreview()
+            else
+                warn("[UI] AttachChild: invalid trunk or branch")
             end
         end
     end)
@@ -403,6 +417,8 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             for name in pairs(branches) do trunk = name break end
             if LoomDesigner.SetTrunk then LoomDesigner.SetTrunk(trunk) end
         end
+
+        print("[UI] ApplyToTrunk", trunk)
 
         if LoomDesigner.EditBranch then
             LoomDesigner.EditBranch(trunk, design)
@@ -468,6 +484,94 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         modeBtn.Text = authoring and "Mode: Authoring" or "Mode: Preview"
         applyBtn.Visible = authoring
     end)
+
+    -- seed controls
+    local seedBox
+    seedBox = numberField(container, "Base Seed", LoomDesigner.GetSeed and LoomDesigner.GetSeed(), function(v)
+        ensureStart()
+        if LoomDesigner.SetSeed then
+            LoomDesigner.SetSeed(v)
+            LoomDesigner.RebuildPreview()
+        end
+    end)
+
+    local reseedBtn = Instance.new("TextButton")
+    reseedBtn.Text = "Randomize Seed"
+    reseedBtn.Size = UDim2.new(0,160,0,24)
+    reseedBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    reseedBtn.TextColor3 = Color3.new(1,1,1)
+    reseedBtn.Parent = container
+    reseedBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        if LoomDesigner.Reseed then
+            local s = LoomDesigner.Reseed()
+            if seedBox then seedBox.Text = tostring(s) end
+        end
+    end)
+
+    -- rotation rules
+    local rotFrame = makeList(container)
+    local state = LoomDesigner.GetState and LoomDesigner.GetState() or {}
+    local rot = state.overrides and state.overrides.rotationRules or {}
+    local contOpts = {"accumulate","absolute"}
+    local contIndex = rot.continuity == "absolute" and 2 or 1
+    labeledDropdown(rotFrame, popupHost, "Continuity", contOpts, contIndex, function(opt)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {continuity = opt}})
+        LoomDesigner.RebuildPreview()
+    end)
+    numberField(rotFrame, "Yaw Clamp Deg", rot.yawClampDeg, function(v)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = v}})
+        LoomDesigner.RebuildPreview()
+    end)
+    numberField(rotFrame, "Pitch Clamp Deg", rot.pitchClampDeg, function(v)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {pitchClampDeg = v}})
+        LoomDesigner.RebuildPreview()
+    end)
+
+    -- model management
+    local modelFrame = makeList(container)
+    local depthInput = numberField(modelFrame, "Model Depth", 0, function() end)
+    local modelInput = numberField(modelFrame, "Model Name", nil, function() end)
+    local modelBtn = Instance.new("TextButton")
+    modelBtn.Text = "Add Model"
+    modelBtn.Size = UDim2.new(0,160,0,24)
+    modelBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    modelBtn.TextColor3 = Color3.new(1,1,1)
+    modelBtn.Parent = modelFrame
+
+    local modelList = Instance.new("TextLabel")
+    modelList.BackgroundTransparency = 1
+    modelList.TextColor3 = Color3.fromRGB(200,200,200)
+    modelList.Size = UDim2.new(1,0,0,0)
+    modelList.AutomaticSize = Enum.AutomaticSize.Y
+    modelList.TextXAlignment = Enum.TextXAlignment.Left
+    modelList.TextYAlignment = Enum.TextYAlignment.Top
+    modelList.Parent = modelFrame
+
+    local function refreshModels()
+        local models = LoomDesigner.GetModels and LoomDesigner.GetModels() or {}
+        local lines = {}
+        for depth, list in pairs(models) do
+            lines[#lines+1] = string.format("[%s] %s", tostring(depth), table.concat(list, ", "))
+        end
+        modelList.Text = table.concat(lines, "\n")
+    end
+    refreshModels()
+
+    modelBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local depth = tonumber(depthInput.Text) or 0
+        local ref = modelInput.Text
+        if LoomDesigner.AddModel then
+            LoomDesigner.AddModel(depth, ref)
+            refreshModels()
+            LoomDesigner.RebuildPreview()
+        end
+    end)
+
 end
 
 return UI
