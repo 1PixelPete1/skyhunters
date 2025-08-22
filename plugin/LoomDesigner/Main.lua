@@ -307,8 +307,28 @@ function LoomDesigner.ExportAuthoring()
         }
 end
 
-function LoomDesigner.ImportAuthoring(cfg)
+function LoomDesigner.ImportAuthoring(cfg, reset)
         cfg = cfg or {}
+        if reset ~= false then
+                newState.modelsByDepth = {}
+                newState.modelLibrary = {}
+                newState.overrides = {
+                        materialization = { mode = "Model" },
+                        rotationRules = {},
+                        decorations = { enabled = false, types = {} },
+                }
+        end
+        if cfg.models and cfg.models.byDepth then
+                newState.modelsByDepth = DC(cfg.models.byDepth)
+        end
+        if cfg.overrides then
+                newState.overrides = DC(cfg.overrides)
+        end
+        newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
+        newState.overrides = select(1, FT.watchTable("newState.overrides", newState.overrides))
+        rebuildLibraries()
+        newState.modelLibrary = select(1, FT.watchTable("newState.modelLibrary", newState.modelLibrary))
+
         newState.branches = DC(cfg.branches or {})
         newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
         newState.assignments = DC(cfg.assignments or {trunk = "", children = {}})
