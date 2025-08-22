@@ -8,7 +8,8 @@ This guide outlines how to access the plugin's `Main` module from the Roblox Stu
 2. Reference the plugin folder and load the module:
 
 ```lua
--- Require the plugin's Main module
+-- Require the plugin folder (init.lua delegates to Main)
+
 local pluginFolder = plugin:WaitForChild("LoomDesigner")
 local LD = require(pluginFolder)
 

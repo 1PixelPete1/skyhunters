@@ -199,12 +199,18 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     local started = false
     local function ensureStart()
         if not started then
-            local ok, _ = pcall(function()
+            local ok, err = pcall(function()
                 return LoomDesigner.Start(plugin)
             end)
+            if not ok then
+                warn("LoomDesigner.Start failed:", err)
+            end
             started = ok
         end
     end
+
+    -- ensure default branch exists before building branch controls
+    ensureStart()
 
     local selectedBranch: string? = nil
     local branchDropdownBtn: TextButton? = nil
