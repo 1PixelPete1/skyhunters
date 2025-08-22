@@ -434,9 +434,19 @@ local function clearExistingPreview(parent)
         end
 end
 
+local rootModel: Model? = nil
+
 local function renderBranch(name, depth)
        local design = newState.branches[name]
        if not design then return end
+
+       -- NEW: make a subcontainer per branch
+       local branchModel = Instance.new("Model")
+       branchModel.Name = "Branch_" .. tostring(name)
+       branchModel.Parent = workspace:FindFirstChild("LoomPreview"):FindFirstChild("PreviewBranch") or rootModel
+
+       -- temporarily redirect VisualScene outputs
+       VisualScene.SetPreviewModel(branchModel)
 
        local cfgId = "__ld_preview_" .. tostring(name)
        LoomConfigs[cfgId] = {
@@ -458,8 +468,14 @@ local function renderBranch(name, depth)
                g = newState.g,
                overrides = newState.overrides,
                scene = {
-                       Clear = VisualScene.Clear,
-                       Spawn = VisualScene.Spawn,
+                       Clear = function()
+                               VisualScene.Clear()
+                       end,
+                       Spawn = function(spec)
+                               spec.attributes = spec.attributes or {}
+                               spec.attributes.BranchName = name
+                               VisualScene.Spawn(spec)
+                       end,
                        ResolveModel = ModelResolver.ResolveFromList,
                },
        })
@@ -474,6 +490,7 @@ local function renderBranch(name, depth)
 
        -- remove preview config after render to avoid leaks
        LoomConfigs[cfgId] = nil
+       VisualScene.SetPreviewModel(rootModel)
 end
 
 function LoomDesigner.RebuildPreview(_container)
@@ -493,6 +510,7 @@ function LoomDesigner.RebuildPreview(_container)
        model.Name = "PreviewBranch"
        model.Parent = parent
        VisualScene.SetPreviewModel(model)
+       rootModel = model -- keep the root handy
 
        if GrowthVisualizer and type(GrowthVisualizer.Release) == "function" then
                GrowthVisualizer.Release(nil, 0)

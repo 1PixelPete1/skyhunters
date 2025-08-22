@@ -14,6 +14,17 @@ local function spawnAsset(assetId: number, parent: Instance): Instance?
     return model
 end
 
+-- helper to apply attributes to instances safely
+local function applyAttributes(inst: Instance, attrs)
+    if type(attrs) == "table" then
+        for k, v in pairs(attrs) do
+            pcall(function()
+                inst:SetAttribute(k, v)
+            end)
+        end
+    end
+end
+
 function VisualScene.SetPreviewModel(m: Model)
     _previewModel = m
     _firstBasePart = nil
@@ -43,9 +54,44 @@ function VisualScene.Spawn(spec)
     if typeof(spec) == "Instance" then
         spec.Parent = _previewModel
         if spec:IsA("BasePart") then ensurePrimary(spec) end
+        applyAttributes(spec, nil)
         return spec
     end
     if type(spec) ~= "table" then return nil end
+
+    if spec.instance then
+        local inst = spec.instance
+        inst.Parent = _previewModel
+        if spec.scale then
+            if inst:IsA("Model") then
+                for _, p in ipairs(inst:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        p.Size = Vector3.new(
+                            p.Size.X * spec.scale.X,
+                            p.Size.Y * spec.scale.Y,
+                            p.Size.Z * spec.scale.Z
+                        )
+                    end
+                end
+            elseif inst:IsA("BasePart") then
+                inst.Size = Vector3.new(
+                    inst.Size.X * spec.scale.X,
+                    inst.Size.Y * spec.scale.Y,
+                    inst.Size.Z * spec.scale.Z
+                )
+            end
+        end
+        if typeof(spec.cframe) == "CFrame" then
+            if inst:IsA("Model") then
+                inst:PivotTo(spec.cframe)
+            else
+                inst.CFrame = spec.cframe
+            end
+        end
+        if inst:IsA("BasePart") then ensurePrimary(inst) end
+        applyAttributes(inst, spec.attributes)
+        return inst
+    end
 
     if spec.assetId then
         local inst = spawnAsset(spec.assetId, _previewModel)
@@ -62,6 +108,8 @@ function VisualScene.Spawn(spec)
                     inst:PivotTo(delta)
                 end
             end
+            if inst:IsA("BasePart") then ensurePrimary(inst) end
+            applyAttributes(inst, spec.attributes)
             return inst
         end
         -- fall back to primitive part if asset failed
@@ -100,6 +148,7 @@ function VisualScene.Spawn(spec)
 
     part.Parent = _previewModel
     ensurePrimary(part)
+    applyAttributes(part, spec.attributes)
     return part
 end
 

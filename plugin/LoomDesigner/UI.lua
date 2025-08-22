@@ -266,6 +266,10 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     branchControls.LayoutOrder = 6
     branchControls.Visible = true  -- Always show branch controls
 
+    local selectedBranch: string? = nil
+    local branchDropdownBtn: TextButton? = nil
+    local kindDropdownBtn = nil
+
     local kinds = LoomDesigner and LoomDesigner.SUPPORTED_KIND_LIST
     if type(kinds) ~= "table" or #kinds == 0 then
         kinds = FALLBACK_KINDS
@@ -326,13 +330,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end
 
-    local delBtn = Instance.new("TextButton")
-    delBtn.Text = "Delete Branch"
-    delBtn.Size = UDim2.new(0,160,0,24)
-    delBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    delBtn.TextColor3 = Color3.new(1,1,1)
-    delBtn.Parent = branchControls
-
     local trunkBtn = Instance.new("TextButton")
     trunkBtn.Text = "Set as Trunk"
     trunkBtn.Size = UDim2.new(0,160,0,24)
@@ -362,6 +359,64 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     applyBtn.Visible = false
     applyBtn.Parent = branchControls
 
+    -- --- Advanced Branch Config ---
+    local advSection = Instance.new("Frame")
+    advSection.BackgroundTransparency = 1
+    advSection.Size = UDim2.new(1,0,0,0)
+    advSection.AutomaticSize = Enum.AutomaticSize.Y
+    advSection.Parent = branchControls
+
+    local advHeader = Instance.new("TextLabel")
+    advHeader.Text = "--- Advanced Branch Config ---"
+    advHeader.BackgroundTransparency = 1
+    advHeader.TextColor3 = Color3.fromRGB(180,255,180)
+    advHeader.Size = UDim2.new(1,0,0,24)
+    advHeader.TextXAlignment = Enum.TextXAlignment.Center
+    advHeader.Parent = advSection
+
+    local advList = makeList(advSection)
+
+    local spawnLocOpts = {"tip","junction","per segment","pattern"}
+    labeledDropdown(advList, popupHost, "Spawn Location", spawnLocOpts, 1, function(opt)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { spawnLocation = opt })
+        end
+    end)
+
+    local rotOpts = {"inherit parent","manual","rng±"}
+    labeledDropdown(advList, popupHost, "Child Rotation", rotOpts, 1, function(opt)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { childRotationMode = opt })
+        end
+    end)
+
+    local yawBox = numberField(advList, "Manual Yaw (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childYaw = v }) end
+    end)
+    local pitchBox = numberField(advList, "Manual Pitch (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childPitch = v }) end
+    end)
+    local rollBox = numberField(advList, "Manual Roll (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childRoll = v }) end
+    end)
+
+    local yawRngBox  = numberField(advList, "Yaw RNG ± (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childYawRng = v }) end
+    end)
+    local pitchRngBox = numberField(advList, "Pitch RNG ± (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childPitchRng = v }) end
+    end)
+    local rollRngBox = numberField(advList, "Roll RNG ± (deg)", 0, function(v)
+        if selectedBranch then LoomDesigner.EditBranch(selectedBranch, { childRollRng = v }) end
+    end)
+
+    local patternOpts = {"sequence","chance"}
+    labeledDropdown(advList, popupHost, "Child Pattern", patternOpts, 1, function(opt)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { childPattern = opt })
+        end
+    end)
+
     local started = false
     local function ensureStart()
         if not started then
@@ -378,14 +433,122 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     -- ensure default branch exists before building branch controls
     ensureStart()
 
-    local selectedBranch: string? = nil
-    local branchDropdownBtn: TextButton? = nil
-    local kindDropdownBtn = nil
-    
     -- Forward declare functions that reference each other
     local updateBranchUI
     local createKindDropdown
-    
+    local refreshBranchDropdown
+
+    local RunService = game:GetService("RunService")
+    local UIS = game:GetService("UserInputService")
+    local mouse = plugin and plugin.GetMouse and plugin:GetMouse() or nil
+
+    -- One shared Highlight for hover
+    local hoverHL = Instance.new("Highlight")
+    hoverHL.Name = "LD_Hover"
+    hoverHL.FillTransparency = 1
+    hoverHL.OutlineTransparency = 0
+    hoverHL.Adornee = nil
+    hoverHL.Parent = workspace
+
+    local function branchFromTarget(target: Instance?): string?
+        if not target then return nil end
+        local node = target
+        while node and node ~= workspace do
+            if node:IsA("Model") and node.Name:match("^Branch_") then
+                local bname = node.Name:gsub("^Branch_", "")
+                return bname
+            end
+            node = node.Parent
+        end
+        local ok, v = pcall(function() return target:GetAttribute("BranchName") end)
+        if ok and type(v) == "string" and v ~= "" then return v end
+        return nil
+    end
+
+    RunService.Heartbeat:Connect(function()
+        if not mouse then return end
+        local t = mouse.Target
+        local bname = branchFromTarget(t)
+        if bname then
+            local root = workspace:FindFirstChild("LoomPreview")
+            local preview = root and root:FindFirstChild("PreviewBranch")
+            local bModel = preview and preview:FindFirstChild("Branch_" .. bname)
+            hoverHL.Adornee = bModel
+        else
+            hoverHL.Adornee = nil
+        end
+    end)
+
+    UIS.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if not mouse then return end
+            local bname = branchFromTarget(mouse.Target)
+            if bname then
+                selectedBranch = bname
+                if branchDropdownBtn then branchDropdownBtn.Text = bname end
+                if updateBranchUI then updateBranchUI() end
+            end
+        end
+    end)
+
+    local delBtn = Instance.new("TextButton")
+    delBtn.Text = "Delete"
+    delBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    delBtn.TextColor3 = Color3.new(1,1,1)
+
+    -- Name row
+    local nameRow = Instance.new("Frame")
+    nameRow.BackgroundTransparency = 1
+    nameRow.Size = UDim2.new(1,0,0,26)
+    nameRow.Parent = branchControls
+
+    local nameBox = Instance.new("TextBox")
+    nameBox.Size = UDim2.new(1,-170,1,0)
+    nameBox.Position = UDim2.new(0,0,0,0)
+    nameBox.BackgroundColor3 = Color3.fromRGB(42,42,42)
+    nameBox.TextColor3 = Color3.new(1,1,1)
+    nameBox.Text = ""
+    nameBox.PlaceholderText = "Branch name"
+    nameBox.Parent = nameRow
+
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Text = "Save"
+    saveBtn.Size = UDim2.new(0,80,1,0)
+    saveBtn.Position = UDim2.new(1,-160,0,0)
+    saveBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    saveBtn.TextColor3 = Color3.new(1,1,1)
+    saveBtn.Parent = nameRow
+
+    delBtn.Parent = nameRow
+    delBtn.Size = UDim2.new(0,80,1,0)
+    delBtn.Position = UDim2.new(1,-80,0,0)
+
+    local function syncNameBox()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        if selectedBranch and branches[selectedBranch] then
+            nameBox.Text = selectedBranch
+        else
+            nameBox.Text = ""
+        end
+    end
+
+    saveBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local newName = (nameBox.Text or ""):gsub("^%s*(.-)%s*$", "%1")
+        if selectedBranch and newName ~= "" and newName ~= selectedBranch then
+            if LoomDesigner.RenameBranch then
+                LoomDesigner.RenameBranch(selectedBranch, newName)
+                selectedBranch = newName
+                if branchDropdownBtn then branchDropdownBtn.Text = newName end
+                LoomDesigner.RebuildPreview()
+                if refreshBranchDropdown then
+                    refreshBranchDropdown(newName)
+                end
+            end
+        end
+    end)
+
     createKindDropdown = function()
         if kindDropdownBtn then kindDropdownBtn.Parent:Destroy() end
         
@@ -458,6 +621,11 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         createKindDropdown()
         renderFields()
         GrowthStylesCore.ApplyPreview()
+    end
+    local prevUpdate = updateBranchUI
+    updateBranchUI = function()
+        prevUpdate()
+        syncNameBox()
     end
     local function refreshBranchDropdown(selectName)
         ensureStart()
@@ -551,7 +719,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             warn("[UI] AddSubBranch: no branch selected")
             return
         end
-        
+
         -- Create a new child branch
         local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
         local i = 1
@@ -560,18 +728,39 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             i += 1
             childName = selectedBranch .. "_child" .. i
         end
-        
+
         -- Create the child branch with default settings
         if LoomDesigner.CreateBranch then
             LoomDesigner.CreateBranch(childName, { kind = "curved" })
         end
-        
-        -- Attach it to the selected branch
+
         if LoomDesigner.AddChild then
             print("[UI] AddSubBranch: attaching", childName, "to", selectedBranch)
             LoomDesigner.AddChild(selectedBranch, childName, "tip", 1)
+
+            local parentB = branches[selectedBranch] or {}
+            local placement = (parentB.spawnLocation == "junction") and "junction" or "tip"
+            local assigns = LoomDesigner.GetAssignments and LoomDesigner.GetAssignments() or {children={}}
+            local idx = #assigns.children
+            if idx >= 1 then
+                LoomDesigner.RemoveChild(idx)
+                LoomDesigner.AddChild(selectedBranch, childName, placement, 1)
+            end
+            local childDesignPatch = {}
+            if parentB.childRotationMode == "manual" then
+                childDesignPatch.initialYaw = parentB.childYaw or 0
+                childDesignPatch.initialPitch = parentB.childPitch or 0
+                childDesignPatch.initialRoll = parentB.childRoll or 0
+            elseif parentB.childRotationMode == "rng±" then
+                childDesignPatch.yawVar = parentB.childYawRng or 0
+                childDesignPatch.pitchVar = parentB.childPitchRng or 0
+                childDesignPatch.rollVar = parentB.childRollRng or 0
+            end
+            if next(childDesignPatch) then
+                LoomDesigner.EditBranch(childName, childDesignPatch)
+            end
             LoomDesigner.RebuildPreview()
-            refreshBranchDropdown(childName)  -- Select the new child
+            refreshBranchDropdown(childName)
         end
     end)
     
