@@ -4,24 +4,99 @@ local GrowthStylesCore = require(script.Parent.GrowthStylesCore)
 
 local UI = {}
 
-local FALLBACK_KINDS = {"straight","curved","zigzag","sigmoid","chaotic"}
+local FALLBACK_KINDS = {"straight","curved","zigzag","sigmoid","chaotic","spiral","noise","random"}
 
 local KIND_FIELDS = {
-    curved = {
-        {key = "amplitudeDeg", label = "Amplitude Deg"},
-        {key = "frequency", label = "Frequency"},
-    },
-    zigzag = {
-        {key = "zigzagEvery", label = "Zigzag Every"},
-        {key = "zigzagStep", label = "Zigzag Step"},
-    },
-    sigmoid = {
-        {key = "curvature", label = "Curvature"},
-    },
+curved = {
+{key = "amplitudeDeg", label = "Amplitude Deg", default = 12},
+{key = "frequency", label = "Frequency", default = 1},
+    {key = "curvature", label = "Curvature", default = 0.35},
+},
+zigzag = {
+{key = "zigzagEvery", label = "Zigzag Every", default = 1},
+    {key = "zigzagStep", label = "Zigzag Step", default = 12},
+    {key = "pitchBias", label = "Pitch Bias", default = 0},
+{key = "rollBias", label = "Roll Bias", default = 0},
+},
+sigmoid = {
+{key = "amplitudeDeg", label = "Amplitude Deg", default = 10},
+{key = "sigmoidK", label = "Sigmoid K", default = 6},
+{key = "sigmoidMid", label = "Sigmoid Mid", default = 0.5},
+},
     chaotic = {
-        {key = "rollBias", label = "Roll Bias"},
-        {key = "amplitudeDeg", label = "Amplitude Deg"},
-        {key = "frequency", label = "Frequency"},
+            {key = "amplitudeDeg", label = "Amplitude Deg", default = 12},
+            {key = "chaoticR", label = "Chaotic R", default = 3.9},
+            {key = "rollBias", label = "Roll Bias", default = 0},
+        },
+        spiral = {
+            {key = "amplitudeDeg", label = "Amplitude Deg", default = 10},
+            {key = "yawStep", label = "Yaw Step", default = 10},
+            {key = "yawVar", label = "Yaw Variance", default = 0},
+            {key = "pitchBias", label = "Pitch Bias", default = 0},
+            {key = "pitchVar", label = "Pitch Variance", default = 0},
+            {key = "rollBias", label = "Roll Bias", default = 0},
+            {key = "rollVar", label = "Roll Variance", default = 0},
+        },
+        noise = {
+            {key = "noiseAmp", label = "Noise Amplitude", default = 10},
+            {key = "rollBias", label = "Roll Bias", default = 0},
+        },
+        random = {
+            {key = "amplitudeDeg", label = "Amplitude Deg", default = 180},
+        },
+    }
+
+local BRANCH_FIELDS = {
+    {
+        kind = "number",
+        label = "Segment Count",
+        key = "segmentCount",
+        default = 12,
+        get = function()
+            if not selectedBranch then return 12 end
+            local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+            local branch = branches[selectedBranch]
+            return branch and branch.segmentCount or 12
+        end,
+        set = function(v)
+            if selectedBranch and LoomDesigner.EditBranch then
+                LoomDesigner.EditBranch(selectedBranch, {segmentCount = v})
+            end
+        end,
+    },
+    {
+        kind = "number",
+        label = "Segment Count Min",
+        key = "segmentCountMin",
+        default = 8,
+        get = function()
+            if not selectedBranch then return 8 end
+            local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+            local branch = branches[selectedBranch]
+            return branch and branch.segmentCountMin or 8
+        end,
+        set = function(v)
+            if selectedBranch and LoomDesigner.EditBranch then
+                LoomDesigner.EditBranch(selectedBranch, {segmentCountMin = v})
+            end
+        end,
+    },
+    {
+        kind = "number",
+        label = "Segment Count Max",
+        key = "segmentCountMax",
+        default = 16,
+        get = function()
+            if not selectedBranch then return 16 end
+            local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+            local branch = branches[selectedBranch]
+            return branch and branch.segmentCountMax or 16
+        end,
+        set = function(v)
+            if selectedBranch and LoomDesigner.EditBranch then
+                LoomDesigner.EditBranch(selectedBranch, {segmentCountMax = v})
+            end
+        end,
     },
 }
 
@@ -34,38 +109,6 @@ local GLOBAL_FIELDS = {
         end,
         set = function(v)
             if LoomDesigner.SetSeed then LoomDesigner.SetSeed(v) end
-        end,
-    },
-    {
-        kind = "number",
-        label = "Segment Count",
-        get = function()
-            return GrowthStylesCore.GetParam("segmentCount")
-        end,
-        set = function(v)
-            GrowthStylesCore.SetParam("segmentCount", v)
-        end,
-    },
-    {
-        kind = "dropdown",
-        label = "Rotation Rules",
-        options = {"auto","accumulate","absolute"},
-        get = function()
-            if LoomDesigner.GetRotationContinuity then
-                local mode = LoomDesigner.GetRotationContinuity()
-                if mode == "accumulate" then return 2 end
-                if mode == "absolute" then return 3 end
-            end
-            return 1
-        end,
-        set = function(opt)
-            if LoomDesigner.SetRotationContinuity then
-                if opt == "auto" then
-                    LoomDesigner.SetRotationContinuity(nil)
-                else
-                    LoomDesigner.SetRotationContinuity(opt)
-                end
-            end
         end,
     },
 }
@@ -221,7 +264,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
 
     local branchControls = makeList(container)
     branchControls.LayoutOrder = 6
-    branchControls.Visible = false
+    branchControls.Visible = true  -- Always show branch controls
 
     local kinds = LoomDesigner and LoomDesigner.SUPPORTED_KIND_LIST
     if type(kinds) ~= "table" or #kinds == 0 then
@@ -234,16 +277,40 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         for _,c in ipairs(paramsFrame:GetChildren()) do
             if c:IsA("GuiObject") then c:Destroy() end
         end
+        
+        -- Add branch-specific fields first
+        for _,entry in ipairs(BRANCH_FIELDS) do
+            if entry.kind == "number" then
+                numberField(paramsFrame, entry.label, entry.get(), function(v)
+                    entry.set(v)
+                    LoomDesigner.RebuildPreview()
+                end)
+            elseif entry.kind == "dropdown" then
+                labeledDropdown(paramsFrame, popupHost, entry.label, entry.options, entry.get(), function(opt)
+                    entry.set(opt)
+                    LoomDesigner.RebuildPreview()
+                end)
+            end
+        end
+        
+        -- Add kind-specific parameters
         local prof = GrowthStylesCore.GetProfile()
         local defs = KIND_FIELDS[prof.kind]
         if defs then
             for _,entry in ipairs(defs) do
-                numberField(paramsFrame, entry.label, GrowthStylesCore.GetParam(entry.key), function(v)
+                local currentValue = GrowthStylesCore.GetParam(entry.key) or entry.default or 0
+                numberField(paramsFrame, entry.label, currentValue, function(v)
                     GrowthStylesCore.SetParam(entry.key, v)
+                    -- Also save to the selected branch
+                    if selectedBranch and LoomDesigner.EditBranch then
+                        LoomDesigner.EditBranch(selectedBranch, {[entry.key] = v})
+                    end
                     GrowthStylesCore.ApplyPreview()
                 end)
             end
         end
+        
+        -- Add global fields
         for _,entry in ipairs(GLOBAL_FIELDS) do
             if entry.kind == "number" then
                 numberField(paramsFrame, entry.label, entry.get(), function(v)
@@ -259,15 +326,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end
 
-    labeledDropdown(branchControls, popupHost, "Kind", kinds, 1, function(opt)
-        GrowthStylesCore.SetKind(opt)
-        renderFields()
-        GrowthStylesCore.ApplyPreview()
-    end)
-
-    renderFields()
-    GrowthStylesCore.ApplyPreview()
-
     local delBtn = Instance.new("TextButton")
     delBtn.Text = "Delete Branch"
     delBtn.Size = UDim2.new(0,160,0,24)
@@ -282,12 +340,19 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     trunkBtn.TextColor3 = Color3.new(1,1,1)
     trunkBtn.Parent = branchControls
 
-    local attachBtn = Instance.new("TextButton")
-    attachBtn.Text = "Attach Child"
-    attachBtn.Size = UDim2.new(0,160,0,24)
-    attachBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    attachBtn.TextColor3 = Color3.new(1,1,1)
-    attachBtn.Parent = branchControls
+    local addChildBtn = Instance.new("TextButton")
+    addChildBtn.Text = "Add Sub-Branch"
+    addChildBtn.Size = UDim2.new(0,160,0,24)
+    addChildBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    addChildBtn.TextColor3 = Color3.new(1,1,1)
+    addChildBtn.Parent = branchControls
+    
+    local navBtn = Instance.new("TextButton")
+    navBtn.Text = "Navigate Hierarchy"
+    navBtn.Size = UDim2.new(0,160,0,24)
+    navBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    navBtn.TextColor3 = Color3.new(1,1,1)
+    navBtn.Parent = branchControls
 
     local applyBtn = Instance.new("TextButton")
     applyBtn.Text = "Apply to Trunk"
@@ -315,6 +380,85 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
 
     local selectedBranch: string? = nil
     local branchDropdownBtn: TextButton? = nil
+    local kindDropdownBtn = nil
+    
+    -- Forward declare functions that reference each other
+    local updateBranchUI
+    local createKindDropdown
+    
+    createKindDropdown = function()
+        if kindDropdownBtn then kindDropdownBtn.Parent:Destroy() end
+        
+        local currentKind = "straight"
+        if selectedBranch then
+            local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+            local branch = branches[selectedBranch]
+            if branch then
+                currentKind = branch.kind or "straight"
+            end
+        end
+        
+        local kindIndex = 1
+        for i, kind in ipairs(kinds) do
+            if kind == currentKind then
+                kindIndex = i
+                break
+            end
+        end
+        
+        kindDropdownBtn = labeledDropdown(branchControls, popupHost, "Kind", kinds, kindIndex, function(opt)
+            GrowthStylesCore.SetKind(opt)
+            -- Also save to the selected branch
+            if selectedBranch and LoomDesigner.EditBranch then
+                LoomDesigner.EditBranch(selectedBranch, {kind = opt})
+            end
+            renderFields()
+            GrowthStylesCore.ApplyPreview()
+        end)
+    end
+    
+    updateBranchUI = function()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        
+        if not selectedBranch or not branches[selectedBranch] then
+            helperLabel.Text = "Create or select a branch to edit."
+            return
+        end
+        
+        local branch = branches[selectedBranch]
+        
+        -- Show branch hierarchy info
+        local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
+        local isTrunk = (assignments.trunk == selectedBranch)
+        local children = {}
+        for _, child in ipairs(assignments.children) do
+            if child.parent == selectedBranch then
+                table.insert(children, child.child)
+            end
+        end
+        
+        local hierarchyText = string.format("Editing: %s", selectedBranch)
+        if isTrunk then
+            hierarchyText = hierarchyText .. " (TRUNK)"
+        end
+        if #children > 0 then
+            hierarchyText = hierarchyText .. string.format(" | Children: %s", table.concat(children, ", "))
+        end
+        helperLabel.Text = hierarchyText
+        
+        -- Sync the branch data to GrowthStylesCore
+        GrowthStylesCore.SetKind(branch.kind or "straight")
+        for k, v in pairs(branch) do
+            if k ~= "kind" and type(v) == "number" then
+                GrowthStylesCore.SetParam(k, v)
+            end
+        end
+        
+        -- Refresh the parameter fields and kind dropdown
+        createKindDropdown()
+        renderFields()
+        GrowthStylesCore.ApplyPreview()
+    end
     local function refreshBranchDropdown(selectName)
         ensureStart()
         if branchDropdownBtn then branchDropdownBtn.Parent:Destroy() end
@@ -324,6 +468,19 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             table.insert(names, name)
         end
         table.sort(names)
+        
+        -- If no branches exist, create a default one
+        if #names == 0 then
+            print("[UI] No branches found, creating default branch")
+            if LoomDesigner.CreateBranch then
+                LoomDesigner.CreateBranch("branch1", { kind = "straight" })
+            end
+            if LoomDesigner.SetTrunk then
+                LoomDesigner.SetTrunk("branch1")
+            end
+            names = {"branch1"}
+        end
+        
         local defaultIndex = 1
         if selectName then
             for i,n in ipairs(names) do
@@ -337,7 +494,11 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             selectedBranch = opt
             updateBranchUI()
         end)
+        branchDropdownBtn.LayoutOrder = 2  -- Position after mode button
         selectedBranch = names[defaultIndex]
+        if selectedBranch then
+            updateBranchUI()
+        end
     end
 
     local addBtn = Instance.new("TextButton")
@@ -345,10 +506,12 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     addBtn.Size = UDim2.new(0,160,0,24)
     addBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
     addBtn.TextColor3 = Color3.new(1,1,1)
+    addBtn.LayoutOrder = 3
     addBtn.Parent = container
     addBtn.MouseButton1Click:Connect(function()
         ensureStart()
         local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local hadNone = not next(branches)
         local i = 1
         local name = "branch" .. i
         while branches[name] do
@@ -359,7 +522,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             LoomDesigner.CreateBranch(name, { kind = "straight" })
         end
         LoomDesigner.RebuildPreview()
-        refreshBranchDropdown(name)
+        refreshBranchDropdown(hadNone and name or nil)
     end)
 
     delBtn.MouseButton1Click:Connect(function()
@@ -382,18 +545,107 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
-    attachBtn.MouseButton1Click:Connect(function()
+    addChildBtn.MouseButton1Click:Connect(function()
         ensureStart()
-        if selectedBranch and LoomDesigner.AddChild then
-            local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
-            local trunk = assignments.trunk
-            if trunk and trunk ~= "" and trunk ~= selectedBranch then
-                print("[UI] AttachChild", trunk, selectedBranch)
-                LoomDesigner.AddChild(trunk, selectedBranch)
-                LoomDesigner.RebuildPreview()
-            else
-                warn("[UI] AttachChild: invalid trunk or branch")
+        if not selectedBranch then
+            warn("[UI] AddSubBranch: no branch selected")
+            return
+        end
+        
+        -- Create a new child branch
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local i = 1
+        local childName = selectedBranch .. "_child" .. i
+        while branches[childName] do
+            i += 1
+            childName = selectedBranch .. "_child" .. i
+        end
+        
+        -- Create the child branch with default settings
+        if LoomDesigner.CreateBranch then
+            LoomDesigner.CreateBranch(childName, { kind = "curved" })
+        end
+        
+        -- Attach it to the selected branch
+        if LoomDesigner.AddChild then
+            print("[UI] AddSubBranch: attaching", childName, "to", selectedBranch)
+            LoomDesigner.AddChild(selectedBranch, childName, "tip", 1)
+            LoomDesigner.RebuildPreview()
+            refreshBranchDropdown(childName)  -- Select the new child
+        end
+    end)
+    
+    navBtn.MouseButton1Click:Connect(function()
+        if not selectedBranch then return end
+        
+        local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
+        local options = {}
+        
+        -- Add parent option
+        local parent = nil
+        for _, child in ipairs(assignments.children) do
+            if child.child == selectedBranch then
+                parent = child.parent
+                break
             end
+        end
+        if parent then
+            table.insert(options, "↑ Parent: " .. parent)
+        end
+        
+        -- Add children options
+        local children = {}
+        for _, child in ipairs(assignments.children) do
+            if child.parent == selectedBranch then
+                table.insert(children, child.child)
+            end
+        end
+        for _, childName in ipairs(children) do
+            table.insert(options, "↓ Child: " .. childName)
+        end
+        
+        -- Add trunk option if not already trunk
+        if assignments.trunk ~= selectedBranch then
+            table.insert(options, "🌳 Trunk: " .. (assignments.trunk or "none"))
+        end
+        
+        if #options > 0 then
+            -- Create a simple navigation popup (using the existing dropdown system)
+            local navFrame = Instance.new("Frame")
+            navFrame.BackgroundColor3 = Color3.fromRGB(36,36,36)
+            navFrame.BorderSizePixel = 1
+            navFrame.Size = UDim2.new(0, 200, 0, math.min(#options * 25 + 10, 200))
+            navFrame.Position = UDim2.new(0.5, -100, 0.5, -50)
+            navFrame.ZIndex = 1000
+            navFrame.Parent = popupHost
+            
+            local list = Instance.new("UIListLayout")
+            list.Parent = navFrame
+            list.Padding = UDim.new(0,2)
+            
+            for _, option in ipairs(options) do
+                local btn = Instance.new("TextButton")
+                btn.Text = option
+                btn.Size = UDim2.new(1, -4, 0, 20)
+                btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+                btn.TextColor3 = Color3.new(1,1,1)
+                btn.TextXAlignment = Enum.TextXAlignment.Left
+                btn.Parent = navFrame
+                btn.MouseButton1Click:Connect(function()
+                    local targetName = option:match(": (.+)$")
+                    if targetName then
+                        refreshBranchDropdown(targetName)
+                    end
+                    navFrame:Destroy()
+                end)
+            end
+            
+            -- Auto-close after 5 seconds
+            task.delay(5, function()
+                if navFrame.Parent then
+                    navFrame:Destroy()
+                end
+            end)
         end
     end)
 
@@ -427,30 +679,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         if LoomDesigner.ApplyAuthoringAndPreview then
             LoomDesigner.ApplyAuthoringAndPreview(nil)
         end
-    end)
-
-    local addBtn = Instance.new("TextButton")
-    addBtn.Text = "Add Branch"
-    addBtn.Size = UDim2.new(0,160,0,24)
-    addBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    addBtn.TextColor3 = Color3.new(1,1,1)
-    addBtn.LayoutOrder = 3
-    addBtn.Parent = container
-    addBtn.MouseButton1Click:Connect(function()
-        ensureStart()
-        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
-        local hadNone = not next(branches)
-        local i = 1
-        local name = "branch" .. i
-        while branches[name] do
-            i += 1
-            name = "branch" .. i
-        end
-        if LoomDesigner.CreateBranch then
-            LoomDesigner.CreateBranch(name, { kind = "straight" })
-        end
-        LoomDesigner.RebuildPreview()
-        refreshBranchDropdown(hadNone and name or nil)
     end)
 
     local quickBtn = Instance.new("TextButton")
@@ -509,35 +737,131 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
-    -- rotation rules
-    local rotFrame = makeList(container)
+    -- Advanced Rotation Controls Section
+    local rotationSection = Instance.new("Frame")
+    rotationSection.BackgroundTransparency = 1
+    rotationSection.Size = UDim2.new(1,0,0,0)
+    rotationSection.AutomaticSize = Enum.AutomaticSize.Y
+    rotationSection.Parent = container
+    
+    local rotationHeader = Instance.new("TextLabel")
+    rotationHeader.Text = "--- Rotation Rules ---"
+    rotationHeader.BackgroundTransparency = 1
+    rotationHeader.TextColor3 = Color3.fromRGB(255,255,0)
+    rotationHeader.Size = UDim2.new(1,0,0,24)
+    rotationHeader.TextXAlignment = Enum.TextXAlignment.Center
+    rotationHeader.Parent = rotationSection
+    
+    local rotFrame = makeList(rotationSection)
+    
     local state = LoomDesigner.GetState and LoomDesigner.GetState() or {}
     local rot = state.overrides and state.overrides.rotationRules or {}
-    local contOpts = {"accumulate","absolute"}
-    local contIndex = rot.continuity == "absolute" and 2 or 1
+    
+    local contOpts = {"auto","accumulate","absolute"}
+    local contIndex = 1
+    if rot.continuity == "accumulate" then contIndex = 2
+    elseif rot.continuity == "absolute" then contIndex = 3 end
+    
     labeledDropdown(rotFrame, popupHost, "Continuity", contOpts, contIndex, function(opt)
         ensureStart()
-        LoomDesigner.SetOverrides({rotationRules = {continuity = opt}})
+        local mode = opt == "auto" and nil or opt
+        LoomDesigner.SetOverrides({rotationRules = {continuity = mode}})
         LoomDesigner.RebuildPreview()
     end)
-    numberField(rotFrame, "Yaw Clamp Deg", rot.yawClampDeg, function(v)
+    
+    numberField(rotFrame, "Yaw Clamp Deg", rot.yawClampDeg or 22, function(v)
         ensureStart()
         LoomDesigner.SetOverrides({rotationRules = {yawClampDeg = v}})
         LoomDesigner.RebuildPreview()
     end)
-    numberField(rotFrame, "Pitch Clamp Deg", rot.pitchClampDeg, function(v)
+    
+    numberField(rotFrame, "Pitch Clamp Deg", rot.pitchClampDeg or 10, function(v)
         ensureStart()
         LoomDesigner.SetOverrides({rotationRules = {pitchClampDeg = v}})
         LoomDesigner.RebuildPreview()
     end)
+    
+    -- Micro-jitter controls
+    local jitterEnabled = rot.enableMicroJitter == true
+    labeledDropdown(rotFrame, popupHost, "Enable Micro Jitter", {"No", "Yes"}, jitterEnabled and 2 or 1, function(opt)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {enableMicroJitter = opt == "Yes"}})
+        LoomDesigner.RebuildPreview()
+    end)
+    
+    numberField(rotFrame, "Micro Jitter Deg", rot.microJitterDeg or 0, function(v)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {microJitterDeg = v}})
+        LoomDesigner.RebuildPreview()
+    end)
+    
+    -- Twist controls
+    local twistEnabled = rot.enableTwist ~= false
+    labeledDropdown(rotFrame, popupHost, "Enable Twist", {"No", "Yes"}, twistEnabled and 2 or 1, function(opt)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {enableTwist = opt == "Yes"}})
+        LoomDesigner.RebuildPreview()
+    end)
+    
+    numberField(rotFrame, "Twist Strength Deg/Seg", rot.twistStrengthDegPerSeg or 0, function(v)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {twistStrengthDegPerSeg = v}})
+        LoomDesigner.RebuildPreview()
+    end)
+    
+    numberField(rotFrame, "Twist RNG Range Deg", rot.twistRngRangeDeg or 0, function(v)
+        ensureStart()
+        LoomDesigner.SetOverrides({rotationRules = {twistRngRangeDeg = v}})
+        LoomDesigner.RebuildPreview()
+    end)
 
-    -- model management
-    local modelFrame = makeList(container)
+    -- Model Management Section
+    local modelSection = Instance.new("Frame")
+    modelSection.BackgroundTransparency = 1
+    modelSection.Size = UDim2.new(1,0,0,0)
+    modelSection.AutomaticSize = Enum.AutomaticSize.Y
+    modelSection.Parent = container
+    
+    local modelHeader = Instance.new("TextLabel")
+    modelHeader.Text = "--- Model Library ---"
+    modelHeader.BackgroundTransparency = 1
+    modelHeader.TextColor3 = Color3.fromRGB(0,255,255)
+    modelHeader.Size = UDim2.new(1,0,0,24)
+    modelHeader.TextXAlignment = Enum.TextXAlignment.Center
+    modelHeader.Parent = modelSection
+
+    local modelFrame = makeList(modelSection)
+    
+    -- Available models in ReplicatedStorage
+    local availableModels = {"BasicBranch", "LeafyBranch", "BarkSegment", "TwigSegment"}  -- Default examples
+    
+    local function getAvailableModels()
+        local models = {}
+        local RS = game:GetService("ReplicatedStorage")
+        local modelsFolder = RS:FindFirstChild("models") or RS:FindFirstChild("Models")
+        if modelsFolder then
+            for _, model in ipairs(modelsFolder:GetChildren()) do
+                table.insert(models, model.Name)
+            end
+        end
+        return #models > 0 and models or availableModels
+    end
+    
     local depthInput = numberField(modelFrame, "Model Depth", 0, function() end)
-    local modelInput = numberField(modelFrame, "Model Name", nil, function() end)
+    
+    local modelDropdown = nil
+    local function refreshModelDropdown()
+        if modelDropdown then modelDropdown.Parent:Destroy() end
+        local models = getAvailableModels()
+        modelDropdown = labeledDropdown(modelFrame, popupHost, "Model Name", models, 1, function(opt)
+            -- Model selected
+        end)
+    end
+    refreshModelDropdown()
+    
     local modelBtn = Instance.new("TextButton")
-    modelBtn.Text = "Add Model"
-    modelBtn.Size = UDim2.new(0,160,0,24)
+    modelBtn.Text = "Add Model to Depth"
+    modelBtn.Size = UDim2.new(0,180,0,24)
     modelBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
     modelBtn.TextColor3 = Color3.new(1,1,1)
     modelBtn.Parent = modelFrame
@@ -549,13 +873,20 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     modelList.AutomaticSize = Enum.AutomaticSize.Y
     modelList.TextXAlignment = Enum.TextXAlignment.Left
     modelList.TextYAlignment = Enum.TextYAlignment.Top
+    modelList.Text = "Model assignments:\n[0] Default segments\n[1] Secondary branches\n[terminal] End caps"
     modelList.Parent = modelFrame
 
     local function refreshModels()
         local models = LoomDesigner.GetModels and LoomDesigner.GetModels() or {}
-        local lines = {}
-        for depth, list in pairs(models) do
-            lines[#lines+1] = string.format("[%s] %s", tostring(depth), table.concat(list, ", "))
+        local lines = {"Model assignments:"}
+        if next(models) then
+            for depth, list in pairs(models) do
+                lines[#lines+1] = string.format("[%s] %s", tostring(depth), table.concat(list, ", "))
+            end
+        else
+            lines[#lines+1] = "[0] Default segments"
+            lines[#lines+1] = "[1] Secondary branches" 
+            lines[#lines+1] = "[terminal] End caps"
         end
         modelList.Text = table.concat(lines, "\n")
     end
@@ -564,13 +895,23 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     modelBtn.MouseButton1Click:Connect(function()
         ensureStart()
         local depth = tonumber(depthInput.Text) or 0
-        local ref = modelInput.Text
-        if LoomDesigner.AddModel then
-            LoomDesigner.AddModel(depth, ref)
+        local models = getAvailableModels()
+        local selectedModel = models[1]  -- Default to first model
+        if modelDropdown and modelDropdown.Text and modelDropdown.Text ~= "Select" then
+            selectedModel = modelDropdown.Text
+        end
+        if LoomDesigner.AddModel and selectedModel then
+            LoomDesigner.AddModel(depth, selectedModel)
             refreshModels()
             LoomDesigner.RebuildPreview()
         end
     end)
+
+    -- Initial setup after all functions are defined
+    createKindDropdown()
+    refreshBranchDropdown()
+    renderFields()
+    GrowthStylesCore.ApplyPreview()
 
 end
 
