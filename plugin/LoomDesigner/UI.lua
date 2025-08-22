@@ -321,6 +321,7 @@ local secRot      = makeSection(scroll, "Rotation Rules")
 local secDeco     = makeSection(scroll, "Decorations")
 -- Branch authoring panels
 local secBranchLib = makeSection(scroll, "Branch Library")
+local secBranchDetail = makeSection(scroll, "Branch Detail")
 local secBranchTree = makeSection(scroll, "Branch Tree")
 local secModels    = makeSection(scroll, "Models (Authoring)")
 local secDecoAuth  = makeSection(scroll, "Decorations (Authoring)")
@@ -330,6 +331,7 @@ local secIO        = makeSection(scroll, "Export / Import")
 local selectedBranch: string? = nil
 local renderBranchLibrary
 local renderBranchTree
+local renderBranchDetail
 
 
 local seedLabel
@@ -715,6 +717,7 @@ local renameBox = labeledTextBox(secBranchLib, "New Name", "", function(txt)
         applyAuthoringAndPreview()
         renderBranchLibrary()
         renderBranchTree()
+        renderBranchDetail()
     end
     renameBox.Parent.Visible = false
 end)
@@ -730,6 +733,7 @@ local function newBranch()
     applyAuthoringAndPreview()
     updateStatus()
     renderBranchLibrary()
+    renderBranchDetail()
 end
 
 local function duplicateBranch()
@@ -743,6 +747,7 @@ local function duplicateBranch()
     selectedBranch = name
     applyAuthoringAndPreview()
     renderBranchLibrary()
+    renderBranchDetail()
 end
 
 local function renameBranch()
@@ -759,6 +764,7 @@ local function deleteBranch()
     updateStatus()
     renderBranchLibrary()
     renderBranchTree()
+    renderBranchDetail()
 end
 
 makeBtn(branchButtonsRow, "New", newBranch)
@@ -789,8 +795,115 @@ renderBranchLibrary = function()
             applyAuthoringAndPreview()
             renderBranchLibrary()
             renderBranchTree()
+            renderBranchDetail()
         end)
     end
+end
+
+renderBranchDetail = function()
+    for _, c in ipairs(secBranchDetail:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
+    end
+    if not selectedBranch then
+        local lab = Instance.new("TextLabel")
+        lab.Text = "Select a branch"
+        lab.BackgroundTransparency = 1
+        lab.TextColor3 = Color3.fromRGB(200,200,200)
+        lab.Size = UDim2.new(1,0,0,20)
+        lab.TextXAlignment = Enum.TextXAlignment.Left
+        lab.Parent = secBranchDetail
+        return
+    end
+
+    local branches = LoomDesigner.GetBranches()
+    local prof = branches[selectedBranch] or {}
+    local kinds = LoomDesigner.SUPPORTED_KIND_LIST or {}
+    dropdown(secBranchDetail, popupHost, "Kind", kinds, table.find(kinds, prof.kind) or 1, function(opt)
+        LoomDesigner.EditBranch(selectedBranch, {kind = opt})
+        applyAuthoringAndPreview()
+        renderBranchDetail()
+    end)
+
+    local ampBox = labeledTextBox(secBranchDetail, "Amplitude (deg)", tostring(prof.amplitudeDeg or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {amplitudeDeg = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local freqBox = labeledTextBox(secBranchDetail, "Frequency", tostring(prof.frequency or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {frequency = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local curvBox = labeledTextBox(secBranchDetail, "Curvature", tostring(prof.curvature or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {curvature = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local zzEveryBox = labeledTextBox(secBranchDetail, "Zigzag Every", tostring(prof.zigzagEvery or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {zigzagEvery = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local zzStepBox = labeledTextBox(secBranchDetail, "Zigzag Step", tostring(prof.zigzagStep or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {zigzagStep = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    labeledTextBox(secBranchDetail, "Roll Bias", tostring(prof.rollBias or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {rollBias = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local sigKBox = labeledTextBox(secBranchDetail, "Sigmoid k", tostring(prof.sigmoidK or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {sigmoidK = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local sigMidBox = labeledTextBox(secBranchDetail, "Sigmoid Mid", tostring(prof.sigmoidMid or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {sigmoidMid = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local chaoticBox = labeledTextBox(secBranchDetail, "Chaotic R", tostring(prof.chaoticR or ""), function(txt)
+        local n = tonumber(txt)
+        if n then
+            LoomDesigner.EditBranch(selectedBranch, {chaoticR = n})
+            applyAuthoringAndPreview()
+        end
+    end)
+
+    local k = prof.kind or "straight"
+    freqBox.Parent.Visible = (k == "curved")
+    curvBox.Parent.Visible = (k == "curved")
+    zzEveryBox.Parent.Visible = (k == "zigzag")
+    zzStepBox.Parent.Visible = (k == "zigzag")
+    sigKBox.Parent.Visible = (k == "sigmoid")
+    sigMidBox.Parent.Visible = (k == "sigmoid")
+    chaoticBox.Parent.Visible = (k == "chaotic")
 end
 
 -- Branch Tree ----------------------------------------------------------------
@@ -846,6 +959,7 @@ end
 
 renderBranchLibrary()
 renderBranchTree()
+renderBranchDetail()
 -- Models -------------------------------------------------------------------
 local function renderModels()
     for _, c in ipairs(secModels:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
