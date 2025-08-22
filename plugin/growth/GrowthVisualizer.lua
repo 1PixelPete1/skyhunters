@@ -215,7 +215,8 @@ local function sampleSegCountTri(rng, minN, maxN, modeN)
     return x
 end
 
-local function normal01(rng)
+-- Box-Muller transform producing a standard normal deviate
+local function gaussian(rng)
     if rng._spare then
         local z = rng._spare
         rng._spare = nil
@@ -230,7 +231,7 @@ local function normal01(rng)
 end
 
 local function normalClamped(rng, a, b, mu, sigma)
-    local x = mu + sigma * normal01(rng)
+    local x = mu + sigma * gaussian(rng)
     if x < a then x = a end
     if x > b then x = b end
     return x
@@ -380,8 +381,9 @@ local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cf
                 enableScaleJitter = true
             end
         end
-        local lenJ = enableScaleJitter and rngMicro:NextNumber(-jitter.length, jitter.length) or 0
-        local thJ  = enableScaleJitter and rngMicro:NextNumber(-jitter.thickness, jitter.thickness) or 0
+        local jSample = enableScaleJitter and gaussian(rngMicro) or 0
+        local lenJ = jSample * jitter.length
+        local thJ  = jSample * jitter.thickness
         local length = baseLength * baseS * (1 + lenJ)
         local thickness = baseThickness * baseS * (1 + thJ)
         if not isfinite(length) or length <= 0 then length = baseLength end
