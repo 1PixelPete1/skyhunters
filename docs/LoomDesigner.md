@@ -5,16 +5,22 @@ This guide outlines how to access the plugin's `Main` module from the Roblox Stu
 ## Accessing the `Main` Module
 
 1. In Roblox Studio, open **View → Command Bar**.
-2. Load the module:
+2. Reference the plugin folder and load the module:
 
 ```lua
 -- Require the plugin's Main module
-local LD = require(game:GetService("ServerScriptService"):WaitForChild("LoomDesigner"):WaitForChild("Main"))
+local pluginFolder = plugin:WaitForChild("LoomDesigner")
+local LD = require(pluginFolder)
+
+-- Initialize authoring state (creates default branch1)
+LD.Start(plugin)
 ```
 
-The `LD` table now exposes the plugin's authoring functions.
+The `LD` table now exposes the plugin's authoring functions. `Start` must be called once before creating or editing branches so the default profile exists.
 
 ## Examples
+
+All snippets assume `LD.Start(plugin)` has already been executed.
 
 ### CreateBranch
 Create a new branch profile:

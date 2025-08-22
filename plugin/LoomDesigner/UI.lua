@@ -209,10 +209,13 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     local selectedBranch: string? = nil
     local branchDropdownBtn: TextButton? = nil
     local function refreshBranchDropdown()
+        ensureStart()
         if branchDropdownBtn then branchDropdownBtn.Parent:Destroy() end
         local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
         local names = {}
-        for name in pairs(branches) do table.insert(names, name) end
+        for name in pairs(branches) do
+            table.insert(names, name)
+        end
         table.sort(names)
         branchDropdownBtn = labeledDropdown(container, popupHost, "Branch", names, 1, function(opt)
             selectedBranch = opt
