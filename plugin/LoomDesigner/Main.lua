@@ -76,6 +76,18 @@ newState.assignments = select(1, FT.watchTable("newState.assignments", newState.
 newState.assignments.children = select(1, FT.watchTable("newState.assignments.children", newState.assignments.children))
 newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
 
+ensureTrunk = function()
+        if next(newState.branches) == nil then
+                newState.branches["branch1"] = {kind = "straight"}
+                newState.assignments.trunk = "branch1"
+        elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
+                for name in pairs(newState.branches) do
+                        newState.assignments.trunk = name
+                        break
+                end
+        end
+end
+
 local function hashToInt(s)
         s = tostring(s)
         local h = 2166136261
@@ -114,10 +126,7 @@ function LoomDesigner.Start(plugin)
         end
 
         -- ensure a default branch exists for editing
-        if next(newState.branches) == nil then
-                newState.branches["branch1"] = {kind = "straight"}
-                newState.assignments.trunk = "branch1"
-        end
+        ensureTrunk()
 
         return newState
 end
@@ -317,15 +326,7 @@ function LoomDesigner.ImportAuthoring(cfg)
                 1,
                 FT.watchTable("newState.assignments.children", newState.assignments.children)
         )
-        if next(newState.branches) == nil then
-                newState.branches["branch1"] = {kind = "straight"}
-                newState.assignments.trunk = "branch1"
-        elseif not newState.assignments.trunk or newState.assignments.trunk == "" then
-                for name in pairs(newState.branches) do
-                        newState.assignments.trunk = name
-                        break
-                end
-        end
+        ensureTrunk()
 
 end
 
@@ -394,15 +395,7 @@ local function renderBranch(name, depth)
 end
 
 function LoomDesigner.RebuildPreview(_container)
-       if next(newState.branches) == nil then
-               newState.branches["branch1"] = {kind = "straight"}
-               newState.assignments.trunk = "branch1"
-       elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
-               for name in pairs(newState.branches) do
-                       newState.assignments.trunk = name
-                       break
-               end
-       end
+       ensureTrunk()
 
        local parent = ensurePreviewParent()
        clearExistingPreview(parent)
