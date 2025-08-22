@@ -196,14 +196,6 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     renderFields()
     GrowthStylesCore.ApplyPreview()
 
-    local applyBtn = Instance.new("TextButton")
-    applyBtn.Text = "Apply to Trunk"
-    applyBtn.Size = UDim2.new(0,160,0,24)
-    applyBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
-    applyBtn.TextColor3 = Color3.new(1,1,1)
-    applyBtn.Visible = false
-    applyBtn.Parent = container
-
     local started = false
     local function ensureStart()
         if not started then
@@ -213,6 +205,98 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             started = ok
         end
     end
+
+    local selectedBranch: string? = nil
+    local branchDropdownBtn: TextButton? = nil
+    local function refreshBranchDropdown()
+        if branchDropdownBtn then branchDropdownBtn.Parent:Destroy() end
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local names = {}
+        for name in pairs(branches) do table.insert(names, name) end
+        table.sort(names)
+        branchDropdownBtn = labeledDropdown(container, popupHost, "Branch", names, 1, function(opt)
+            selectedBranch = opt
+        end)
+        selectedBranch = names[1]
+    end
+    refreshBranchDropdown()
+
+    local addBtn = Instance.new("TextButton")
+    addBtn.Text = "Add Branch"
+    addBtn.Size = UDim2.new(0,160,0,24)
+    addBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    addBtn.TextColor3 = Color3.new(1,1,1)
+    addBtn.Parent = container
+    addBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+        local i = 1
+        local name = "branch" .. i
+        while branches[name] do
+            i += 1
+            name = "branch" .. i
+        end
+        if LoomDesigner.CreateBranch then
+            LoomDesigner.CreateBranch(name, { kind = "straight" })
+        end
+        LoomDesigner.RebuildPreview()
+        refreshBranchDropdown()
+    end)
+
+    local delBtn = Instance.new("TextButton")
+    delBtn.Text = "Delete Branch"
+    delBtn.Size = UDim2.new(0,160,0,24)
+    delBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    delBtn.TextColor3 = Color3.new(1,1,1)
+    delBtn.Parent = container
+    delBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        if selectedBranch and LoomDesigner.DeleteBranch then
+            LoomDesigner.DeleteBranch(selectedBranch)
+            LoomDesigner.RebuildPreview()
+            refreshBranchDropdown()
+        end
+    end)
+
+    local trunkBtn = Instance.new("TextButton")
+    trunkBtn.Text = "Set as Trunk"
+    trunkBtn.Size = UDim2.new(0,160,0,24)
+    trunkBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    trunkBtn.TextColor3 = Color3.new(1,1,1)
+    trunkBtn.Parent = container
+    trunkBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        if selectedBranch and LoomDesigner.SetTrunk then
+            LoomDesigner.SetTrunk(selectedBranch)
+            LoomDesigner.RebuildPreview()
+        end
+    end)
+
+    local attachBtn = Instance.new("TextButton")
+    attachBtn.Text = "Attach Child"
+    attachBtn.Size = UDim2.new(0,160,0,24)
+    attachBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    attachBtn.TextColor3 = Color3.new(1,1,1)
+    attachBtn.Parent = container
+    attachBtn.MouseButton1Click:Connect(function()
+        ensureStart()
+        if selectedBranch and LoomDesigner.AddChild then
+            local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
+            local trunk = assignments.trunk
+            if trunk and trunk ~= "" and trunk ~= selectedBranch then
+                LoomDesigner.AddChild(trunk, selectedBranch)
+                LoomDesigner.RebuildPreview()
+            end
+        end
+    end)
+
+    local applyBtn = Instance.new("TextButton")
+    applyBtn.Text = "Apply to Trunk"
+    applyBtn.Size = UDim2.new(0,160,0,24)
+    applyBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    applyBtn.TextColor3 = Color3.new(1,1,1)
+    applyBtn.Visible = false
+    applyBtn.Parent = container
 
     applyBtn.MouseButton1Click:Connect(function()
         ensureStart()
