@@ -9,8 +9,7 @@ commenting requirements.
 -- create module table
 local FT = {}
 
--- run-time configuration defaults; may be overridden via FT.init
-FT.ENABLED = true -- master switch to disable all tracing
+FT.ENABLED = false -- master switch to disable verbose tracing
 FT.TAG_ALLOW = nil -- optional set {tag=true} to filter logs
 FT.MAX_STR = 200 -- max length when stringifying values
 
@@ -90,16 +89,16 @@ end
 
 -- internal dispatch function used by log/warn
 local function emit(level: ("print"|"warn"), tag: string, msg: string)
-    -- skip entirely if disabled
+    -- warnings always surface regardless of FT.ENABLED so errors are visible
+    if level == "warn" then
+        warn(msg)
+        return
+    end
+    -- skip debug logs when tracing disabled
     if not FT.ENABLED then return end
     -- tag filtering when TAG_ALLOW is a set of allowed tags
     if FT.TAG_ALLOW and not FT.TAG_ALLOW[tag] then return end
-    -- choose output function based on level
-    if level == "warn" then
-        warn(msg)
-    else
-        print(msg)
-    end
+    print(msg)
 end
 
 -- public logging API ------------------------------------------------------

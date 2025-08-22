@@ -312,7 +312,6 @@ end)
 updateSpawnLabel()
 
 -- === Sections ===
-local secConfig   = makeSection(scroll, "Branch Config")
 local secSeed     = makeSection(scroll, "Seed / Randomness")
 local secGrowth   = makeSection(scroll, "Growth Progression")
 local secSeg      = makeSection(scroll, "Segment Overrides")
@@ -322,6 +321,7 @@ local secRot      = makeSection(scroll, "Rotation Rules")
 local secDeco     = makeSection(scroll, "Decorations")
 -- Branch authoring panels
 local secBranchLib = makeSection(scroll, "Branch Library")
+local secBranchDetails = makeSection(scroll, "Branch Details")
 local secBranchTree = makeSection(scroll, "Branch Tree")
 local secModels    = makeSection(scroll, "Models (Authoring)")
 local secDecoAuth  = makeSection(scroll, "Decorations (Authoring)")
@@ -330,31 +330,9 @@ local secIO        = makeSection(scroll, "Export / Import")
 -- Forward decls for branch authoring
 local selectedBranch: string? = nil
 local renderBranchLibrary
+local renderBranchDetails
 local renderBranchTree
 
--- Config dropdown (list from LoomConfigs keys)
-local LoomConfigs = require(game.ReplicatedStorage.looms.LoomConfigs)
-local LoomConfigUtil = require(game.ReplicatedStorage.looms.LoomConfigUtil)
-
-local function listConfigIds()
-    local ids = {}
-    for k, v in pairs(LoomConfigs) do
-        if type(v) == "table" then table.insert(ids, k) end
-    end
-    table.sort(ids)
-    return ids
-end
-
-local configIds = listConfigIds()
-
-dropdown(secConfig, popupHost, "Config", configIds, 1, function(id)
-    if type(LoomConfigs[id]) ~= "table" then
-        warn("[LoomDesigner] Ignoring non-table config key: " .. tostring(id))
-    else
-        LoomDesigner.SetConfigId(id)
-        LoomDesigner.RebuildPreview(nil)
-    end
-end)
 
 local seedLabel
 local seedBox = labeledTextBox(secSeed, "Seed", tostring(LoomDesigner.GetSeed()), function(txt)
@@ -442,34 +420,6 @@ if n then
 end
 end)
 
-local function renderProfileSection()
-    for _, c in ipairs(secProfile:GetChildren()) do
-        if c:IsA("GuiObject") then c:Destroy() end
-    end
-    local st = LoomDesigner.GetState()
-    local active = st.activeProfileName
-    if not active then
-        local banner = Instance.new("TextLabel")
-        banner.Text = "Select or create a Profile in Authoring to edit."
-        banner.TextColor3 = Color3.fromRGB(255,180,80)
-        banner.BackgroundTransparency = 1
-        banner.Size = UDim2.new(1,0,0,20)
-        banner.Parent = secProfile
-    else
-        local KINDS = LoomDesigner.SUPPORTED_KIND_LIST or {"straight","curved","zigzag","sigmoid","chaotic"}
-        local draft = st.profileDrafts[active]
-        dropdown(secProfile, popupHost, "Kind", KINDS,
-            table.find(KINDS, (draft and draft.kind) or "curved") or 2,
-            function(opt)
-                draft.kind = string.lower(opt)
-                LoomDesigner.CommitProfileEdit(active, draft)
-                LoomDesigner.ApplyAuthoring()
-                LoomDesigner.RebuildPreview(nil)
-            end
-        )
-    end
-end
-renderProfileSection()
 
 -- === Segment Geometry ===
 dropdown(secGeo, popupHost, "Mode", {"Model", "Part"}, 1, function(opt)
@@ -766,6 +716,7 @@ local renameBox = labeledTextBox(secBranchLib, "New Name", "", function(txt)
         selectedBranch = txt
         applyAuthoringAndPreview()
         renderBranchLibrary()
+        renderBranchDetails()
         renderBranchTree()
     end
     renameBox.Parent.Visible = false
@@ -782,6 +733,7 @@ local function newBranch()
     applyAuthoringAndPreview()
     updateStatus()
     renderBranchLibrary()
+    renderBranchDetails()
 end
 
 local function duplicateBranch()
@@ -795,6 +747,7 @@ local function duplicateBranch()
     selectedBranch = name
     applyAuthoringAndPreview()
     renderBranchLibrary()
+    renderBranchDetails()
 end
 
 local function renameBranch()
@@ -810,6 +763,7 @@ local function deleteBranch()
     applyAuthoringAndPreview()
     updateStatus()
     renderBranchLibrary()
+    renderBranchDetails()
     renderBranchTree()
 end
 
@@ -840,8 +794,50 @@ renderBranchLibrary = function()
             LoomDesigner.EditBranch(name, {})
             applyAuthoringAndPreview()
             renderBranchLibrary()
+            renderBranchDetails()
             renderBranchTree()
         end)
+    end
+end
+
+-- Branch Details -------------------------------------------------------------
+renderBranchDetails = function()
+    for _, c in ipairs(secBranchDetails:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
+    end
+    if not selectedBranch then return end
+    local branch = LoomDesigner.GetBranches()[selectedBranch]
+    if not branch then return end
+
+    -- kind dropdown
+    local kinds = LoomDesigner.SUPPORTED_KIND_LIST
+    local idx = table.find(kinds, branch.kind) or 1
+    dropdown(secBranchDetails, popupHost, "Kind", kinds, idx, function(opt)
+        LoomDesigner.EditBranch(selectedBranch, {kind = opt})
+        branch = LoomDesigner.GetBranches()[selectedBranch]
+        renderBranchDetails()
+        applyAuthoringAndPreview()
+    end)
+
+    -- helper for numeric fields
+    local function numField(label, key)
+        bindNumberField(secBranchDetails, label, function() return branch[key] end,
+            function(v) LoomDesigner.EditBranch(selectedBranch, {[key] = v}) end,
+            function() applyAuthoringAndPreview() end)
+    end
+
+    if branch.kind == "curved" then
+        numField("Amplitude Deg", "amplitudeDeg")
+        numField("Frequency", "frequency")
+    elseif branch.kind == "zigzag" then
+        numField("Zigzag Every", "zigzagEvery")
+        numField("Zigzag Step", "zigzagStep")
+    elseif branch.kind == "sigmoid" then
+        numField("Curvature", "curvature")
+    elseif branch.kind == "chaotic" then
+        numField("Roll Bias", "rollBias")
+        numField("Amplitude Deg", "amplitudeDeg")
+        numField("Frequency", "frequency")
     end
 end
 
@@ -897,6 +893,7 @@ renderBranchTree = function()
 end
 
 renderBranchLibrary()
+renderBranchDetails()
 renderBranchTree()
 -- Models -------------------------------------------------------------------
 local function renderModels()

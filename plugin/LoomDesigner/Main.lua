@@ -12,10 +12,6 @@ local GrowthVisualizer = RequireUtil.fromRelative(script.Parent.Parent, {"growth
 GrowthVisualizer = RequireUtil.must(GrowthVisualizer, "growth/GrowthVisualizer")
 print("[LoomDesigner] GrowthVisualizer:", GrowthVisualizer._PLUGIN_VERSION or "unknown")
 
-local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
-    or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
-LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
-
 local LoomConfigUtil = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigUtil"})
     or RequireUtil.fromReplicatedStorage({"looms","LoomConfigUtil"})
 LoomConfigUtil = RequireUtil.must(LoomConfigUtil, "looms/LoomConfigUtil")
@@ -26,6 +22,9 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
+
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
+LoomConfigs = RequireUtil.must(LoomConfigs, "looms/LoomConfigs")
 
 -- Forward declare so we can use local deepCopy inside DC even if it’s defined later
 local deepCopy
@@ -50,45 +49,8 @@ for _,k in ipairs(SUPPORTED_KIND_LIST) do SUPPORTED_KINDS[k] = true end
 LoomDesigner.SUPPORTED_KIND_LIST = SUPPORTED_KIND_LIST
 LoomDesigner.SUPPORTED_KINDS = SUPPORTED_KINDS
 
-local function firstConfigKey(configs)
-        for k, v in pairs(configs) do
-                if type(v) == "table" then return k end
-        end
-        return nil
-end
-
-local function resolveConfigId(configs, wantedId)
-        if type(configs) ~= "table" then
-                warn("[LoomDesigner] LoomConfigs is not a table; check module load path")
-                return nil
-        end
-        if wantedId and type(configs[wantedId]) == "table" then
-                return wantedId
-        end
-        local fallback = firstConfigKey(configs)
-        if not fallback then
-                warn("[LoomDesigner] No valid config tables found in LoomConfigs")
-                return nil
-        end
-        if wantedId and type(configs[wantedId]) == "function" then
-                warn(("[LoomDesigner] '%s' is a function, not a config. Falling back to '%s'")
-                        :format(tostring(wantedId), tostring(fallback)))
-        elseif wantedId and configs[wantedId] == nil then
-                warn(("[LoomDesigner] Unknown configId '%s'. Falling back to '%s'")
-                        :format(tostring(wantedId), tostring(fallback)))
-        end
-        return fallback
-end
-
-local function isConfigTable(x)
-        return type(x) == "table" and (x.id ~= nil or x.uiName ~= nil or next(x) ~= nil)
-end
-
-local firstConfigId = firstConfigKey(LoomConfigs)
-
--- current working state used by the designer
-local state = {
-        configId = firstConfigId,
+-- unified authoring state
+local newState = {
         baseSeed = 12345,
         g = 50, -- growth percent
         overrides = {
@@ -96,40 +58,23 @@ local state = {
                 rotationRules = {},
                 decorations = { enabled = false, types = {} },
         },
-
-        -- Authoring state (Stage D)
-        savedProfiles = {},
-        profileDrafts = {},
-        activeProfileName = nil,
-        branchAssignments = { trunkProfile = "" },
         modelLibrary = {},
         modelsByDepth = {},
         decoLibrary = {},
-}
-
--- Proxy top-level state and sub tables so every read/write is logged
-state = select(1, FT.watchTable("state", state))
-state.savedProfiles = select(1, FT.watchTable("state.savedProfiles", state.savedProfiles))
-state.profileDrafts = select(1, FT.watchTable("state.profileDrafts", state.profileDrafts))
-state.overrides = select(1, FT.watchTable("state.overrides", state.overrides))
-state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
-
--- independent branch design + assignment state for migration
-local newState = {
-    baseSeed = 12345,
-    g = 50,
-    branches = {},
-    assignments = {
-        trunk = "",
-        children = {},
-    },
+        branches = {},
+        assignments = {
+                trunk = "",
+                children = {},
+        },
 }
 
 -- watch newState tables for trace logging
 newState = select(1, FT.watchTable("newState", newState))
+newState.overrides = select(1, FT.watchTable("newState.overrides", newState.overrides))
 newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
 newState.assignments = select(1, FT.watchTable("newState.assignments", newState.assignments))
 newState.assignments.children = select(1, FT.watchTable("newState.assignments.children", newState.assignments.children))
+newState.modelsByDepth = select(1, FT.watchTable("newState.modelsByDepth", newState.modelsByDepth))
 
 local function hashToInt(s)
         s = tostring(s)
@@ -150,13 +95,16 @@ end
 function LoomDesigner.Start(plugin)
         print("LoomDesigner plugin started", plugin)
 
-        -- read optional tag filter from plugin settings then init tracer
+        -- read optional tag filter and enable flag from plugin settings then init tracer
         local tagAllow
+        local enabled = false
         if plugin and plugin.GetSetting then
                 local ok, tags = pcall(plugin.GetSetting, plugin, "ld.ft.tags")
                 if ok then tagAllow = tags end
+                local okEnabled, en = pcall(plugin.GetSetting, plugin, "ld.ft.enabled")
+                if okEnabled then enabled = en end
         end
-        FT.init({enabled = true, tagAllow = tagAllow, maxStr = 160})
+        FT.init({enabled = enabled, tagAllow = tagAllow, maxStr = 160})
 
         -- checkpoint at start: do we have a GrowthVisualizer module?
         FT.check("Start.begin", {hasGV = GrowthVisualizer ~= nil})
@@ -168,46 +116,35 @@ function LoomDesigner.Start(plugin)
                 FT.warn("GV.missing.SetEditorMode", "skipped")
         end
 
-        -- Bootstrap one profile if none exist
-        if FT.branch("Start.hasProfiles", next(state.savedProfiles or {}) ~= nil,
-                {count = (state.savedProfiles and #state.savedProfiles)}) then
-               ensureTrunk(state, state.activeProfileName)
-        else
-                LoomDesigner.CreateProfile("profile1", { kind = "curved", segmentCountMin = 1, segmentCountMax = 1 })
-                state.profileDrafts = state.profileDrafts or {}
-                state.profileDrafts["profile1"] = DC(state.savedProfiles["profile1"])
-                state.activeProfileName = "profile1"
-               ensureTrunk(state, state.activeProfileName)
-                LoomDesigner.CommitProfileEdit("profile1", state.profileDrafts["profile1"])
-                FT.check("Start.created", {active = state.activeProfileName})
+        -- ensure a default branch exists for editing
+        if next(newState.branches) == nil then
+                newState.branches["branch1"] = {kind = "straight"}
+                newState.assignments.trunk = "branch1"
         end
-        return state
-end
 
-function LoomDesigner.SetConfigId(id)
-        state.configId = id
+        return newState
 end
 
 function LoomDesigner.SetSeed(seed)
-        state.baseSeed = normalizeSeed(seed)
+        newState.baseSeed = normalizeSeed(seed)
 end
 
 function LoomDesigner.RandomizeSeed()
         local rng = Random.new(os.clock() * 1e6)
-        state.baseSeed = rng:NextInteger(1, 2^31 - 1)
-        return state.baseSeed
+        newState.baseSeed = rng:NextInteger(1, 2^31 - 1)
+        return newState.baseSeed
 end
 
 function LoomDesigner.GetSeed()
-        return state.baseSeed
+        return newState.baseSeed
 end
 
 function LoomDesigner.GetState()
-        return state
+        return newState
 end
 
 function LoomDesigner.SetGrowthPercent(g)
-	state.g = g
+        newState.g = g
 end
 
 local function deepMerge(dst, src)
@@ -232,204 +169,17 @@ end
 -- Trace deepCopy helper as it is reused in multiple paths
 deepCopy = FT.fn("Main.deepCopy", deepCopy)
 
-local _commitTimer: thread? = nil
-
-local function normalizeChildren(prof, name)
-        if type(prof) ~= "table" then return end
-        local legacy = false
-        if prof.depthRules ~= nil then
-                local flat = {}
-                for _, list in pairs(prof.depthRules) do
-                        if type(list) == "table" then
-                                for _, pick in ipairs(list) do
-                                        table.insert(flat, pick)
-                                end
-                        end
-                end
-                if #flat > 0 then
-                        legacy = true
-                        prof.children = prof.children or {}
-                        for _, pick in ipairs(flat) do
-                                table.insert(prof.children, pick)
-                        end
-                end
-                prof.depthRules = nil
-        end
-        if type(prof.children) == "table" then
-                if not (prof.children[1] and prof.children[1].name) then
-                        local flat = {}
-                        for _, list in pairs(prof.children) do
-                                if type(list) == "table" then
-                                        for _, pick in ipairs(list) do
-                                                table.insert(flat, pick)
-                                        end
-                                end
-                        end
-                        if #flat > 0 then
-                                legacy = true
-                                prof.children = flat
-                        else
-                                prof.children = {}
-                        end
-                end
-                for i, pick in ipairs(prof.children) do
-                        if type(pick) == "string" then
-                                prof.children[i] = {
-                                        name = pick,
-                                        count = 1,
-                                        placement = "tip",
-                                        rotation = "upright",
-                                }
-                        elseif type(pick) == "table" then
-                                pick.name = pick.name or pick[1]
-                                pick.count = pick.count or 1
-                                pick.placement = pick.placement or "tip"
-                                if pick.rotation == nil then
-                                        pick.rotation = "upright"
-                                end
-                                prof.children[i] = pick
-                        else
-                                prof.children[i] = nil
-                        end
-                end
-        else
-                prof.children = {}
-        end
-        if legacy then
-                warn(string.format("[LoomDesigner] converted legacy depth rules for profile '%s'", tostring(name)))
-        end
-end
-
-function ensureTrunk(st, newProfileName)
-        st.savedProfiles = st.savedProfiles or {}
-        local first
-        for n, prof in pairs(st.savedProfiles) do
-                first = first or n
-                normalizeChildren(prof, n)
-        end
-       st.branchAssignments = st.branchAssignments or {}
-       -- only wrap once; retain existing proxy if present
-       if getmetatable(st.branchAssignments) == nil then
-               st.branchAssignments = select(1, FT.watchTable("state.branchAssignments", st.branchAssignments))
-       end
-       local trunk = st.branchAssignments.trunkProfile
-       local fallback = newProfileName or first or "trunk"
-       if trunk == nil or trunk == "" or st.savedProfiles[trunk] == nil then
-               st.branchAssignments.trunkProfile = fallback
-       end
-end
-
--- Wrap local helpers for traceable entry/exit
-ensureTrunk = FT.fn("Main.ensureTrunk", ensureTrunk)
-
-function LoomDesigner.CommitProfileEdit(draftName: string, draftTable: table)
-        local st = LoomDesigner.GetState()
-        st.savedProfiles = st.savedProfiles or {}
-        FT.check("Commit.args", {name = draftName})
-        if draftName and draftName ~= "" and draftTable then
-                -- Normalize & validate kind
-                if draftTable.kind then
-                        local k = tostring(draftTable.kind):lower()
-                        draftTable.kind = SUPPORTED_KINDS[k] and k or "curved"
-                end
-                normalizeChildren(draftTable, draftName)
-                draftTable.children = DC(draftTable.children or {})
-                local cloned = DC(draftTable)
-                st.savedProfiles[draftName] = cloned
-
-                -- Deep-copy into active LoomConfig
-                local cfgId = resolveConfigId(LoomConfigs, st.configId)
-                if cfgId then
-                        st.configId = cfgId
-                        local cfg = LoomConfigs[cfgId]
-                        if type(cfg) ~= "table" then
-                                cfg = { id = cfgId }
-                        end
-                        cfg.profiles = cfg.profiles or {}
-                        cfg.profiles[draftName] = DC(cloned)
-                        LoomConfigs[cfgId] = cfg
-                end
-
-                FT.check("Commit.cloned", {keys = draftTable and "ok" or "nil"})
-       end
-
-ensureTrunk(st, draftName)
-
-if _commitTimer then task.cancel(_commitTimer) end
-
-       -- Apply authoring after updating LoomConfig and trunk
-       local f = LoomDesigner.ApplyAuthoring
-       assert(type(f) == "function", "ApplyAuthoring missing")
-       local merged = f()
-       if not merged then
-               warn(string.format("[LoomDesigner] Failed to merge profile '%s'; trunk unchanged", tostring(draftName)))
-               return
-       end
-
-       _commitTimer = task.delay(0.1, function()
-               local cfgId = state.configId
-               local trunkName = state.branchAssignments and state.branchAssignments.trunkProfile
-               local hasProfile = LoomConfigs
-                       and LoomConfigs[cfgId]
-                       and LoomConfigs[cfgId].profiles
-                       and LoomConfigs[cfgId].profiles[trunkName]
-               if hasProfile then
-                       LoomDesigner.RebuildPreview(nil)
-               else
-                       warn(string.format(
-                               "[LoomDesigner] Missing profile '%s' for config '%s'; skipping preview",
-                               tostring(trunkName),
-                               tostring(cfgId)
-                       ))
-               end
-               _commitTimer = nil
-       end)
-end
-
 function LoomDesigner.SetOverrides(overrides)
-        deepMerge(state.overrides, overrides)
+        deepMerge(newState.overrides, overrides)
 end
 
 function LoomDesigner.ClearOverride(pathList)
-        local t = state.overrides
+        local t = newState.overrides
         for i = 1, #pathList - 1 do
                 t = t[pathList[i]]
                 if type(t) ~= "table" then return end
         end
         t[pathList[#pathList]] = nil
-end
-
--- simple profile helpers ----------------------------------------------------
-function LoomDesigner.CreateProfile(name: string, profile)
-        profile = profile or { kind = "straight", segmentCountMin = 1, segmentCountMax = 1, children = {} }
-        normalizeChildren(profile, name)
-        state.savedProfiles[name] = profile
-        ensureTrunk(state, name)
-end
-
-function LoomDesigner.DeleteProfile(name: string)
-        state.savedProfiles[name] = nil
-        if state.profileDrafts then state.profileDrafts[name] = nil end
-        if state.activeProfileName == name then state.activeProfileName = nil end
-       ensureTrunk(state, state.activeProfileName)
-end
-
-function LoomDesigner.RenameProfile(oldName: string, newName: string)
-        if state.savedProfiles[oldName] then
-                state.savedProfiles[newName] = state.savedProfiles[oldName]
-                state.savedProfiles[oldName] = nil
-                if state.branchAssignments.trunkProfile == oldName then
-                        state.branchAssignments.trunkProfile = newName
-                end
-                if state.profileDrafts and state.profileDrafts[oldName] then
-                        state.profileDrafts[newName] = state.profileDrafts[oldName]
-                        state.profileDrafts[oldName] = nil
-                end
-                if state.activeProfileName == oldName then
-                        state.activeProfileName = newName
-                end
-                LoomDesigner.CommitProfileEdit(newName, state.profileDrafts and state.profileDrafts[newName] or state.savedProfiles[newName])
-        end
 end
 
 -- branch layout helpers -----------------------------------------------------
@@ -513,21 +263,21 @@ end
 
 -- export/import -------------------------------------------------------------
 local function rebuildLibraries()
-        state.modelLibrary = {}
-        for _, list in pairs(state.modelsByDepth) do
+        newState.modelLibrary = {}
+        for _, list in pairs(newState.modelsByDepth) do
                 for _, ref in ipairs(list) do
-                        if not table.find(state.modelLibrary, ref) then
-                                table.insert(state.modelLibrary, ref)
+                        if not table.find(newState.modelLibrary, ref) then
+                                table.insert(newState.modelLibrary, ref)
                         end
                 end
         end
-        state.decoLibrary = {}
-        if state.overrides.decorations.enabled then
-                for _, deco in ipairs(state.overrides.decorations.types) do
+        newState.decoLibrary = {}
+        if newState.overrides.decorations.enabled then
+                for _, deco in ipairs(newState.overrides.decorations.types) do
                         if deco.models then
                                 for _, ref in ipairs(deco.models) do
-                                        if not table.find(state.decoLibrary, ref) then
-                                                table.insert(state.decoLibrary, ref)
+                                        if not table.find(newState.decoLibrary, ref) then
+                                                table.insert(newState.decoLibrary, ref)
                                         end
                                 end
                         end
@@ -536,69 +286,57 @@ local function rebuildLibraries()
 end
 
 local function applyAuthoring()
-        local cfgId = resolveConfigId(LoomConfigs, state.configId)
-        if not cfgId then return end
-        state.configId = cfgId
-
-        local base = LoomConfigs[cfgId]
-        if type(base) ~= "table" then
-                warn("[LoomDesigner] Resolved config is not a table; creating new")
-                base = { id = cfgId }
-        end
-
-        local authored = {
-               profiles = DC(state.savedProfiles),
-                branchAssignments = state.branchAssignments,
+        rebuildLibraries()
+        return {
+                branches = newState.branches,
+                assignments = newState.assignments,
                 models = {
-                        byDepth = state.modelsByDepth,
-                        decorations = (state.overrides and state.overrides.decorations and state.overrides.decorations.enabled)
-                                and state.overrides.decorations.types
-                                or (base.models and DC(base.models.decorations)) or nil,
+                        byDepth = newState.modelsByDepth,
+                        decorations = (newState.overrides and newState.overrides.decorations and newState.overrides.decorations.enabled)
+                                and newState.overrides.decorations.types
+                                or nil,
                 },
-                overrides = state.overrides,
+                overrides = newState.overrides,
         }
-
-        local merged = LoomConfigUtil.mergeConfig(base, authored)
-
-        LoomConfigs[cfgId] = merged
-       ensureTrunk(state, state.activeProfileName)
-        return merged
 end
 
 -- Trace the local utility for visibility across calls
 applyAuthoring = FT.fn("Main.applyAuthoring", applyAuthoring)
 
-function LoomDesigner.ImportAuthoring()
-        local cfg = LoomConfigs[state.configId]
-        if not cfg then return end
-        state.savedProfiles = deepCopy(cfg.profiles or {})
-        for name, prof in pairs(state.savedProfiles) do
-                normalizeChildren(prof, name)
-        end
-       state.branchAssignments = deepCopy(cfg.branchAssignments or {trunkProfile=""})
-       state.branchAssignments = select(1, FT.watchTable("state.branchAssignments", state.branchAssignments))
-        local models = cfg.models or {}
-        state.modelsByDepth = deepCopy(models.byDepth or {})
-        if models.decorations then
-                state.overrides.decorations = { enabled = true, types = deepCopy(models.decorations) }
-        else
-                state.overrides.decorations = { enabled = false, types = {} }
-        end
-        rebuildLibraries()
+function LoomDesigner.ExportAuthoring()
+        return {
+                branches = DC(newState.branches),
+                assignments = DC(newState.assignments),
+        }
 end
 
-function LoomDesigner.ExportAuthoring()
-        local cfg = applyAuthoring()
-        LoomDesigner.ExportConfig(cfg)
+function LoomDesigner.ImportAuthoring(cfg)
+        cfg = cfg or {}
+        newState.branches = DC(cfg.branches or {})
+        newState.branches = select(1, FT.watchTable("newState.branches", newState.branches))
+        newState.assignments = DC(cfg.assignments or {trunk = "", children = {}})
+        newState.assignments = select(1, FT.watchTable("newState.assignments", newState.assignments))
+        newState.assignments.children = select(
+                1,
+                FT.watchTable("newState.assignments.children", newState.assignments.children)
+        )
+        if next(newState.branches) == nil then
+                newState.branches["branch1"] = {kind = "straight"}
+                newState.assignments.trunk = "branch1"
+        elseif not newState.assignments.trunk or newState.assignments.trunk == "" then
+                for name in pairs(newState.branches) do
+                        newState.assignments.trunk = name
+                        break
+                end
+        end
 end
 
 LoomDesigner.ApplyAuthoring = applyAuthoring
 
 function LoomDesigner.Reseed()
-        state.baseSeed = LoomDesigner.RandomizeSeed()
-        LoomDesigner.ApplyAuthoring()
+        newState.baseSeed = LoomDesigner.RandomizeSeed()
         LoomDesigner.RebuildPreview(nil)
-        return state.baseSeed
+        return newState.baseSeed
 end
 
 local function ensurePreviewParent()
@@ -622,11 +360,25 @@ local function renderBranch(name, depth)
        local design = newState.branches[name]
        if not design then return end
 
+       local cfgId = "__ld_preview_" .. tostring(name)
+       LoomConfigs[cfgId] = {
+               profiles = { [name] = design },
+               branchAssignments = { trunkProfile = name },
+               models = {
+                       byDepth = newState.modelsByDepth,
+                       decorations = (newState.overrides and newState.overrides.decorations and newState.overrides.decorations.enabled)
+                               and newState.overrides.decorations.types
+                               or nil,
+               },
+               growthDefaults = {},
+       }
+
        GrowthVisualizer.Render(nil, {
                loomUid = 0,
+               configId = cfgId,
                baseSeed = newState.baseSeed,
                g = newState.g,
-               branchDesign = design,
+               overrides = newState.overrides,
                scene = {
                        Clear = VisualScene.Clear,
                        Spawn = VisualScene.Spawn,
@@ -644,6 +396,16 @@ local function renderBranch(name, depth)
 end
 
 function LoomDesigner.RebuildPreview(_container)
+       if next(newState.branches) == nil then
+               newState.branches["branch1"] = {kind = "straight"}
+               newState.assignments.trunk = "branch1"
+       elseif not newState.assignments.trunk or newState.assignments.trunk == "" or not newState.branches[newState.assignments.trunk] then
+               for name in pairs(newState.branches) do
+                       newState.assignments.trunk = name
+                       break
+               end
+       end
+
        local parent = ensurePreviewParent()
        clearExistingPreview(parent)
        local model = Instance.new("Model")
