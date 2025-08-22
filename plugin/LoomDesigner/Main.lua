@@ -23,8 +23,8 @@ VisualScene = RequireUtil.must(VisualScene, "LoomDesigner/VisualScene")
 local ModelResolver = RequireUtil.fromRelative(script.Parent, {"ModelResolver"})
 ModelResolver = RequireUtil.must(ModelResolver, "LoomDesigner/ModelResolver")
 
-local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"})
-    or RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
+local LoomConfigs = RequireUtil.fromRelative(script.Parent.Parent, {"looms","LoomConfigs"}) or
+    RequireUtil.fromReplicatedStorage({"looms","LoomConfigs"})
 if not LoomConfigs then
     FT.warn("LC.missing", "could not resolve looms/LoomConfigs; using stub")
     LoomConfigs = {}
