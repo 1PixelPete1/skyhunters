@@ -402,7 +402,7 @@ LoomDesigner.ApplyAuthoring = applyAuthoring
 function LoomDesigner.ApplyAuthoringAndPreview(container)
         local branchCount = 0
         for _ in pairs(newState.branches) do branchCount += 1 end
-        FT.log("Main.ApplyAuthoringAndPreview", "trunk=%s branches=%d", tostring(newState.assignments.trunk), branchCount)
+       FT.log("Main.ApplyAuthoringAndPreview", ("trunk=%s branches=%d"):format(tostring(newState.assignments.trunk), branchCount))
         local a = LoomDesigner.ApplyAuthoring
         local r = LoomDesigner.RebuildPreview
         if type(a) == "function" then a() end
@@ -436,63 +436,6 @@ end
 
 local rootModel: Model? = nil
 
-local function renderBranch(name, depth)
-       local design = newState.branches[name]
-       if not design then return end
-
-       -- NEW: make a subcontainer per branch
-       local branchModel = Instance.new("Model")
-       branchModel.Name = "Branch_" .. tostring(name)
-       branchModel.Parent = workspace:FindFirstChild("LoomPreview"):FindFirstChild("PreviewBranch") or rootModel
-
-       -- temporarily redirect VisualScene outputs
-       VisualScene.SetPreviewModel(branchModel)
-
-       local cfgId = "__ld_preview_" .. tostring(name)
-       LoomConfigs[cfgId] = {
-               profiles = { [name] = design },
-               branchAssignments = { trunkProfile = name },
-               models = {
-                       byDepth = newState.modelsByDepth,
-                       decorations = (newState.overrides and newState.overrides.decorations and newState.overrides.decorations.enabled)
-                               and newState.overrides.decorations.types
-                               or nil,
-               },
-               growthDefaults = {},
-       }
-
-       GrowthVisualizer.Render(nil, {
-               loomUid = 0,
-               configId = cfgId,
-               baseSeed = newState.baseSeed,
-               g = newState.g,
-               overrides = newState.overrides,
-               scene = {
-                       Clear = function()
-                               VisualScene.Clear()
-                       end,
-                       Spawn = function(spec)
-                               spec.attributes = spec.attributes or {}
-                               spec.attributes.BranchName = name
-                               VisualScene.Spawn(spec)
-                       end,
-                       ResolveModel = ModelResolver.ResolveFromList,
-               },
-       })
-
-       for _, child in ipairs(newState.assignments.children) do
-               if child.parent == name then
-                       for i = 1, child.count do
-                               renderBranch(child.child, depth + 1)
-                       end
-               end
-       end
-
-       -- remove preview config after render to avoid leaks
-       LoomConfigs[cfgId] = nil
-       VisualScene.SetPreviewModel(rootModel)
-end
-
 function LoomDesigner.RebuildPreview(_container)
        if next(newState.branches) == nil then
                newState.branches["branch1"] = {kind = "straight"}
@@ -516,8 +459,88 @@ function LoomDesigner.RebuildPreview(_container)
                GrowthVisualizer.Release(nil, 0)
        end
 
-       VisualScene.Clear()
-       renderBranch(newState.assignments.trunk, 0)
+       -- Build a single config and render once
+       -- copy branch designs into profiles
+       local cfgId = "__ld_preview_all"
+       local profiles = {}
+       for name, design in pairs(newState.branches) do
+               profiles[name] = DC(design)
+               profiles[name].kind = profiles[name].kind or "straight"
+       end
+
+       -- wire children picks onto parent profiles
+       for _, a in ipairs(newState.assignments.children) do
+               local parent = a.parent
+               local child = a.child
+               if profiles[parent] and profiles[child] then
+                       profiles[parent].children = profiles[parent].children or {}
+                       local p = newState.branches[parent] or {}
+                       local rotation = nil
+                       if p.childRotationMode == "manual" then
+                               rotation = {
+                                       yaw = p.childYaw or 0,
+                                       pitch = p.childPitch or 0,
+                                       roll = p.childRoll or 0,
+                               }
+                       end
+                       local pick = {
+                               name = child,
+                               placement = (p.spawnLocation == "junction") and "junction"
+                                       or (p.spawnLocation == "per segment") and "per_segment"
+                                       or (p.spawnLocation == "pattern") and "pattern"
+                                       or "tip",
+                               rotation = rotation,
+                               count = a.count or 1,
+                               step = p.childEvery,
+                               chance = p.childChancePct,
+                               spiralDeg = p.childSpiralDeg,
+                       }
+                       table.insert(profiles[parent].children, pick)
+               end
+       end
+
+       LoomConfigs[cfgId] = {
+               profiles = profiles,
+               branchAssignments = { trunkProfile = newState.assignments.trunk },
+               models = {
+                       byDepth = newState.modelsByDepth,
+                       decorations = (newState.overrides.decorations and newState.overrides.decorations.enabled)
+                               and newState.overrides.decorations.types
+                               or nil,
+               },
+               growthDefaults = {},
+       }
+
+       GrowthVisualizer.Render(nil, {
+               loomUid = 0,
+               configId = cfgId,
+               baseSeed = newState.baseSeed,
+               g = newState.g,
+               overrides = newState.overrides,
+               scene = {
+                       Clear = VisualScene.Clear,
+                       Spawn = VisualScene.Spawn,
+                       ResolveModel = ModelResolver.ResolveFromList,
+               },
+       })
+
+       -- group parts by BranchName into Branch_<name> containers
+       local buckets = {}
+       for _, inst in ipairs(model:GetDescendants()) do
+               local ok, bname = pcall(function() return inst:GetAttribute("BranchName") end)
+               if ok and type(bname) == "string" and bname ~= "" and inst:IsA("BasePart") then
+                       local bucket = buckets[bname]
+                       if not bucket then
+                               bucket = Instance.new("Model")
+                               bucket.Name = "Branch_" .. bname
+                               bucket.Parent = model
+                               buckets[bname] = bucket
+                       end
+                       inst.Parent = bucket
+               end
+       end
+
+       LoomConfigs[cfgId] = nil
 
        local sb = Instance.new("SelectionBox")
        sb.Adornee = model
