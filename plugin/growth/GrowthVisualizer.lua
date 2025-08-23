@@ -621,42 +621,64 @@ function GrowthVisualizer.Render(container, loomState)
         local lastSeg = segRefs[segCount]
         local parentRot = startCF.Rotation
         local basePos = startCF.Position
+
         for pIdx, pick in ipairs(children) do
-            local count = pick.count or 1
-            local intCount = math.floor(count)
-            local extra = count - intCount
-            local placement = pick.placement or "tip"
-            local orient
-            if type(pick.rotation) == "table" then
-                orient = pick.rotation
-            elseif pick.rotation == "upright" then
-                orient = {pitch = 0, yaw = 0, roll = 0}
-            else
-                orient = {}
+            local place = pick.placement or "tip"
+
+            local function placeCFForSeg(seg)
+                local cf = seg.cframe
+                if place == "junction" then
+                    cf = cf * CFrame.new(0, -(seg.length or 0)/2, 0)
+                else
+                    cf = cf * CFrame.new(0, (seg.length or 0)/2, 0)
+                end
+                cf = CFrame.new(cf.Position) * parentRot
+                local r = pick.rotation
+                if r then
+                    cf = cf * CFrame.Angles(math.rad(r.pitch or 0), math.rad(r.yaw or 0), math.rad(r.roll or 0))
+                end
+                return cf
             end
-            local function spawnOne()
+
+            local function spawnOneAt(cf)
+                nextId = nextId + 1
+                traverse(nextId, depth + 1, pick.name, cf)
+            end
+
+            if place == "per_segment" or place == "pattern" then
+                local step = math.max(1, math.floor(pick.step or 1))
+                local chancePct = tonumber(pick.chance or 0) or 0
+                local yawStep = tonumber(pick.spiralDeg or 0) or 0
+                local rngPick = SeedUtil.rng(baseSeed, "child-perseg", chainId, depth, pIdx)
+
+                local yawAcc = 0
+                for i = 1, segCount, step do
+                    local seg = segRefs[i]
+                    local fire = (chancePct <= 0) or (rngPick:NextNumber() < (chancePct / 100))
+                    if fire then
+                        local cf = placeCFForSeg(seg)
+                        if yawStep ~= 0 then
+                            yawAcc = yawAcc + yawStep
+                            cf = cf * CFrame.Angles(0, math.rad(yawAcc), 0)
+                        end
+                        spawnOneAt(cf)
+                    end
+                end
+            else
+                local count = pick.count or 1
+                local intCount = math.floor(count)
+                local extra = count - intCount
                 local posCF
-                if placement == "tip" and lastSeg then
+                if place == "tip" and lastSeg then
                     local tipCF = lastSeg.cframe * CFrame.new(0, lastSeg.length/2, 0)
                     posCF = CFrame.new(tipCF.Position) * parentRot
                 else
                     posCF = CFrame.new(basePos) * parentRot
                 end
-                local startHere = posCF * CFrame.Angles(
-                    math.rad(orient.pitch or 0),
-                    math.rad(orient.yaw or 0),
-                    math.rad(orient.roll or 0)
-                )
-                nextId = nextId + 1
-                traverse(nextId, depth + 1, pick.name, startHere)
-            end
-            for _ = 1, intCount do
-                spawnOne()
-            end
-            if extra > 0 then
-                local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
-                if rngPick:NextNumber() < extra then
-                    spawnOne()
+                for _ = 1, intCount do spawnOneAt(posCF) end
+                if extra > 0 then
+                    local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
+                    if rngPick:NextNumber() < extra then spawnOneAt(posCF) end
                 end
             end
         end

@@ -417,6 +417,22 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
+    numberField(advList, "Child Every N Segments", 1, function(v)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { childEvery = math.max(1, math.floor(v)) })
+        end
+    end)
+    numberField(advList, "Child Chance % per Segment", 0, function(v)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { childChancePct = math.max(0, math.min(100, v)) })
+        end
+    end)
+    numberField(advList, "Spiral ΔYaw (deg)", 0, function(v)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, { childSpiralDeg = v })
+        end
+    end)
+
     local started = false
     local function ensureStart()
         if not started then
@@ -629,6 +645,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     end
     local function refreshBranchDropdown(selectName)
         ensureStart()
+        local prev = selectName or selectedBranch
         if branchDropdownBtn then branchDropdownBtn.Parent:Destroy() end
         local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
         local names = {}
@@ -636,7 +653,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             table.insert(names, name)
         end
         table.sort(names)
-        
+
         -- If no branches exist, create a default one
         if #names == 0 then
             print("[UI] No branches found, creating default branch")
@@ -648,25 +665,24 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             end
             names = {"branch1"}
         end
-        
+
         local defaultIndex = 1
-        if selectName then
-            for i,n in ipairs(names) do
-                if n == selectName then
+        if prev then
+            for i, n in ipairs(names) do
+                if n == prev then
                     defaultIndex = i
                     break
                 end
             end
         end
+
         branchDropdownBtn = labeledDropdown(container, popupHost, "Branch", names, defaultIndex, function(opt)
             selectedBranch = opt
             updateBranchUI()
         end)
         branchDropdownBtn.LayoutOrder = 2  -- Position after mode button
         selectedBranch = names[defaultIndex]
-        if selectedBranch then
-            updateBranchUI()
-        end
+        updateBranchUI()
     end
 
     local addBtn = Instance.new("TextButton")
