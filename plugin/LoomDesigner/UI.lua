@@ -351,6 +351,68 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     navBtn.TextColor3 = Color3.new(1,1,1)
     navBtn.Parent = branchControls
 
+    local showNodesBtn = Instance.new("TextButton")
+    showNodesBtn.Text = "Show Spawn Nodes: off"
+    showNodesBtn.Size = UDim2.new(0,160,0,24)
+    showNodesBtn.BackgroundColor3 = Color3.fromRGB(48,48,48)
+    showNodesBtn.TextColor3 = Color3.new(1,1,1)
+    showNodesBtn.Parent = branchControls
+
+    local showNodes = false
+    showNodesBtn.MouseButton1Click:Connect(function()
+        showNodes = not showNodes
+        showNodesBtn.Text = "Show Spawn Nodes: " .. (showNodes and "on" or "off")
+        if LoomDesigner.SetOverrides then
+            LoomDesigner.SetOverrides({debug = {showNodes = showNodes}})
+            LoomDesigner.RebuildPreview()
+        end
+    end)
+
+    -- Visual controls
+    local visualSection = Instance.new("Frame")
+    visualSection.BackgroundTransparency = 1
+    visualSection.Size = UDim2.new(1,0,0,0)
+    visualSection.AutomaticSize = Enum.AutomaticSize.Y
+    visualSection.Parent = branchControls
+
+    local visualHeader = Instance.new("TextLabel")
+    visualHeader.Text = "--- Visual ---"
+    visualHeader.BackgroundTransparency = 1
+    visualHeader.TextColor3 = Color3.fromRGB(180,255,180)
+    visualHeader.Size = UDim2.new(1,0,0,24)
+    visualHeader.TextXAlignment = Enum.TextXAlignment.Center
+    visualHeader.Parent = visualSection
+
+    local visualList = makeList(visualSection)
+
+    local currentColor = {r = 255, g = 255, b = 255}
+    local function commitColor()
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, {color = currentColor})
+            LoomDesigner.RebuildPreview()
+        end
+    end
+    local rBox = numberField(visualList, "R", currentColor.r, function(v)
+        currentColor.r = math.clamp(math.floor(v), 0, 255)
+        commitColor()
+    end)
+    local gBox = numberField(visualList, "G", currentColor.g, function(v)
+        currentColor.g = math.clamp(math.floor(v), 0, 255)
+        commitColor()
+    end)
+    local bBox = numberField(visualList, "B", currentColor.b, function(v)
+        currentColor.b = math.clamp(math.floor(v), 0, 255)
+        commitColor()
+    end)
+
+    local materialOpts = {"SmoothPlastic","Wood","Metal","Concrete"}
+    local matDropdownBtn = labeledDropdown(visualList, popupHost, "Material", materialOpts, 1, function(opt)
+        if selectedBranch then
+            LoomDesigner.EditBranch(selectedBranch, {material = Enum.Material[opt]})
+            LoomDesigner.RebuildPreview()
+        end
+    end)
+
     local applyBtn = Instance.new("TextButton")
     applyBtn.Text = "Apply to Trunk"
     applyBtn.Size = UDim2.new(0,160,0,24)
@@ -376,8 +438,20 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
 
     local advList = makeList(advSection)
 
-    local spawnLocOpts = {"tip","junction","per segment","pattern"}
-    labeledDropdown(advList, popupHost, "Spawn Location", spawnLocOpts, 1, function(opt)
+    local branches = (LoomDesigner.GetBranches and LoomDesigner.GetBranches()) or {}
+    local selBranch = selectedBranch and branches[selectedBranch] or nil
+
+    local spawnLocOpts = {"tip","junction","per_segment"}
+    local spawnIndex = 1
+    if selBranch and selBranch.spawnLocation then
+        for i, opt in ipairs(spawnLocOpts) do
+            if opt == selBranch.spawnLocation then
+                spawnIndex = i
+                break
+            end
+        end
+    end
+    labeledDropdown(advList, popupHost, "Spawn Location", spawnLocOpts, spawnIndex, function(opt)
         if selectedBranch then
             LoomDesigner.EditBranch(selectedBranch, { spawnLocation = opt })
         end
@@ -417,19 +491,19 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         end
     end)
 
-    numberField(advList, "Child Every N Segments", 1, function(v)
+    numberField(advList, "Child Every N Segments", selBranch and selBranch.childEveryNSeg or 1, function(v)
         if selectedBranch then
-            LoomDesigner.EditBranch(selectedBranch, { childEvery = math.max(1, math.floor(v)) })
+            LoomDesigner.EditBranch(selectedBranch, { childEveryNSeg = math.max(1, math.floor(v)) })
         end
     end)
-    numberField(advList, "Child Chance % per Segment", 0, function(v)
+    numberField(advList, "Child Chance % per Segment", selBranch and selBranch.childChancePct or 0, function(v)
         if selectedBranch then
             LoomDesigner.EditBranch(selectedBranch, { childChancePct = math.max(0, math.min(100, v)) })
         end
     end)
-    numberField(advList, "Spiral ΔYaw (deg)", 0, function(v)
+    numberField(advList, "Spiral ΔYaw (deg)", selBranch and selBranch.childSpiralDeltaYawDeg or 0, function(v)
         if selectedBranch then
-            LoomDesigner.EditBranch(selectedBranch, { childSpiralDeg = v })
+            LoomDesigner.EditBranch(selectedBranch, { childSpiralDeltaYawDeg = v })
         end
     end)
 
@@ -624,13 +698,35 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             hierarchyText = hierarchyText .. string.format(" | Children: %s", table.concat(children, ", "))
         end
         helperLabel.Text = hierarchyText
-        
+
         -- Sync the branch data to GrowthStylesCore
         GrowthStylesCore.SetKind(branch.kind or "straight")
         for k, v in pairs(branch) do
             if k ~= "kind" and type(v) == "number" then
                 GrowthStylesCore.SetParam(k, v)
             end
+        end
+
+        -- Sync visual fields
+        do
+            local col = branch.color
+            if typeof(col) == "Color3" then
+                currentColor = {r = math.floor(col.R * 255), g = math.floor(col.G * 255), b = math.floor(col.B * 255)}
+            elseif type(col) == "table" then
+                currentColor = {r = col.r or 255, g = col.g or 255, b = col.b or 255}
+            else
+                currentColor = {r = 255, g = 255, b = 255}
+            end
+            rBox.Text = tostring(currentColor.r)
+            gBox.Text = tostring(currentColor.g)
+            bBox.Text = tostring(currentColor.b)
+
+            local mat = branch.material
+            local idx = 1
+            for i, m in ipairs(materialOpts) do
+                if Enum.Material[m] == mat then idx = i break end
+            end
+            if matDropdownBtn then matDropdownBtn.Text = materialOpts[idx] end
         end
         
         -- Refresh the parameter fields and kind dropdown
@@ -755,7 +851,9 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
             LoomDesigner.AddChild(selectedBranch, childName, "tip", 1)
 
             local parentB = branches[selectedBranch] or {}
-            local placement = (parentB.spawnLocation == "junction") and "junction" or "tip"
+            local placement = (parentB.spawnLocation == "junction") and "junction"
+                    or (parentB.spawnLocation == "per_segment") and "per_segment"
+                    or "tip"
             local assigns = LoomDesigner.GetAssignments and LoomDesigner.GetAssignments() or {children={}}
             local idx = #assigns.children
             if idx >= 1 then
@@ -785,7 +883,11 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         
         local assignments = (LoomDesigner.GetAssignments and LoomDesigner.GetAssignments()) or {}
         local options = {}
-        
+
+        if assignments.trunk then
+            table.insert(options, "🌳 Trunk: " .. assignments.trunk)
+        end
+
         -- Add parent option
         local parent = nil
         for _, child in ipairs(assignments.children) do
@@ -808,12 +910,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         for _, childName in ipairs(children) do
             table.insert(options, "↓ Child: " .. childName)
         end
-        
-        -- Add trunk option if not already trunk
-        if assignments.trunk ~= selectedBranch then
-            table.insert(options, "🌳 Trunk: " .. (assignments.trunk or "none"))
-        end
-        
+
         if #options > 0 then
             -- Create a simple navigation popup (using the existing dropdown system)
             local navFrame = Instance.new("Frame")
@@ -1055,12 +1152,16 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
     local depthInput = numberField(modelFrame, "Model Depth", 0, function() end)
     
     local modelDropdown = nil
+    local selectedModelName = nil
     local function refreshModelDropdown()
         if modelDropdown then modelDropdown.Parent:Destroy() end
         local models = getAvailableModels()
         modelDropdown = labeledDropdown(modelFrame, popupHost, "Model Name", models, 1, function(opt)
-            -- Model selected
+            selectedModelName = opt
         end)
+        if selectedModelName then
+            modelDropdown.Text = selectedModelName
+        end
     end
     refreshModelDropdown()
     
@@ -1101,10 +1202,7 @@ function UI.Build(_widget: PluginGui, plugin: Plugin, where)
         ensureStart()
         local depth = tonumber(depthInput.Text) or 0
         local models = getAvailableModels()
-        local selectedModel = models[1]  -- Default to first model
-        if modelDropdown and modelDropdown.Text and modelDropdown.Text ~= "Select" then
-            selectedModel = modelDropdown.Text
-        end
+        local selectedModel = selectedModelName or models[1]
         if LoomDesigner.AddModel and selectedModel then
             LoomDesigner.AddModel(depth, selectedModel)
             refreshModels()

@@ -299,13 +299,13 @@ local function chooseSegCount(profile, overrides, rng)
     return math.max(1, math.floor(val))
 end
 
-local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cfg, overrides)
+local function buildChain(segOut, chainId, depth, baseSeed, startCF, profile, cfg, overrides, profileName)
     local seedFlags = overrides.seedAffects or {}
     local macroSeed = seedFlags.segmentCount == false and 0 or baseSeed
     local profileSeed = (seedFlags.curvature == false and seedFlags.frequency == false) and 0 or baseSeed
     local microSeed = seedFlags.jitter == false and 0 or baseSeed
 
-    local rngMacro = SeedUtil.rng(macroSeed, "macro", chainId)
+    local rngMacro = SeedUtil.rng(macroSeed, "macro", profileName, depth, chainId)
     local rngProfile = SeedUtil.rng(profileSeed, "profile", chainId)
     local rngMicro = SeedUtil.rng(microSeed, "micro", chainId)
 
@@ -577,6 +577,8 @@ function GrowthVisualizer.Render(container, loomState)
     end
     branchDepthMax = branchDepthMax or 0
 
+    local debugNodes = {}
+
     local function resolveChildren(prof, profileName)
         local children = prof.children
         if type(children) == "table" and not (children[1] and children[1].name) then
@@ -621,6 +623,7 @@ function GrowthVisualizer.Render(container, loomState)
         local lastSeg = segRefs[segCount]
         local parentRot = startCF.Rotation
         local basePos = startCF.Position
+        local showNodes = overrides.debug and overrides.debug.showNodes
 
         for pIdx, pick in ipairs(children) do
             local place = pick.placement or "tip"
@@ -645,22 +648,26 @@ function GrowthVisualizer.Render(container, loomState)
                 traverse(nextId, depth + 1, pick.name, cf)
             end
 
-            if place == "per_segment" or place == "pattern" then
+            if place == "per_segment" or place == "junction" then
                 local step = math.max(1, math.floor(pick.step or 1))
                 local chancePct = tonumber(pick.chance or 0) or 0
                 local yawStep = tonumber(pick.spiralDeg or 0) or 0
-                local rngPick = SeedUtil.rng(baseSeed, "child-perseg", chainId, depth, pIdx)
 
                 local yawAcc = 0
-                for i = 1, segCount, step do
-                    local seg = segRefs[i]
-                    local fire = (chancePct <= 0) or (rngPick:NextNumber() < (chancePct / 100))
+                for i = 1, segCount do
+                    local fire = (step > 0 and (i % step == 0))
+                    if chancePct > 0 then
+                        local rngSeg = SeedUtil.rng(baseSeed, "child-perseg", chainId, depth, pIdx, i)
+                        if rngSeg:NextNumber() < (chancePct / 100) then fire = true end
+                    end
                     if fire then
+                        local seg = segRefs[i]
                         local cf = placeCFForSeg(seg)
                         if yawStep ~= 0 then
                             yawAcc = yawAcc + yawStep
                             cf = cf * CFrame.Angles(0, math.rad(yawAcc), 0)
                         end
+                        if showNodes then table.insert(debugNodes, cf) end
                         spawnOneAt(cf)
                     end
                 end
@@ -675,6 +682,7 @@ function GrowthVisualizer.Render(container, loomState)
                 else
                     posCF = CFrame.new(basePos) * parentRot
                 end
+                if showNodes then table.insert(debugNodes, posCF) end
                 for _ = 1, intCount do spawnOneAt(posCF) end
                 if extra > 0 then
                     local rngPick = SeedUtil.rng(baseSeed, "child", chainId, depth, pIdx)
@@ -687,7 +695,7 @@ function GrowthVisualizer.Render(container, loomState)
     local function traverse(chainId, depth, profileName, startCF)
         local prof = profileOverride or profiles[profileName] or profiles.trunk or (config.profileDefaults or {kind="curved"})
         prof = GrowthProfiles.clampProfile(prof)
-        local res = buildChain(segOut, chainId, depth, baseSeed, startCF, prof, cfg, overrides)
+        local res = buildChain(segOut, chainId, depth, baseSeed, startCF, prof, cfg, overrides, profileName)
         chainMap[chainId] = { id = chainId, depth = depth, profileName = profileName, startCF = startCF, segCount = res.segCount }
         local segRefs = res.segRefs
         local segCount = res.segCount
@@ -726,13 +734,18 @@ function GrowthVisualizer.Render(container, loomState)
                     size = Vector3.new(seg.thickness, seg.length, seg.thickness)
                 end
                 local branchName = (chainMap[seg.chainId] and chainMap[seg.chainId].profileName) or "trunk"
+                local bProf = profiles[branchName] or {}
+                local bColor = bProf.color or partCfg.color
+                if type(bColor) == "table" then
+                    bColor = Color3.new((bColor.r or 0)/255, (bColor.g or 0)/255, (bColor.b or 0)/255)
+                end
                 scene.Spawn({
                     class = "Part",
                     shape = shape,
                     size = size,
                     cframe = seg.cframe,
-                    material = partCfg.material or Enum.Material.SmoothPlastic,
-                    color = partCfg.color,
+                    material = bProf.material or partCfg.material or Enum.Material.SmoothPlastic,
+                    color = bColor,
                     anchored = true,
                     canCollide = false,
                     name = "Segment",
@@ -776,6 +789,21 @@ function GrowthVisualizer.Render(container, loomState)
             renderSegments(scene, partCfg, segOut, chainMap)
         end
 
+        if overrides.debug and overrides.debug.showNodes then
+            for _, cf in ipairs(debugNodes) do
+                scene.Spawn({
+                    class = "Part",
+                    shape = Enum.PartType.Ball,
+                    size = Vector3.new(0.2,0.2,0.2),
+                    cframe = cf,
+                    color = Color3.fromRGB(255,215,0),
+                    material = Enum.Material.Neon,
+                    anchored = true,
+                    canCollide = false,
+                    name = "Node",
+                })
+            end
+        end
         placeDecorations(scene, baseSeed, segOut, config, overrides, partCfg)
     end
 end

@@ -434,6 +434,55 @@ local function clearExistingPreview(parent)
         end
 end
 
+local function buildPreviewConfig()
+       local cfgId = "__ld_preview_all"
+       local profiles = {}
+       for name, design in pairs(newState.branches) do
+               profiles[name] = DC(design)
+               profiles[name].kind = profiles[name].kind or "straight"
+       end
+
+       for _, a in ipairs(newState.assignments.children) do
+               local parent = a.parent
+               local child = a.child
+               if profiles[parent] and profiles[child] then
+                       profiles[parent].children = profiles[parent].children or {}
+                       local p = newState.branches[parent] or {}
+                       local rotation
+                       if p.childRotationMode == "manual" then
+                               rotation = {
+                                       yaw = p.childYaw or 0,
+                                       pitch = p.childPitch or 0,
+                                       roll = p.childRoll or 0,
+                               }
+                       end
+                       table.insert(profiles[parent].children, {
+                               name = child,
+                               placement = (p.spawnLocation == "junction") and "junction"
+                                       or (p.spawnLocation == "per_segment") and "per_segment"
+                                       or "tip",
+                               rotation = rotation,
+                               count = a.count or 1,
+                               step = p.childEveryNSeg,
+                               chance = p.childChancePct,
+                               spiralDeg = p.childSpiralDeltaYawDeg,
+                       })
+               end
+       end
+
+       return cfgId, {
+               profiles = profiles,
+               branchAssignments = { trunkProfile = newState.assignments.trunk },
+               models = {
+                       byDepth = newState.modelsByDepth,
+                       decorations = (newState.overrides.decorations and newState.overrides.decorations.enabled)
+                               and newState.overrides.decorations.types
+                               or nil,
+               },
+               growthDefaults = {},
+       }
+end
+
 local rootModel: Model? = nil
 
 function LoomDesigner.RebuildPreview(_container)
@@ -449,6 +498,7 @@ function LoomDesigner.RebuildPreview(_container)
 
        local parent = ensurePreviewParent()
        clearExistingPreview(parent)
+       VisualScene.Clear()
        local model = Instance.new("Model")
        model.Name = "PreviewBranch"
        model.Parent = parent
@@ -459,57 +509,8 @@ function LoomDesigner.RebuildPreview(_container)
                GrowthVisualizer.Release(nil, 0)
        end
 
-       -- Build a single config and render once
-       -- copy branch designs into profiles
-       local cfgId = "__ld_preview_all"
-       local profiles = {}
-       for name, design in pairs(newState.branches) do
-               profiles[name] = DC(design)
-               profiles[name].kind = profiles[name].kind or "straight"
-       end
-
-       -- wire children picks onto parent profiles
-       for _, a in ipairs(newState.assignments.children) do
-               local parent = a.parent
-               local child = a.child
-               if profiles[parent] and profiles[child] then
-                       profiles[parent].children = profiles[parent].children or {}
-                       local p = newState.branches[parent] or {}
-                       local rotation = nil
-                       if p.childRotationMode == "manual" then
-                               rotation = {
-                                       yaw = p.childYaw or 0,
-                                       pitch = p.childPitch or 0,
-                                       roll = p.childRoll or 0,
-                               }
-                       end
-                       local pick = {
-                               name = child,
-                               placement = (p.spawnLocation == "junction") and "junction"
-                                       or (p.spawnLocation == "per segment") and "per_segment"
-                                       or (p.spawnLocation == "pattern") and "pattern"
-                                       or "tip",
-                               rotation = rotation,
-                               count = a.count or 1,
-                               step = p.childEvery,
-                               chance = p.childChancePct,
-                               spiralDeg = p.childSpiralDeg,
-                       }
-                       table.insert(profiles[parent].children, pick)
-               end
-       end
-
-       LoomConfigs[cfgId] = {
-               profiles = profiles,
-               branchAssignments = { trunkProfile = newState.assignments.trunk },
-               models = {
-                       byDepth = newState.modelsByDepth,
-                       decorations = (newState.overrides.decorations and newState.overrides.decorations.enabled)
-                               and newState.overrides.decorations.types
-                               or nil,
-               },
-               growthDefaults = {},
-       }
+       local cfgId, cfg = buildPreviewConfig()
+       LoomConfigs[cfgId] = cfg
 
        GrowthVisualizer.Render(nil, {
                loomUid = 0,
