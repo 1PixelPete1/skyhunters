@@ -1,0 +1,143 @@
+{
+  "name": "WailingWinds",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "ContentRegistry": {
+        "$path": "src/replicated/ContentRegistry"
+      },
+      "Config": {
+        "$path": "src/replicated/Config"
+      },
+      "systems": {
+        "$className": "Folder",
+        "Lantern": { "$path": "src/replicated/systems/Lantern" }
+      },
+      "effects": {
+        "$className": "Folder",
+        "LanternFXAssets": { "$path": "src/replicated/effects/LanternFXAssets" }
+      },
+      "Net": {
+        "$className": "Folder",
+        "Remotes": {
+          "$className": "Folder",
+          "RF_ClaimPond": { "$className": "RemoteFunction" },
+          "RF_StartVoyage": { "$className": "RemoteFunction" },
+
+          "RF_DepositOil": { "$className": "RemoteFunction" },
+          "RF_PlaceBaseLantern": { "$className": "RemoteFunction" },
+          "RF_RefillBaseLantern": { "$className": "RemoteFunction" },
+          "RF_ApplyBaseLantern": { "$className": "RemoteFunction" },
+          "RF_ToggleRunLantern": { "$className": "RemoteFunction" },
+
+          "RE_BaseAssigned": { "$className": "RemoteEvent" },
+          "RE_Balances": { "$className": "RemoteEvent" },
+          "RE_InventoryDelta": { "$className": "RemoteEvent" },
+          "RE_UpgradeUnlocked": { "$className": "RemoteEvent" },
+
+          "RE_OnLanternStatesBatch": { "$className": "RemoteEvent" },
+          "RE_OnMinionScatter": { "$className": "RemoteEvent" },
+          "RE_OnRunTension": { "$className": "RemoteEvent" },
+          "RE_OnFlameChanged": { "$className": "RemoteEvent" },
+          "RE_OnSafeZoneChanged": { "$className": "RemoteEvent" },
+          "RE_OnCrowdDescriptor": { "$className": "RemoteEvent" }
+        }
+      }
+    },
+
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      },
+      "Systems": {
+        "$path": "src/server/Systems"
+      },
+      "Tests": {
+        "$path": "src/server/Tests"
+      }
+    },
+
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      },
+      "StarterCharacterScripts": {
+        "$path": "src/client/StarterCharacterScripts"
+      }
+    },
+
+    "ServerStorage": {
+      "ContentDB": {
+        "$path": "src/serverstorage/ContentDB"
+      },
+      "IslandTemplates": {
+        "$path": "src/serverstorage/IslandTemplates"
+      },
+      "LanternPools": { "$path": "src/serverstorage/LanternPools.luau" }
+    },
+
+    "Workspace": {
+      "$properties": {
+        "FilteringEnabled": true
+      },
+      "Baseplate": {
+        "$className": "Part",
+        "$properties": {
+          "Anchored": true,
+          "Color": [
+            0.38823,
+            0.37254,
+            0.38823
+          ],
+          "Locked": true,
+          "Position": [
+            0,
+            -10,
+            0
+          ],
+          "Size": [
+            512,
+            20,
+            512
+          ]
+        }
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Ambient": [
+          0,
+          0,
+          0
+        ],
+        "Brightness": 2,
+        "GlobalShadows": true,
+        "Outlines": false,
+        "Technology": "Voxel"
+      }
+    },
+    "SoundService": {
+      "$properties": {
+        "RespectFilteringEnabled": true
+      }
+    },
+    "StarterPack": {
+      "RunLantern": {
+        "$className": "Tool",
+        "$properties": { }
+      },
+      "PondTool": {
+        "$className": "Tool",
+        "$properties": { "RequiresHandle": false },
+        "Controller": { "$className": "LocalScript", "$path": "src/client/Tools/PondTool.client.luau" }
+      },
+      
+    }
+  }
+}

@@ -1,0 +1,6 @@
+﻿# Normalize line endings and encoding
+* text=auto eol=lf
+*.lua text eol=lf
+*.luau text eol=lf
+*.rbxl binary
+*.png binary
