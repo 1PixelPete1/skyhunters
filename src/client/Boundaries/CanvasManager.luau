@@ -4,6 +4,7 @@
 local CanvasManager = {}
 local RS = game:GetService("ReplicatedStorage")
 local WorldConfig = require(RS.Config.WorldConfig)
+local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
 
 export type Canvas = {
     id: string,
@@ -34,7 +35,7 @@ local function makeCanvas(): Canvas
     local gui = Instance.new("SurfaceGui")
     gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
     gui.CanvasSize = Vector2.new(128, 128)
-    gui.PixelsPerStud = 24
+    gui.PixelsPerStud = BoundaryConfig.pps_global
     gui.Face = Enum.NormalId.Top
     gui.AlwaysOnTop = true
     gui.Parent = part
@@ -48,7 +49,7 @@ local function makeCanvas(): Canvas
         part = part,
         gui = gui,
         container = container,
-        pps = 24,
+        pps = BoundaryConfig.pps_global,
         minX = 0, minZ = 0, maxX = 0, maxZ = 0,
     }
 end

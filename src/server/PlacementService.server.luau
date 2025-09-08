@@ -15,6 +15,8 @@ RF.Name = "RF_PlaceLantern"; RF.Parent = Remotes
 -- New path: under workspace.Plots/<pk>/Lanterns (managed by LanternService)
 
 local PondFieldMath = require(RS.Shared.PondFieldMath)
+local BoundarySDF = require(RS.Shared.Boundary.BoundarySDF)
+local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
 local Config = require(RS.Shared.Config)
 local ApplyCore = require(RS.Shared.ApplyCore)
 local SSS = game:GetService("ServerScriptService")
@@ -64,9 +66,9 @@ local function resolveIslandContext(): (string, CFrame)
   return "plane_64m", CFrame.new()
 end
 
-local PAD = 1.25
 local function serverAllowed(posXZ: Vector2): boolean
-  return PondFieldMath.isInside(posXZ, PondNetworkService.getSnapshot(), PAD)
+  -- Use unified BoundarySDF for parity
+  return BoundarySDF.isInside(posXZ, PondNetworkService.getSnapshot())
 end
 
 RF.OnServerInvoke = function(player, cframe: CFrame, presetKey: string?)

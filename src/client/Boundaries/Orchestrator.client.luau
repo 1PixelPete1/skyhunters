@@ -2,18 +2,36 @@
 -- Orchestrator: Snapshot -> Geometry2D -> CanvasManager -> StrokeRenderer2D
 
 local RS = game:GetService("ReplicatedStorage")
+local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
+if BoundaryConfig.boundary_renderer_enabled then
+    script.Disabled = true
+    return
+end
 print("[Boundary] Orchestrator init")
 
-local NetClient = require(script.Parent.Parent:WaitForChild("PondNetworkClient"))
+local NetClient do
+    local m = script.Parent.Parent:FindFirstChild("PondNetworkClient")
+    if m and m:IsA("ModuleScript") then
+        NetClient = require(m)
+    else
+        warn("[Orchestrator] PondNetworkClient missing; using empty snapshot")
+        NetClient = { snapshot = { ponds = {}, lakes = {} } }
+    end
+end
 local PondFieldMath = require(RS.Shared.PondFieldMath)
 local Geometry2D = require(script.Parent:WaitForChild("Geometry2D"))
 local CanvasManager = require(script.Parent:WaitForChild("CanvasManager"))
 local StrokeRenderer2D = require(script.Parent:WaitForChild("StrokeRenderer2D"))
+local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
 
 local CONFIG = {
-    POND_SCALE = 0.5,
-    PAD = 1.25,
-    PPS = 24, -- pixels per stud (global)
+    -- Sourced from BoundaryConfig
+    POND_SCALE = BoundaryConfig.pond_scale,
+    PAD = BoundaryConfig.pad,
+    PPS = BoundaryConfig.pps_global, -- pixels per stud (global)
+    maxRedrawsPerFrame = BoundaryConfig.max_redraws_per_frame,
+
+    -- Local renderer constants (kept here until future phases)
     STROKE_PX = 3, -- odd px for readability
     pondMinSeg = 24,
     pondMaxSeg = 96,
@@ -23,7 +41,6 @@ local CONFIG = {
     yOffset = 0.15,
     maxSegmentsPerCanvas = 300,
     maxTotalSegments = 2500,
-    maxRedrawsPerFrame = 4,
     -- Gap controls (Angle-Wedge method)
     pixelFudgeAngleDeg = 4.0,
     gapMarginStuds = 2.0,
@@ -214,7 +231,7 @@ local function renderLake(id: string, lake)
         -- Fallback to math if canal parts missing
         local center = lake.path or {}
         if #center < 2 then return end
-        local step = CONFIG.lakeStepPxNear / CONFIG.PPS
+    local step = CONFIG.lakeStepPxNear / CONFIG.PPS
         local res = Geometry2D.resampleByArcLength(center, step)
         res = Geometry2D.simplifyNearDuplicates(res, CONFIG.epsilon)
         local offset = (lake.width * 0.5) + CONFIG.PAD

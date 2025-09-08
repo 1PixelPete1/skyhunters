@@ -20,7 +20,35 @@ This document defines the principles, constraints, and operating rules for anyon
 **Shared world, predictable rules**
 
 * Islands/terrains are consistent per session. Players can’t grief core world state; changes are gated by server policies and rare items/events.
+Before I use your microbriefs, I am getting this roblox error:
 
+  12:02:55.790  Attempted to call require with invalid argument(s).  -  Server - PlacementService:19
+  12:02:55.790  Stack Begin  -  Studio
+  12:02:55.790  Script 'ServerScriptService.Server.PlacementService', Line 19  -  Studio - PlacementService:19
+  12:02:55.790  Stack End  -  Studio
+  12:02:55.791  Attempted to call require with invalid argument(s).  -  Server - WorldBootstrap:50
+  12:02:55.791  Stack Begin  -  Studio
+  12:02:55.791  Script 'ServerScriptService.Server.WorldBootstrap', Line 50  -  Studio - WorldBootstrap:50
+  12:02:55.791  Stack End  -  Studio
+  12:02:55.791  Attempted to call require with invalid argument(s).  -  Server - OilService:5
+  12:02:55.791  Stack Begin  -  Studio
+  12:02:55.791  Script 'ServerScriptService.Server.OilService', Line 5  -  Studio - OilService:5
+  12:02:55.792  Stack End  -  Studio
+  12:02:55.792  Attempted to call require with invalid argument(s).  -  Server - LanternService:11
+  12:02:55.792  Stack Begin  -  Studio
+  12:02:55.792  Script 'ServerScriptService.Server.LanternService', Line 11  -  Studio - LanternService:11
+  12:02:55.792  Stack End  -  Studio
+  12:02:55.794  GATEWAY PlacementGateway bound=true reason=nil  -  Server - Server:159
+  12:02:55.794  GATEWAY ApplyGateway bound=true reason=nil  -  Server - Server:163
+  12:02:55.794  BOOT ok=26 degraded=0 skipped=0 failures=[]  -  Server - Server:208
+  12:02:55.898  Plot assigned: P1  -  Client - UIRouter:11
+  12:02:55.898  Balances: 0 0  -  Client - UIRouter:15
+  12:02:56.308  [Load] plot=P1 restored=2 skipped=0  -  Server - SaveService:119
+
+these are for local PondFieldService = require(SSS.Server.PondFieldService)
+local SaveStore = require(SSS.Server.LanternSaveStore)
+
+these are the lines roblox is attributing the issues to, maybe some more.
 **Performance by design**
 
 * Event-driven recompute over per-frame loops. Spatial/locality limits. Memory pools where it matters. Low-end devices remain viable.
