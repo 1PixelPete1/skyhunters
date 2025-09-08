@@ -135,8 +135,8 @@
       "PondTool": {
         "$className": "Tool",
         "$properties": { "RequiresHandle": false },
-        "Controller": { "$className": "LocalScript", "$path": "src/client/Tools/PondTool.client.luau" }
-      },
+        "Controller": { "$path": "src/client/Tools/PondTool.client.luau" }
+      }
       
     }
   }

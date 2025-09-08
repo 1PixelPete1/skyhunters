@@ -52,6 +52,7 @@ local OilService = require(SSS:WaitForChild("Server"):WaitForChild("OilService")
 local RimBuilder = require(SSS:WaitForChild("Server"):WaitForChild("RimBuilder"))
 local LanternService = require(SSS:WaitForChild("Server"):WaitForChild("LanternService"))
 local PondNetworkService = require(SSS:WaitForChild("Systems"):WaitForChild("PondNetworkService"))
+-- Boundary publisher will be initialized AFTER ponds are created in PlayerAdded
 
 -- Ensure root container
 local root = workspace:FindFirstChild("Islands") or Instance.new("Folder")
@@ -115,13 +116,46 @@ Players.PlayerAdded:Connect(function(player)
         OilService.initForPlot(pk, center, radius)
         RimBuilder.build(workspace, center, radius, 24, nil)
         print(string.format("[Terrain] ponds seeded pk=%s r=%.1f", pk, radius))
-        -- Seed PondNetworkService once so SDF-based placement has a default valid region
-        local snap = PondNetworkService.getSnapshot()
-        local hasAny = false
-        for _, _ in pairs(snap.ponds) do hasAny = true; break end
-        if not hasAny then
-            PondNetworkService.addPond(Vector2.new(center.X, center.Z), radius)
+        
+        -- Add default pond to PondNetworkService
+        local pondAdded = PondNetworkService.addPond(Vector2.new(center.X, center.Z), radius)
+        if pondAdded then
+            print(string.format("[WorldBootstrap] default pond added id=%s", pondAdded.id))
         end
+        
+        -- CRITICAL FIX: Wait for PondNetworkService to fully register the pond
+        task.wait(0.2)
+        
+        -- Initialize boundary system AFTER pond exists
+        local BoundaryPublisher = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryPublisher"))
+        local BoundaryGraph = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryGraph"))
+        
+        -- Sync existing ponds from PondNetworkService to BoundaryGraph
+        local existingSnap = PondNetworkService.getSnapshot()
+        local trackedCount = 0
+        for pondId, pond in pairs(existingSnap.ponds or {}) do
+            local added = BoundaryGraph.addNode({ id = pondId, posXZ = pond.pos, radius = pond.radius })
+            if added then
+                trackedCount = trackedCount + 1
+                print(string.format("[Boundary/Init] tracked pond id=%s pos=(%.1f,%.1f) r=%.1f", pondId, pond.pos.X, pond.pos.Y, pond.radius))
+            end
+        end
+        
+        -- Track any existing lakes
+        for lakeId, lake in pairs(existingSnap.lakes or {}) do
+            BoundaryGraph.addEdge({ id = lakeId, a = lake.a, b = lake.b, path = lake.path, width = lake.width })
+            print(string.format("[Boundary/Init] tracked lake id=%s", lakeId))
+        end
+        
+        -- Force initial boundary publish after tracking
+        if trackedCount > 0 then
+            task.wait(0.1)  -- Give graph time to process
+            BoundaryPublisher.forcePublish()
+            print(string.format("[Boundary/Init] forced publish for %d ponds", trackedCount))
+        else
+            warn("[Boundary/Init] no ponds tracked, boundary markers may not appear")
+        end
+        
         -- Restore lanterns for this plot
         LanternService.RestoreForPlot(pk, island)
     end

@@ -1,123 +1,113 @@
-## Boundary & Canal System — Implementation History + Current Design (Summary)
+# Changelog — Wailing Winds (Boundary V3 Dots)
 
-Overview
-- Server-authoritative ponds and canals determine where lanterns can be placed. Terrain edits are done server-side; clients render an up-facing overlay and/or part-based visuals to show the exact perimeter.
-- Goals: accurate, stable, cheap visuals; exact parity with server acceptance; no floating visuals; rings show gaps where canals attach (gap cut currently disabled while canal geometry is tuned).
+## [2025-09-08] M1.4 (Fixes for Y positioning, canal connections, default pond tracking)
 
-Core Data Types (Shared)
-- `PondId` = string; `LakeId` = string
-- `Pond` = { id: PondId, pos: Vector2 (world XZ), radius: number }
-- `Lake` = { id: LakeId, a: PondId, b: PondId, path: { Vector2 } (centerline), width: number }
-- `Snapshot` = { version: number, ponds: { [PondId]: Pond }, lakes: { [LakeId]: Lake } }
+Fixed
+- Oil dots now use terrain raycast for Y positioning instead of fixed plane calculation.
+- Stone rail segments now properly connect to pond rims instead of going center-to-center.
+- Default pond markers now appear on startup (boundary system now tracks existing ponds).
+- Preview positioning fixed to use proper terrain height.
 
-Shared Math
-- Module: `ReplicatedStorage/Shared/PondFieldMath`
-  - Constants: `POND_SCALE = 0.5`, `PAD = 1.25`
-  - `Rpond = radius * (1 + POND_SCALE) + PAD`
-  - `roff = (width / 2) + PAD` for canals
-  - `signedDistance(p, snapshot, PAD)`: min distance to pond discs at `Rpond` and to each canal capsule with `roff`. `isInside` is ≤0.
+Added
+- Boundary markers toggle with 'M' key (similar to lantern ghost 'B' key toggle).
+- Canal path clipping to pond ring circumferences for proper visual connections.
+- Terrain raycast positioning for all boundary dots (ponds and canals).
 
-Server Modules (authoritative)
-- `ServerScriptService/Systems/PondNetworkService`
-  - Snapshot: `S.snapshot: Types.Snapshot`
-  - Policy (tunable): `MinPondRadius=6`, `MaxPondRadius=20`, `DefaultLakeWidth=10`, `PathSampleStep=8`, `AutoLink=true`, `AutoLinkMaxGap=80`, `MaxLakeSpan=600`
-  - Public API:
-    - `addPond(posXZ: Vector2, radius: number) -> Pond`
-      - Emits delta (version++), sculpts terrain (Air-only cylinder), builds rim stones (`workspace/PondRims/<pondId>`). Auto-links based on `edge gap` and span. Debug prints.
-    - `connectPonds(aId: string, bId: string, width?: number) -> Lake?`
-      - Samples Bezier A→B (seed wobble), then clips the path so it starts/ends at `Rpond` for both ponds (bisection). Writes clipped path + visual width `visW=max(2,baseWidth*0.4)` into snapshot, sculpts canal (Air-only chain), builds canal visuals. Debug prints.
-    - `getSnapshot() -> Snapshot`; `setSnapshot(newSnap: Snapshot)` (replace + `{full=true}`).
-  - Remotes (ReplicatedStorage/Net/Remotes):
-    - `RF_GetPondNetworkSnapshot` (RemoteFunction)
-    - `RE_PondNetworkDelta` (RemoteEvent)
-    - Dev: `RF_AddPond(posXZ: Vector2, radius: number)`, `RF_LinkPonds(aId, bId, width?)`
+Changed
+- All boundary dots (pond rims and canal rails) now use terrain raycast + lift instead of fixed Y.
+- Canal geometry properly clips to pond boundaries using ring radius calculations.
+- WorldBootstrap initializes boundary publisher after default pond creation and ensures tracking.
 
-- `ServerScriptService/PlacementService.server`
-  - Remote: `ReplicatedStorage/Remotes/RF_PlaceLantern`
-  - Validations (server):
-    - SDF ring (PAD=1.25, POND_SCALE=0.5): `PondFieldMath.isInside(Vector2(pos.X,pos.Z), PondNetworkService.getSnapshot(), PAD)`
-    - Terrain: vertical ray from Y+200; ignore rims/oil/boundary; reject Water (`ON_WATER`) and steep slopes (`upDot < 0.85`).
-    - Spacing: ≥ 6 studs from tagged `Lantern`.
-  - Delegates spawn to `ServerScriptService/Server/LanternService.ApplyPlacement`.
+Notes for QA
+- Press 'M' to toggle boundary markers visibility.
+- Default pond should now have visible markers on startup.
+- Canal segments should now connect cleanly to pond rims without gaps.
+- All markers should sit properly on terrain surface regardless of height variations.
 
-- `ServerScriptService/Server/LanternService`
-  - Uses pond-network SDF (vs legacy oil disc) to accept placements visually inside the boundary ring.
+## [2025-09-08] M1.3 (Junction Markers groundwork, soup v3)
 
-- `ServerScriptService/Server/OilService`
-  - Oil plane sits below terrain (base ~3.0 under center; top ~0.6 below surface).
+Added
+- soupVer=3 and junctionsVer=1 are attached to every `RE_BoundaryDelta` payload.
+- Lakes persist deterministic junctions at both ends: `{ pondId, lakeId, theta, arcHalfWidth, capLength=0.75, y }`.
+- `BoundaryConfig.useJunctions=true` gate for junction mode (default on).
+- Auto-link visibility logs: `[Boundary/Link] candidates|choose|occluded|none`.
 
-- `ServerScriptService/Server/RimBuilder`
-  - Campfire-style stones: `StoneCount=32`, slightly larger stones, small arc jitter; radius offset includes stone length.
-  - Rims live under `workspace/PondRims/<pondId>`.
+Changed
+- Junction discipline: with `useJunctions=true`, rim gaps are built only from persisted lake.junctions; no geometric gap inference.
+- Delta packet ordering: `junctionsRemove -> junctionsAdd -> adds -> removes` to avoid flicker.
+- Canal “river” visuals disabled on server; stone rails are driven by dot soup (client).
 
-Client Modules (visual only)
-- `StarterPlayerScripts/Client/Boundaries/*`
-  - CanvasManager: up-facing SurfaceGui; uniform height = `peakRimStoneTop + yOffset`; `PPS=24`, `AlwaysOnTop=true`.
-  - Geometry2D: circleSample (chord based), resampleByArcLength, offsetPolylineBevel, simplify, aabb.
-  - StrokeRenderer2D: frames as segments; 3px odd stroke; integer-pixel snapping; clear() per redraw.
-  - Orchestrator: ponds as circles at `Rpond` (gap cut disabled for now), lakes as polylines built from canal Bound parts (not math) — read part endpoints via CFrame; continuous chain `[a1,b1,b2,…]`; clear() before draw; scheduler budgets redraws.
+Fixed
+- PondNetworkService parse error (helpers after `return S`): removed code after return; helpers live above `connectPonds`.
+- Prevented phantom gaps when no lake exists: computePondGaps returns `{}` if no junctions for pond.
 
-- `StarterPlayerScripts/Client/PlacementClient.client`
-  - Default lantern ghost can toggle via `RE_DevToggleGhost`.
-  - Ghost validity: `PondFieldMath.isInside` with PAD=1.25 (matches server gate).
+Removed
+- Legacy canal body build path (river meshes) disabled by default.
 
-- `StarterPlayerScripts/Client/PondNetworkClient` (ModuleScript)
-  - Fetches `Snapshot` (RF) and applies deltas (RE); exposes `Changed` + `snapshot`.
+Notes for QA
+- Cold boot: `[Boundary/Publisher] init`, first publish contains `soupVer=3 junctionsVer=1`.
+- Add pond B (no link): both ponds keep full halos; logs include `[Boundary/Link] none ...` if not chosen.
+- If link is chosen: expect two junctions and four adds (A rim, B rim, lake_L, lake_R).
 
-- `StarterPack/PondTool`
-  - Visual ghosts while equipped:
-    - Red cylinder = pond, white cylinder = placement ring.
-    - Green canal preview: translucent blocks sampling a Bezier from nearest pond to cursor.
-  - Activation invokes `RF_AddPond(Vector2, radius)` (server allows in Studio).
+Migration / Flags
+- `BoundaryConfig.useJunctions=true` must be enabled (default). Legacy polyline soup remains for back‑compat.
 
-Remotes Summary
-- Core: `RF_GetPondNetworkSnapshot`, `RE_PondNetworkDelta`
-- Legacy alias: `RF_GetPondDisc` (in `/Remotes` and `/Net/Remotes`) logs deprecation once.
-- Dev: `RF_AddPond`, `RF_LinkPonds`, `RE_DevToggleGhost`, `RE_DevBoundaryDebug`
+## [2025-09-08] M1.2.2 (Gap dedupe + crash guards)
 
-Validation & Constants
-- `PAD = 1.25` (absolute), `POND_SCALE = 0.5` (relative pond growth)
-- Spacing: ≥ 6 studs; slope threshold: ≥ 0.85 up-dot; Terrain only (no Water)
+Added
+- Degree-cap dedupe: if `arcs_merged > degree(pond)`, drop narrowest arcs; log `[Boundary/Gaps] dedupe ...`.
 
-Studio Commands
-- `/mode pond` — hides default ghost and equips PondTool.
-- `/ghost on|off` — toggles default lantern ghost.
-- `/boundary debug on|off` — client prints segment counts and bbox per recompute.
-- `/pond add x z r` — adds a pond; sculpts terrain; builds rim.
-- `/wipe plot` — wipes current plot’s lantern save and clears spawned lanterns.
+Fixed
+- `segCircleHits` nil/degenerate guards — never throws; returns empty hits.
+- Sanitized canal centerlines to Vector2; skipped short paths with logs.
+- Publisher per‑id pcall isolation: keep last batches on build error; log `[Boundary/Publish] skip id=...`.
 
-World Config (for testing)
-- `ISLANDS.SizeStuds = 192`, `ISLANDS.HeightStuds = 48`.
-- Defaults: `ISLANDS.Pond { Radius=15, Depth=2 }`, `DefaultHeightY` used for sculpt pivot.
+Notes for QA
+- No “invalid argument (Vector2 expected)” crashes.
+- Rims never disappear on partial recompute; previous batches persist.
 
-Performance Notes
-- Boundary avoids full-field marching when lakes exist; uses two constant-offset polylines along A→B.
-- Ponds render as circles (72 segments). Sculpting uses cylinders (fast enough for Studio iteration).
+## [2025-09-08] M1.2.1 (Wrap-safe merge + thin-rim protection)
 
-Potential Next
-- Expose `POND_SCALE`/`PAD` in Shared.Config.
-- Add canal end-caps (capsules) and bank smoothing.
-- Scale rim density with circumference for very large ponds.
+Changed
+- Wrap-safe arc merging on [-π,π) then map to [0,2π); robust around seam.
+- Densify rim when remaining dots < 6; never blank full rims. Log `[Boundary/Rim] skip_thin ...` if skip.
 
-Up-Facing 2D Boundary Canvas (No Beams) — Clarifications
+## [2025-09-08] M1.2 (Defensive gap sampling + isolation)
 
-- Pixels-per-stud is global: use a single PPS for all canvases so stroke thickness is identical across ponds/lakes.
-- AABB includes stroke pad:
-  - Ponds: expand by `(R + strokeHalfWidth/PPS)` where `R = radius * (1 + POND_SCALE) + PAD`.
-  - Lakes: compute min/max over the offset rims (left/right), not just the centerline.
-- World→canvas axis: consistently map X→px, Z→py as `py = (maxZ - z) * PPS` (flip so “north” is up). Document once and reuse.
-- Y elevation: place canvases a tiny, fixed offset above water/terrain to avoid z-fighting; keep this in config alongside PPS and stroke.
-- Preview tick, not per-frame: update the preview ghost at a fixed Hz (e.g., 15–20); never tie rebuild to `RenderStepped`.
-- Segment caps and resampling:
-  - Clamp pond segments by `pondMinSeg/pondMaxSeg`.
-  - Resample lakes by arc length with `lakeStepNear/lakeStepFar`.
-  - Enforce `maxSegmentsPerCanvas` and `maxTotalSegments`.
-- Work scheduler: process at most `maxRedrawsPerFrame` canvases each frame; queue the rest to avoid spikes.
-- Tiling only when needed: split lakes whose AABB exceeds `tileMaxCanvasSizeStuds` into 2–3 tiles with a 1 px overlap to prevent seam gaps.
-- Edge cases:
-  - Tiny/huge ponds: clamp segments so tiny rings don’t vanish; cap large ones.
-  - Sharp canal turns: bevel joins only; collapse degenerates before offsetting.
-  - Self-intersections: drop segments < 1 px to prune micro-zigs/overdraw bursts.
-- Visibility modes: default ghost-only; if persistent overlays are enabled, add distance/frustum culling and coarser LOD at range.
-- Instrumentation:
-  - Per rebuild, log or HUD: `shapeId`, type (pond/lake), canvas px size, segments, ms in Geometry2D/CanvasManager/StrokeRenderer, pool usage, queued canvases; totals for active canvases and segments.
+Added
+- Fallback to nearest-point-on-polyline only when no circle hits; never combine with hit.
+
+Fixed
+- No combined fallback+hit duplicates; one gap per (pond,lake).
+
+## [2025-09-08] M1.1 (Rim alignment + occlusion-aware auto-link)
+
+Added
+- Auto-link occlusion test: skip candidates whose A→B segment intersects another pond’s expanded disk.
+- Logs: `[Boundary/Link] occluded ...`.
+
+Changed
+- (Interim) Rim notch direction based on ring intersection; superseded by junctions in M1.3.
+
+## [2025-09-08] M1 (Dot soup + deltas)
+
+Added
+- Server builds DotBatches for pond rims and canal rails; publishes full soup once, then deltas on graph changes.
+- Delta suppression if empty; adaptive spacing if dots exceed `maxDotsPerPublish`.
+- Telemetry: `[Boundary/Publish] ... ms_build ms_validate ms_send`.
+
+## [2025-09-07] M0 (Client renderer hardening)
+
+Added
+- BoundaryRenderer forced to DottedMarkers; nil-guarded `State.set`; watchdog logs; renderer stats HUD.
+- BoundaryMask scaffold; PlacementClient tolerates mask missing and legacy remotes.
+
+Fixed
+- Client infinite-yield hazards: replaced strict WaitForChild with timed waits and fallbacks.
+
+---
+
+Legend
+- M#.# — minor/feature milestones; M1.x tracks Dot Soup + Boundary V3.
+- JM-# — Junction Markers implementation phases.
+

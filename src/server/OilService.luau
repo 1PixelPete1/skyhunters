@@ -36,6 +36,8 @@ function OilService.initForPlot(pk: string, center: Vector3, radius: number)
     ensureBox(pk, center, radius)
     centers[pk] = center
     levelByPlot[pk] = levelByPlot[pk] or 0
+    -- FIXED: Force update with current level to apply new height calculation
+    OilService.setOilLevel(pk, levelByPlot[pk])
 end
 
 function OilService.setOilLevel(pk: string, level: number)
@@ -43,10 +45,10 @@ function OilService.setOilLevel(pk: string, level: number)
     levelByPlot[pk] = lvl
     local box = boxes[pk]
     if not box then return end
-    -- Place oil below terrain surface: base ~1.8 studs below center Y; cap top at ~0.2 below surface
+    -- FIXED: Place oil 2 studs lower to avoid terrain flickering
     local center = centers[pk] or Vector3.new(0,0,0)
-    local targetTop = center.Y - 0.6
-    local baseY = center.Y - 3.0
+    local targetTop = center.Y - 2.6  -- FIXED: was -0.6, now -2.6 (2 studs lower)
+    local baseY = center.Y - 5.0     -- FIXED: lowered proportionally
     local maxH = math.max(0.6, targetTop - baseY)
     local h = (lvl / 100) * maxH
     local size = box.Size

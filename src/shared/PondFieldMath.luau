@@ -2,6 +2,8 @@
 -- PondFieldMath: SDF utilities for ponds + lakes
 
 local PondFieldMath = {}
+local RS = game:GetService("ReplicatedStorage")
+local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
 
 function PondFieldMath.distPointSeg2D(p: Vector2, a: Vector2, b: Vector2): number
     local ab = b - a
@@ -16,7 +18,7 @@ end
 
 -- Signed distance to union (pond discs dilated by pad) U (lake capsules dilated by pad)
 -- pad is an absolute epsilon in studs; ponds are additionally scaled by POND_SCALE
-local POND_SCALE = 0.5 -- enlarge pond discs by +50%
+local POND_SCALE = BoundaryConfig.pond_scale -- enlarge pond discs by configured scale
 
 function PondFieldMath.signedDistance(p: Vector2, snapshot: any, pad: number): number
     local best = math.huge
@@ -28,7 +30,7 @@ function PondFieldMath.signedDistance(p: Vector2, snapshot: any, pad: number): n
     end
 
     for _, lake in pairs(snapshot.lakes or {}) do
-        local w = ((lake.width or 10) * 0.5) + (pad or 0)
+        local w = (((lake.width or BoundaryConfig.canal_width_default) * 0.5) + (pad or 0))
         local path = lake.path or {}
         for i = 1, #path - 1 do
             local d = PondFieldMath.distPointSeg2D(p, path[i], path[i+1]) - w
