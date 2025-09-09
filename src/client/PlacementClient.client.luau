@@ -73,23 +73,6 @@ boundaryGhost.Color = Color3.fromRGB(255, 255, 0)  -- Yellow for boundary
 boundaryGhost.Shape = Enum.PartType.Cylinder
 boundaryGhost.Parent = ghostFolder
 
-local function rayToTerrainSurface(worldPos: Vector3): number
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Whitelist
-    params.FilterDescendantsInstances = { workspace.Terrain }
-    
-    local origin = worldPos + Vector3.new(0, 1000, 0)  -- Start high above
-    local direction = Vector3.new(0, -2000, 0)  -- Ray down
-    
-    local hit = workspace:Raycast(origin, direction, params)
-    if hit then
-        return hit.Position.Y
-    else
-        -- Fallback to world position Y if no terrain hit
-        return worldPos.Y
-    end
-end
-
 local function detectPlacementMode(): string
     -- Check if player has a tool equipped
     local player = Players.LocalPlayer
@@ -110,15 +93,40 @@ local function detectPlacementMode(): string
     return "lantern"
 end
 
-local function updateLanternGhost(position: Vector3, normal: Vector3, isValid: boolean)
-    -- Position lantern on surface
-    local terrainY = rayToTerrainSurface(position)
-    lanternGhost.Position = Vector3.new(position.X, terrainY + (lanternGhost.Size.Y * 0.5), position.Z)
+-- Store last valid hit for rotation
+local lastHit = nil
+
+local function updateLanternGhost(hit: RaycastResult?, isValid: boolean)
+    if not hit then
+        lanternGhost.Parent = nil
+        return
+    end
+    
+    -- Position lantern on actual hit surface with proper rotation
+    local pos = hit.Position
+    local normal = hit.Normal
+    
+    -- Calculate rotation to align with surface normal
+    local lookDir = normal:Cross(Vector3.new(1, 0, 0))
+    if lookDir.Magnitude < 0.01 then
+        lookDir = normal:Cross(Vector3.new(0, 0, 1))
+    end
+    lookDir = lookDir.Unit
+    
+    local cf = CFrame.lookAt(pos, pos + lookDir, normal)
+    lanternGhost.CFrame = cf * CFrame.new(0, lanternGhost.Size.Y * 0.5, 0)
     lanternGhost.Color = isValid and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(255, 100, 100)
     lanternGhost.Parent = workspace
 end
 
-local function updatePondGhost(position: Vector3, normal: Vector3, isValid: boolean)
+local function updatePondGhost(hit: RaycastResult?, isValid: boolean)
+    if not hit then
+        ghostFolder.Parent = workspace
+        pondGhost.Position = Vector3.new(0, -1000, 0)
+        boundaryGhost.Position = Vector3.new(0, -1000, 0)
+        return
+    end
+    
     -- Get pond configuration
     local pondConfig = WorldConfig.ISLANDS.Pond
     local pondRadius = pondConfig.Radius or 15
@@ -128,9 +136,7 @@ local function updatePondGhost(position: Vector3, normal: Vector3, isValid: bool
     local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
     local boundaryRadius = pondRadius * (1 + (BoundaryConfig.pond_scale or 0.5)) + (BoundaryConfig.pad or 1.25)
     
-    -- FIXED: Get actual terrain surface Y for proper positioning
-    local terrainY = rayToTerrainSurface(position)
-    local adjustedPos = Vector3.new(position.X, terrainY, position.Z)
+    local adjustedPos = hit.Position
     
     -- Main pond cylinder (squashed, represents actual pond)
     local pondHeight = pondDepth * 0.3  -- Squashed representation
@@ -145,6 +151,8 @@ local function updatePondGhost(position: Vector3, normal: Vector3, isValid: bool
     -- Color based on validity
     pondGhost.Color = isValid and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(255, 100, 100)
     boundaryGhost.Color = isValid and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(255, 150, 150)
+    
+    ghostFolder.Parent = workspace
 end
 
 local function screenRay()
@@ -152,17 +160,15 @@ local function screenRay()
   return camera:ViewportPointToRay(m.X, m.Y)
 end
 
-local function rayToWorld(): (Vector3?, Vector3?)
+local function rayToWorld(): RaycastResult?
   local r = screenRay()
   local params = RaycastParams.new()
   params.FilterType = Enum.RaycastFilterType.Blacklist
-  params.FilterDescendantsInstances = { ghostFolder, lanternGhost }  -- Filter both ghost systems
+  params.FilterDescendantsInstances = { ghostFolder, lanternGhost }
+  params.IgnoreWater = false  -- We want to detect water placement
+  
   local hit = workspace:Raycast(r.Origin, r.Direction * 1000, params)
-  if not hit then return nil, nil end
-  -- Snap Y to boundary plane (authoritative)
-  local planeY = (BoundaryState and BoundaryState.plane_y) or (WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or hit.Position.Y
-  local snapped = Vector3.new(hit.Position.X, planeY, hit.Position.Z)
-  return snapped, hit.Normal
+  return hit
 end
 
 local placeOk = false
@@ -198,16 +204,6 @@ do
   end
 end
 
-local function resolveIslandCF(): (string, CFrame)
-  local islands = workspace:FindFirstChild("Islands")
-  local islandModel = islands and islands:FindFirstChild("Island_01")
-  if islandModel and islandModel.PrimaryPart then
-    local key = islandModel:GetAttribute("PresetKey") or "plane_64m"
-    return key, islandModel.PrimaryPart.CFrame
-  end
-  return "plane_64m", CFrame.new()
-end
-
 RunService.RenderStepped:Connect(function()
   -- Detect current placement mode
   placementMode = detectPlacementMode()
@@ -218,14 +214,15 @@ RunService.RenderStepped:Connect(function()
     return 
   end
   
-  local p, n = rayToWorld()
-  if not p then
+  local hit = rayToWorld()
+  lastHit = hit  -- Store for placement
+  
+  if not hit then
     -- Hide ghosts when no valid position
     if placementMode == "pond" then
-        ghostFolder.Parent = workspace
-        updatePondGhost(Vector3.new(0, -1000, 0), Vector3.yAxis, false)
+        updatePondGhost(nil, false)
     else
-        lanternGhost.Parent = nil
+        updateLanternGhost(nil, false)
     end
     return
   end
@@ -234,30 +231,37 @@ RunService.RenderStepped:Connect(function()
   if placementMode == "pond" then
     -- Hide lantern ghost, show pond ghost
     lanternGhost.Parent = nil
-    ghostFolder.Parent = workspace
     
     -- Validate pond placement
     local ok = true
     local mask = BoundaryMask
     if mask and mask.isInsideBoundary then
-      ok = mask.isInsideBoundary(Vector2.new(p.X, p.Z))
+      ok = mask.isInsideBoundary(Vector2.new(hit.Position.X, hit.Position.Z))
     end
     placeOk = ok
-    updatePondGhost(p, n, ok)
+    updatePondGhost(hit, ok)
   else
     -- Hide pond ghost, show lantern ghost
     ghostFolder.Parent = nil
     
-    -- Validate lantern placement (basic for now)
-    local ok = true  -- Could add more validation
+    -- Validate lantern placement
+    local ok = true
+    -- Check if on water
+    if hit.Material == Enum.Material.Water then
+      ok = false
+    end
+    -- Check slope
+    if hit.Normal:Dot(Vector3.yAxis) < 0.85 then
+      ok = false
+    end
     placeOk = ok
-    updateLanternGhost(p, n, ok)
+    updateLanternGhost(hit, ok)
   end
 end)
 
 UIS.InputBegan:Connect(function(input, gpe)
   if gpe then return end
-  if input.UserInputType == Enum.UserInputType.MouseButton1 and placeOk then
+  if input.UserInputType == Enum.UserInputType.MouseButton1 and placeOk and lastHit then
     if placementMode == "pond" then
       -- Place pond using pond ghost position
       local success, reason = RF:InvokeServer(pondGhost.CFrame, "pond")
@@ -265,8 +269,19 @@ UIS.InputBegan:Connect(function(input, gpe)
         warn("Pond place failed:", reason)
       end
     else
-      -- Place lantern at ghost position
-      local cf = CFrame.new(lanternGhost.Position)
+      -- Place lantern at actual hit position with rotation
+      -- Build CFrame from hit position and normal
+      local pos = lastHit.Position
+      local normal = lastHit.Normal
+      
+      -- Calculate rotation to align with surface normal
+      local lookDir = normal:Cross(Vector3.new(1, 0, 0))
+      if lookDir.Magnitude < 0.01 then
+        lookDir = normal:Cross(Vector3.new(0, 0, 1))
+      end
+      lookDir = lookDir.Unit
+      
+      local cf = CFrame.lookAt(pos, pos + lookDir, normal)
       local success, reason = RF:InvokeServer(cf, lanternPresetKey)
       if not success then
         warn("Lantern place failed:", reason)
@@ -294,14 +309,17 @@ task.spawn(function()
   while true do
     task.wait(0.2)
     if not probe then continue end
-    local p, _ = rayToWorld()
-    if p and BoundarySDF then
-      local inside = BoundarySDF.isInside(Vector2.new(p.X, p.Z), NetClient.snapshot)
+    local hit = rayToWorld()
+    if hit and BoundarySDF then
+      local inside = BoundarySDF.isInside(Vector2.new(hit.Position.X, hit.Position.Z), NetClient.snapshot)
       -- Approx dist sample via SDF on current point only (offsets optional)
       local d = 0
       -- expose signed distance only if BoundarySDF exports; else approximate via inside flag
       -- For now, print 0 for dist placeholder
-      print(string.format("[Boundary/SDF] inside=%s dist=%.2f onWater=%s slopeBad=%s", tostring(inside), d, tostring(false), tostring(false)))
+      print(string.format("[Boundary/SDF] inside=%s dist=%.2f onWater=%s slopeBad=%s", 
+        tostring(inside), d, 
+        tostring(hit.Material == Enum.Material.Water), 
+        tostring(hit.Normal:Dot(Vector3.yAxis) < 0.85)))
     end
   end
 end)

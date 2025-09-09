@@ -101,6 +101,11 @@ else
     end
 end
 
+-- Initialize boundary system BEFORE any pond creation
+-- This ensures the publisher is listening for graph changes
+local BoundaryPublisher = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryPublisher"))
+print("[WorldBootstrap] boundary system initialized")
+
 -- One-time seed per assigned plot
 local Players = game:GetService("Players")
 Players.PlayerAdded:Connect(function(player)
@@ -118,42 +123,12 @@ Players.PlayerAdded:Connect(function(player)
         print(string.format("[Terrain] ponds seeded pk=%s r=%.1f", pk, radius))
         
         -- Add default pond to PondNetworkService
+        -- This will automatically register with BoundaryGraph and trigger boundary publishing
         local pondAdded = PondNetworkService.addPond(Vector2.new(center.X, center.Z), radius)
         if pondAdded then
             print(string.format("[WorldBootstrap] default pond added id=%s", pondAdded.id))
-        end
-        
-        -- CRITICAL FIX: Wait for PondNetworkService to fully register the pond
-        task.wait(0.2)
-        
-        -- Initialize boundary system AFTER pond exists
-        local BoundaryPublisher = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryPublisher"))
-        local BoundaryGraph = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryGraph"))
-        
-        -- Sync existing ponds from PondNetworkService to BoundaryGraph
-        local existingSnap = PondNetworkService.getSnapshot()
-        local trackedCount = 0
-        for pondId, pond in pairs(existingSnap.ponds or {}) do
-            local added = BoundaryGraph.addNode({ id = pondId, posXZ = pond.pos, radius = pond.radius })
-            if added then
-                trackedCount = trackedCount + 1
-                print(string.format("[Boundary/Init] tracked pond id=%s pos=(%.1f,%.1f) r=%.1f", pondId, pond.pos.X, pond.pos.Y, pond.radius))
-            end
-        end
-        
-        -- Track any existing lakes
-        for lakeId, lake in pairs(existingSnap.lakes or {}) do
-            BoundaryGraph.addEdge({ id = lakeId, a = lake.a, b = lake.b, path = lake.path, width = lake.width })
-            print(string.format("[Boundary/Init] tracked lake id=%s", lakeId))
-        end
-        
-        -- Force initial boundary publish after tracking
-        if trackedCount > 0 then
-            task.wait(0.1)  -- Give graph time to process
-            BoundaryPublisher.forcePublish()
-            print(string.format("[Boundary/Init] forced publish for %d ponds", trackedCount))
         else
-            warn("[Boundary/Init] no ponds tracked, boundary markers may not appear")
+            warn("[WorldBootstrap] failed to add default pond")
         end
         
         -- Restore lanterns for this plot

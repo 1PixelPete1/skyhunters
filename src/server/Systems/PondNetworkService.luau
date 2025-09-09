@@ -218,8 +218,9 @@ local function autoLink(newId: string)
     end
 end
 
-function S.addPond(posXZ: Vector2, radius: number)
+function S.addPond(posXZ: Vector2, radius: number, depth: number?)
     radius = math.clamp(radius, Policy.MinPondRadius, Policy.MaxPondRadius)
+    depth = depth or ((WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2)
     -- Overlap guard: prevent placing overlapping ponds (by ring radii)
     local POND_SCALE = BoundaryConfig.pond_scale
     local PAD = BoundaryConfig.pad
@@ -243,9 +244,10 @@ function S.addPond(posXZ: Vector2, radius: number)
     local pond = { id = id, pos = posXZ, radius = radius, centerY = surfaceY }  -- Store surface Y
     S.snapshot.ponds[id] = pond
     S.bump({ ponds = { created = { pond } } })
-    -- Sculpt terrain: clear to Air only (no Water fill), build rim
-    local height = depth
-    local clearR = radius + 1.5
+    -- Sculpt terrain: carve circular crater with proper depth
+    local sculptDepth = depth
+    local height = sculptDepth
+    local clearR = radius + 0.5  -- Slightly larger for clean edges
     local okCarve1, err1 = pcall(function()
         Terrain:FillCylinder(CFrame.new(sculptCenter, sculptCenter + Vector3.yAxis), height, clearR, Enum.Material.Air)
     end)
@@ -306,15 +308,16 @@ function S.connectPonds(aId: string, bId: string, width: number?)
     }
     S.snapshot.lakes[id] = lake
     S.bump({ lakes = { created = { lake } } })
-    -- Sculpt a canal along the path: chain of Air-only cylinders (no Water fill)
+    -- Sculpt a canal along the clipped path: chain of shallow Air-only cylinders
     local yTop = WorldConfig.ISLANDS.DefaultHeightY
-    local depth = (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2
+    local depth = math.min(1, (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2) * 0.5  -- Shallower canals
     local height = depth
-    local clearR = lake.width + 1.5
+    local clearR = lake.width + 0.5  -- Narrower carving
     local okCarve2, err2 = pcall(function()
-        for i = 1, #path do
-            local p = path[i]
-            local sculptCenter = Vector3.new(p.X, yTop - (depth * 0.5), p.Y)  -- Use depth center for carving
+        -- Use clipped path for carving too
+        for i = 1, #clipped do
+            local p = clipped[i]
+            local sculptCenter = Vector3.new(p.X, yTop - (depth * 0.5), p.Y)  -- Use shallow depth for carving
             Terrain:FillCylinder(CFrame.new(sculptCenter, sculptCenter + Vector3.yAxis), height, clearR, Enum.Material.Air)
         end
     end)
@@ -323,10 +326,10 @@ function S.connectPonds(aId: string, bId: string, width: number?)
     else
         print(string.format("[PondNetwork] carved canal steps=%d r=%.1f", #path, clearR))
     
-    -- FIXED: Add stone rim segments along canal path for visual connection
+    -- FIXED: Add dense stone rim segments along canal path for visual connection
     pcall(function()
-        local segmentSpacing = 8  -- studs between stone segments
-        local segmentCount = math.max(2, math.floor(#path / math.max(1, segmentSpacing / Policy.PathSampleStep)))
+        local segmentSpacing = 2  -- Much closer spacing for continuous appearance
+        local segmentCount = math.max(2, math.floor((#path * Policy.PathSampleStep) / segmentSpacing))
         
         local canals = workspace:FindFirstChild("CanalSegments") or Instance.new("Folder")
         canals.Name = "CanalSegments"; canals.Parent = workspace
@@ -338,38 +341,56 @@ function S.connectPonds(aId: string, bId: string, width: number?)
             if child.Name == "CanalStone" then child:Destroy() end
         end
         
-        -- Place stone segments along the path
-        for i = 1, segmentCount do
-            local pathIndex = math.floor((i / segmentCount) * (#path - 1)) + 1
-            pathIndex = math.clamp(pathIndex, 1, #path)
-            local pathPoint = path[pathIndex]
+        -- Get the clipped path (rim to rim, not center to center)
+        local clippedPath = lake.path  -- This is already clipped to rings
+        
+        -- Place stone segments along the clipped path
+        for i = 1, #clippedPath - 1 do
+            local p1 = clippedPath[i]
+            local p2 = clippedPath[i + 1]
+            local segLen = (p2 - p1).Magnitude
+            local numStones = math.max(1, math.floor(segLen / segmentSpacing))
             
-            -- Create small stone segment
-            local stone = Instance.new("Part")
-            stone.Name = "CanalStone"
-            stone.Anchored = true
-            stone.CanCollide = true
-            stone.Material = Enum.Material.Rock
-            stone.Color = Color3.fromRGB(118, 116, 112)
-            stone.Size = Vector3.new(2, 0.8, 1.5)
-            stone.TopSurface = Enum.SurfaceType.Smooth
-            stone.BottomSurface = Enum.SurfaceType.Smooth
-            
-            -- Position on terrain surface like RimBuilder does
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Whitelist
-            params.FilterDescendantsInstances = { workspace.Terrain }
-            
-            local origin = Vector3.new(pathPoint.X, 1000, pathPoint.Y)
-            local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
-            local surfY = (hit and hit.Position.Y) or (yTop - depth * 0.5)
-            
-            local stoneY = surfY + (stone.Size.Y * 0.5)
-            stone.Position = Vector3.new(pathPoint.X, stoneY, pathPoint.Y)
-            stone.Parent = canalFolder
+            for j = 0, numStones - 1 do
+                local t = j / math.max(1, numStones - 1)
+                local pathPoint = p1 + (p2 - p1) * t
+                
+                -- Create stone segment
+                local stone = Instance.new("Part")
+                stone.Name = "CanalStone"
+                stone.Anchored = true
+                stone.CanCollide = true
+                stone.Material = Enum.Material.Rock
+                stone.Color = Color3.fromRGB(118, 116, 112)
+                stone.Size = Vector3.new(2.5, 0.8, 2)  -- Wider for better coverage
+                stone.TopSurface = Enum.SurfaceType.Smooth
+                stone.BottomSurface = Enum.SurfaceType.Smooth
+                
+                -- Position on terrain surface
+                local params = RaycastParams.new()
+                params.FilterType = Enum.RaycastFilterType.Whitelist
+                params.FilterDescendantsInstances = { workspace.Terrain }
+                
+                local origin = Vector3.new(pathPoint.X, 1000, pathPoint.Y)
+                local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
+                local surfY = (hit and hit.Position.Y) or yTop
+                
+                local stoneY = surfY + (stone.Size.Y * 0.5)
+                stone.Position = Vector3.new(pathPoint.X, stoneY, pathPoint.Y)
+                
+                -- Orient along path direction
+                if i < #clippedPath then
+                    local dir = (p2 - p1).Unit
+                    local angle = math.atan2(dir.Y, dir.X)
+                    stone.CFrame = stone.CFrame * CFrame.Angles(0, angle, 0)
+                end
+                
+                stone.Parent = canalFolder
+            end
         end
         
-        print(string.format("[PondNetwork] canal stones id=%s segments=%d", id, segmentCount))
+        local totalStones = canalFolder:GetChildren()
+        print(string.format("[PondNetwork] canal stones id=%s segments=%d", id, #totalStones))
     end)
     end
     print(string.format("[PondNetwork] connectPonds id=%s a=%s b=%s width=%.1f steps=%d", id, aId, bId, lake.width, #path))

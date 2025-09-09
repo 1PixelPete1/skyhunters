@@ -25,7 +25,7 @@ return {
       },
     },
     MainPresetKey = "plane_64m",
-    DefaultHeightY = 100,            -- global Y for Phase-1 main islands
+    DefaultHeightY = 1,            -- global Y for Phase-1 main islands
     AllowScale = false,              -- Phase-1: fixed scale=1.0 (left here for future)
     
     -- M0.2 toggles and dimensions for SmoothTerrain island

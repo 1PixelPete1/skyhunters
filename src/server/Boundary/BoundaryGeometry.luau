@@ -455,8 +455,8 @@ function Geometry.sampleCanalRails(graph: BoundaryGraph, lakeId: string, centerl
         end
     end
     
-    -- FIXED: Use much denser sampling for continuous canal appearance
-    local denseSpacing = math.min(spacing * 0.4, 1.5)  -- Much denser dots for canals
+    -- Use moderately denser sampling for continuous canal appearance
+    local denseSpacing = math.min(spacing * 0.7, 2.5)  -- Slightly denser than pond dots
     local res = resampleUniform(clipped, denseSpacing)
     if #res < 2 then
         local pts = {}

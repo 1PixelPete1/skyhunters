@@ -193,29 +193,63 @@ end
 
 if RE_Delta then
 RE_Delta.OnClientEvent:Connect(function(payload)
-    if payload and payload.replace and payload.soup then
-        enqueueSoup(payload)
-        if BoundaryMask and BoundaryMask.setSoup then
-            pcall(BoundaryMask.setSoup, payload.soup)
+    if payload then
+        -- Handle full replace payload
+        if payload.replace or payload.full then
+            enqueueSoup(payload)
+            if BoundaryMask and BoundaryMask.setSoup and payload.soup then
+                pcall(BoundaryMask.setSoup, payload.soup)
+            end
+            -- log batches count if present
+            local b = (payload.full and payload.full.batches) or {}
+            print(string.format("[Boundary/Renderer] RE_Delta pub_id=%s batches=%d queue=%d", 
+                tostring(payload.pub_id or payload.version or -1), 
+                #b, 
+                #soupQueue))
+            if payload.canvasY and State and State.setPlaneY then 
+                pcall(State.setPlaneY, payload.canvasY) 
+            end
+        -- Handle delta payload
+        elseif payload.delta then
+            enqueueSoup(payload)
+            local adds = payload.delta.adds or {}
+            print(string.format("[Boundary/Renderer] RE_Delta delta pub_id=%s adds=%d queue=%d", 
+                tostring(payload.pub_id or -1), 
+                #adds, 
+                #soupQueue))
         end
-        -- log batches count if present
-        local b = (payload.full and payload.full.batches) or (payload.delta and payload.delta.adds) or {}
-        print(string.format("[Boundary/Renderer] pub_id=%s batches=%d queue=%d", tostring(payload.version or (payload.soup and payload.soup.version) or -1), #(b or {}), #soupQueue))
-        -- If batches exist, renderer will consume them; ignore any legacy fields.
-        if payload.canvasY and State and State.setPlaneY then pcall(State.setPlaneY, payload.canvasY) end
     end
 end)
 end
 
 task.defer(function()
+    -- Wait a bit for server to be ready with default pond
+    task.wait(1.0)  -- Give server time to create default pond and boundary graph
+    
     if RF_Get then
         local ok, resp = pcall(function() return RF_Get:InvokeServer() end)
         if ok and resp then
-            enqueueSoup({ replace = true, soup = resp, version = resp.version })
-            gotSoupAt = os.clock()
-            if BoundaryMask and BoundaryMask.setSoup then
-                pcall(BoundaryMask.setSoup, resp)
+            print(string.format("[Boundary/Renderer] Got initial soup version=%s batches=%d", 
+                tostring(resp.version), 
+                resp.full and #(resp.full.batches or {}) or 0))
+            
+            -- Handle both old and new format
+            if resp.full and resp.full.batches and #resp.full.batches > 0 then
+                -- New format with batches - this is what we need!
+                enqueueSoup(resp)
+            elseif resp.soup then
+                -- Old format - try to use it anyway
+                enqueueSoup({ replace = true, soup = resp.soup or resp, version = resp.version or 0 })
+            else
+                warn("[Boundary/Renderer] Initial soup has no batches, waiting for delta")
             end
+            
+            gotSoupAt = os.clock()
+            if BoundaryMask and BoundaryMask.setSoup and resp.soup then
+                pcall(BoundaryMask.setSoup, resp.soup)
+            end
+        else
+            warn("[Boundary/Renderer] Failed to get initial soup:", tostring(resp))
         end
     else
         warn("[Boundary/Renderer] RF_BoundaryGetSoup missing; will rely on events")
