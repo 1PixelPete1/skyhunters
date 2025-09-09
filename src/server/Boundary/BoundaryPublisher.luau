@@ -58,34 +58,22 @@ local function countDots(batches: { any }): number
     return n
 end
 
-local function raycastToTerrain(worldPos: Vector3, featureType: string?): number
+local function raycastToTerrain(worldPos: Vector3): number
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Whitelist
     params.FilterDescendantsInstances = { workspace.Terrain }
+    params.IgnoreWater = false  -- We want to hit the terrain surface, not water
     
-    local origin = worldPos + Vector3.new(0, 1000, 0)  -- Start high above
-    local direction = Vector3.new(0, -2000, 0)  -- Ray down
+    local origin = worldPos + Vector3.new(0, 100, 0)  -- Start above
+    local direction = Vector3.new(0, -200, 0)  -- Ray down
     
     local hit = workspace:Raycast(origin, direction, params)
     if hit then
-        -- Check if this is for oil positioning
-        if featureType == "oil" then
-            -- Oil floats on pond bottom, well below water surface
-            local depth = (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2
-            return hit.Position.Y - depth + 0.1  -- Slightly above pond floor
-        else
-            -- Regular boundary markers at terrain surface
-            return hit.Position.Y
-        end
+        -- Return the actual terrain surface hit
+        return hit.Position.Y
     else
-        -- Fallback if raycast fails
-        local yTop = ((WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 0)
-        if featureType == "oil" then
-            local depth = (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2
-            return yTop - depth + 0.1  -- Oil at pond bottom
-        else
-            return yTop  -- Regular markers at surface
-        end
+        -- Fallback to configured height if no terrain
+        return (WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 1
     end
 end
 
@@ -94,6 +82,10 @@ local function buildAllDotBatches(graph): { any }
     local spacing = cfg.dotSpacing or 3.5
     local lift = (cfg.dotLiftY or 0.05)
     local half = cfg.canalHalfWidth or 2.0
+    
+    -- Use the configured island surface height as a base, but raycast for actual terrain
+    local islandSurfaceY = (WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 1
+    
     local function buildWith(sp)
         local tmp = {}
         -- Try to read PondNetworkService snapshot for per-feature Y baking
@@ -108,17 +100,13 @@ local function buildAllDotBatches(graph): { any }
             local R = n.radius * (1 + (cfg.pond_scale or 0)) + (cfg.pad or 0)
             local okG, gaps = pcall(function() return require(script.Parent.BoundaryGeometry).computePondGaps(graph, pondId, R, half) end)
             
-            -- FIXED: Detect if this is an oil batch and position accordingly
-            local isOilPond = false
-            -- Check if this pond has oil (simple heuristic - you may need to check OilService)
-            -- For now, check if pond ID contains "oil" or check a marker
-            if string.find(tostring(pondId), "oil") then
-                isOilPond = true
-            end
+            -- Boundary markers should be at actual terrain surface around the pond
+            -- Raycast to find the rim height (should be at island surface)
+            local rimPoint = n.posXZ + n.posXZ.Unit * (n.radius + 2)  -- Sample point on rim
+            local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
+            local terrainY = raycastToTerrain(centerWorld)
+            local pondY = terrainY + lift  -- Surface level plus small lift
             
-            local centerWorld = Vector3.new(n.posXZ.X, 0, n.posXZ.Y)
-            local terrainY = raycastToTerrain(centerWorld, isOilPond and "oil" or nil)
-            local pondY = terrainY + lift
             local okB, batch = pcall(function() return require(script.Parent.BoundaryGeometry).samplePondRim(graph, pondId, n.posXZ, R, okG and gaps or {}, sp, pondY) end)
             if okB and batch then
                 batch.id = "pond_"..pondId; batch.kind = "pond_rim"
@@ -130,13 +118,14 @@ local function buildAllDotBatches(graph): { any }
             end
         end
         for lakeId, e in pairs(graph.edges or {}) do
-            -- FIXED: Raycast to terrain for rails too
+            -- Canal rails should also be at terrain surface level
+            -- Sample a point along the path for height
             local pathMidpoint = #e.path > 0 and e.path[math.ceil(#e.path / 2)] or Vector2.new(0, 0)
-            local railWorld = Vector3.new(pathMidpoint.X, 0, pathMidpoint.Y)
-            local railTerrainY = raycastToTerrain(railWorld)
-            local railY = railTerrainY + lift
-            -- Use denser spacing for canal rails
-            local railSpacing = math.min(sp * 0.4, 1.5)  -- Much denser for continuous appearance
+            local railWorld = Vector3.new(pathMidpoint.X, islandSurfaceY, pathMidpoint.Y)
+            local railY = raycastToTerrain(railWorld) + lift
+            
+            -- Use denser spacing for canal rails but not too dense
+            local railSpacing = math.min(sp * 0.7, 2.5)  -- Slightly denser than ponds but not excessive
             local okLR, L, Rr = pcall(function()
                 local l, r = require(script.Parent.BoundaryGeometry).sampleCanalRails(graph, lakeId, e.path, half, railSpacing, railY)
                 return l, r
@@ -187,7 +176,6 @@ local function diffDotBatches(newBatches: { any }): ({ any }, { string })
 end
 
 local function publishReplace(soup, buildTiming, validateTiming)
-    lastGoodSoup = soup; lastPublishedVersion = soup.version or lastPublishedVersion
     local polyCount = #(soup.polylines or {}); local segs = 0
     for _, pl in ipairs(soup.polylines or {}) do segs += math.max(0, #(pl.pts or {}) - 1) end
     local ponds = 0; local lakes = 0
@@ -222,6 +210,11 @@ local function publishReplace(soup, buildTiming, validateTiming)
     local tSend0 = os.clock()
     local canvasY = ((WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 0) + (BoundaryConfig.dotLiftY or 0.05)
     local payload = { replace = true, version = soup.version, soup = soup, full = { batches = dotBatches }, pub_id = lastPubId, stats = { build = buildTiming, validate = validateTiming }, soupVer = soupVer, junctionsVer = junctionsVer, canvasY = canvasY }
+    
+    -- Cache the full payload for RF_Get requests
+    lastGoodSoup = payload
+    lastPublishedVersion = soup.version or lastPublishedVersion
+    
     RE_Delta:FireAllClients(payload)
     local msSend = (os.clock()-tSend0)*1000
     if rateGate("Publish") then
@@ -259,18 +252,17 @@ local function onGraphChanged(version: number, op: string?, id: string?)
         local spacing = BoundaryConfig.dotSpacing or 3.5
         local lift = BoundaryConfig.dotLiftY or 0.05
         local half = BoundaryConfig.canalHalfWidth or 2.0
+        local islandSurfaceY = (WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 1
+        
         local function buildFor(idKey: string): { any }
             local batches = {}
             local e = snap.edges[idKey]
             local n = snap.nodes[idKey]
             if e then
-                -- Use per-rail Y = midpoint of connected pond centerYs + lift
-                local railY = nil
-                -- FIXED: Raycast to terrain for delta rails
+                -- Use terrain surface level for rails
                 local pathMidpoint = #e.path > 0 and e.path[math.ceil(#e.path / 2)] or Vector2.new(0, 0)
-                local railWorld = Vector3.new(pathMidpoint.X, 0, pathMidpoint.Y)
-                local railTerrainY = raycastToTerrain(railWorld)
-                local railY = railTerrainY + lift
+                local railWorld = Vector3.new(pathMidpoint.X, islandSurfaceY, pathMidpoint.Y)
+                local railY = raycastToTerrain(railWorld) + lift
                 local okLR, L, Rr = pcall(function() return BoundaryGeometry.sampleCanalRails(snap, idKey, e.path, half, spacing, railY) end)
                 if okLR and L and Rr then
                     L.id = "lake_"..idKey.."_L"; Rr.id = "lake_"..idKey.."_R"
@@ -288,10 +280,10 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                     local R = na.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                     local okG, gaps = pcall(function() return BoundaryGeometry.computePondGaps(snap, e.a, R, half) end)
                     
-                    -- FIXED: Raycast to terrain for delta pond A
-                    local centerWorld = Vector3.new(na.posXZ.X, 0, na.posXZ.Y)
-                    local terrainY = raycastToTerrain(centerWorld)
-                    local pondYa = terrainY + lift
+                    -- Use terrain surface level for pond A
+                    local rimPoint = na.posXZ + na.posXZ.Unit * (na.radius + 2)
+                    local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
+                    local pondYa = raycastToTerrain(centerWorld) + lift
                     local okB, bA = pcall(function() return BoundaryGeometry.samplePondRim(snap, e.a, na.posXZ, R, okG and gaps or {}, spacing, pondYa) end)
                     if okB and bA then
                         bA.id = "pond_"..e.a
@@ -304,10 +296,10 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                     local R = nb.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                     local okG2, gaps2 = pcall(function() return BoundaryGeometry.computePondGaps(snap, e.b, R, half) end)
                     
-                    -- FIXED: Raycast to terrain for delta pond B
-                    local centerWorld = Vector3.new(nb.posXZ.X, 0, nb.posXZ.Y)
-                    local terrainY = raycastToTerrain(centerWorld)
-                    local pondYb = terrainY + lift
+                    -- Use terrain surface level for pond B
+                    local rimPoint = nb.posXZ + nb.posXZ.Unit * (nb.radius + 2)
+                    local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
+                    local pondYb = raycastToTerrain(centerWorld) + lift
                     local okB2, bB = pcall(function() return BoundaryGeometry.samplePondRim(snap, e.b, nb.posXZ, R, okG2 and gaps2 or {}, spacing, pondYb) end)
                     if okB2 and bB then
                         bB.id = "pond_"..e.b
@@ -320,10 +312,10 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                 local R = n.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                 local okG, gaps = pcall(function() return BoundaryGeometry.computePondGaps(snap, idKey, R, half) end)
                 
-                -- FIXED: Raycast to terrain for delta standalone pond
-                local centerWorld = Vector3.new(n.posXZ.X, 0, n.posXZ.Y)
-                local terrainY = raycastToTerrain(centerWorld)
-                local pondY = terrainY + lift
+                -- Use terrain surface level for standalone pond
+                local rimPoint = n.posXZ + n.posXZ.Unit * (n.radius + 2)
+                local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
+                local pondY = raycastToTerrain(centerWorld) + lift
                 local okB, b = pcall(function() return BoundaryGeometry.samplePondRim(snap, idKey, n.posXZ, R, okG and gaps or {}, spacing, pondY) end)
                 if okB and b then
                     b.id = "pond_"..idKey
@@ -377,12 +369,50 @@ end
 BoundaryGraph.Changed:Connect(onGraphChanged)
 
 RF_Get.OnServerInvoke = function(_player)
-    if lastGoodSoup then return lastGoodSoup end
+    -- If we have a cached good soup with batches, return it
+    if lastGoodSoup and lastGoodSoup.full and lastGoodSoup.full.batches then 
+        return lastGoodSoup 
+    end
+    
+    -- Build fresh soup AND dot batches
     local snap = BoundaryGraph.snapshot()
     local soup, bTiming = BoundaryGeometry.buildSoup(snap)
     local ok, _, vTiming = BoundaryGeometry.validateSoup(soup, snap)
-    if ok then lastGoodSoup = soup; lastPublishedVersion = soup.version end
-    return soup
+    
+    if ok then
+        -- Build dot batches (same as publishReplace does)
+        local dotBatches = buildAllDotBatches(snap)
+        local canvasY = ((WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 0) + (BoundaryConfig.dotLiftY or 0.05)
+        
+        -- Create full payload with batches
+        local fullPayload = {
+            replace = true,
+            version = soup.version,
+            soup = soup,
+            full = { batches = dotBatches },
+            pub_id = lastPubId + 1,
+            soupVer = soupVer,
+            junctionsVer = junctionsVer,
+            canvasY = canvasY
+        }
+        
+        lastGoodSoup = fullPayload
+        lastPublishedVersion = soup.version
+        
+        print(string.format("[Boundary/Publisher] RF_Get built soup version=%d batches=%d", soup.version, #dotBatches))
+        return fullPayload
+    else
+        warn("[Boundary/Publisher] RF_Get soup validation failed")
+        -- Return minimal valid structure
+        return {
+            replace = true,
+            version = 0,
+            soup = { version = 0, polylines = {} },
+            full = { batches = {} },
+            soupVer = soupVer,
+            junctionsVer = junctionsVer
+        }
+    end
 end
 
 -- Public API for forcing a publish (used by WorldBootstrap)
