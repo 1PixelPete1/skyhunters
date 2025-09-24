@@ -63,8 +63,15 @@ local function toolEquipped(): boolean
     if not char then return false end
     for _, inst in ipairs(char:GetChildren()) do
         if inst:IsA("Tool") then
-            local name = inst.Name:lower()
-            if name:find("pond") or name:find("lantern") then return true end
+            local itemType = inst:GetAttribute("ItemType")
+            if itemType == "pond" or itemType == "lantern" or itemType == "oil" then
+                return true
+            end
+            -- Fallback heuristic for legacy tools by name; avoid run/toggle tools
+            local name = string.lower(inst.Name or "")
+            if (name:find("pond") or (name:find("lantern") and not name:find("run") and not name:find("toggle"))) then
+                return true
+            end
         end
     end
     return false
@@ -259,15 +266,31 @@ end)
 game:GetService("RunService").Heartbeat:Connect(processQueue)
 
 -- ADDED: Boundary markers toggle (M key)
-local markersEnabled = true
-UIS.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.M then
-        markersEnabled = not markersEnabled
+-- Auto-enable markers only while placement tools are equipped
+local markersEnabled = false
+local lastBuildToolSeenAt: number? = nil
+local OFF_GRACE_SECONDS = 0.35 -- avoid flicker/re-render when swapping build tools
+local function autoUpdateMarkers()
+    local want = toolEquipped()
+    local now = os.clock()
+    if want then
+        lastBuildToolSeenAt = now
+    end
+    -- Hysteresis: keep markers on briefly after losing tool to absorb quick swaps
+    local effectiveWant = want or ((lastBuildToolSeenAt ~= nil) and ((now - (lastBuildToolSeenAt :: number)) < OFF_GRACE_SECONDS))
+    if effectiveWant ~= markersEnabled then
+        markersEnabled = effectiveWant
         local strat = requireDotted()
         strat.setEnabled(markersEnabled)
-        print(string.format("[Boundary/Renderer] markers_visible=%s (toggle with M key)", tostring(markersEnabled)))
+        if markersEnabled then
+            print("[Boundary/Renderer] markers_visible=true (placement tool equipped)")
+        else
+            print("[Boundary/Renderer] markers_visible=false (no placement tool)")
+        end
     end
+end
+game:GetService("RunService").Heartbeat:Connect(function()
+    autoUpdateMarkers()
 end)
 
 -- Dev commands

@@ -124,8 +124,11 @@ function PlacementPolicy.validateLantern(req: LanternRequest): (boolean, string?
   end
 
   -- 1) bounds via TransformUtil with optional island CFrame
+  -- FIXED: Always use the main island preset for bounds, not the lantern preset
   local islandCF = req.islandCFrame or CFrame.new()
-  if not TransformUtil.inIslandBoundsAt(req.position, req.islandPresetKey, islandCF) then
+  local islandPresetKey = "plane_64m"  -- Always use island bounds, not lantern bounds
+  local inBounds = TransformUtil.inIslandBoundsAt(req.position, islandPresetKey, islandCF)
+  if not inBounds then
     return false, "OUT_OF_BOUNDS"
   end
 

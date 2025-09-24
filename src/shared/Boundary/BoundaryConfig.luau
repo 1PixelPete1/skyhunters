@@ -50,6 +50,8 @@ local BoundaryConfig = {
     strategy_tool = "BeamRibbon",
     lod_near_distance = 40, -- studs
     lod_far_distance = 120,  -- studs
+    -- Pool growth rate for dotted markers to avoid spike on first render
+    dot_pool_grow_per_frame = 64,
     -- Budgets per strategy
     max_beams_total = 1500,
     max_dots_total = 3000,
@@ -72,7 +74,7 @@ local BoundaryConfig = {
     previewAlpha = 0.6,
     previewTimeoutS = 2.0,
     logRateWarnPerSec = 4,
-    dotLiftY = 0.05,
+    dotLiftY = 0.8,
 }
 
 return BoundaryConfig

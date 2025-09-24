@@ -40,25 +40,25 @@ game:GetService("Players").PlayerAdded:Connect(function(plr)
                 RE_BoundaryDebug:FireClient(plr, false)
             end
         elseif args[1] == "/mode" and args[2] == "pond" then
-            -- Hide default ghost and equip PondTool
+            -- Add pond excavator to inventory and equip it
             RE_ToggleGhost:FireClient(plr, false)
-            local char = plr.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local bp = plr:FindFirstChildOfClass("Backpack")
-            if hum and bp then
-                -- Find PondTool in Backpack or StarterPack clone
-                local tool = bp:FindFirstChild("PondTool")
-                if not tool then
-                    local sp = game:GetService("StarterPack")
-                    local t = sp and sp:FindFirstChild("PondTool")
-                    if t and t:IsA("Tool") then
-                        tool = t:Clone()
-                        tool.Parent = bp
-                    end
+            
+            -- Try to use InventoryService
+            local InventoryService = nil
+            pcall(function()
+                InventoryService = require(SSS:WaitForChild("Systems"):WaitForChild("InventoryService"))
+            end)
+            
+            if InventoryService then
+                -- Add pond excavator to inventory
+                local success = InventoryService:AddItem(plr, "pond_excavator", 1)
+                if success then
+                    -- Add to hotbar for quick access
+                    InventoryService:AddToHotbar(plr, "pond_excavator", 1, 1)
+                    print("[PondDev] Added pond excavator to inventory and hotbar")
                 end
-                if tool and tool:IsA("Tool") then
-                    hum:EquipTool(tool)
-                end
+            else
+                warn("[PondDev] InventoryService not available")
             end
         elseif args[1] == "/wipe" then
             local sub = tostring(args[2] or "")

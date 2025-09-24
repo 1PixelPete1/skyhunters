@@ -9,7 +9,29 @@ local Net = RS:WaitForChild("Net")
 local Remotes = Net:WaitForChild("Remotes")
 local RF_Link: RemoteFunction = Remotes:WaitForChild("RF_LinkPonds")
 
-local NetClient = require(script.Parent.Parent:FindFirstChild("PondNetworkClient") or RS.Client:FindFirstChild("PondNetworkClient"))
+-- Try to find PondNetworkClient in various locations
+local NetClient
+local possiblePaths = {
+    script.Parent.Parent:FindFirstChild("PondNetworkClient"),
+    script.Parent:FindFirstChild("PondNetworkClient"),
+    RS.Shared:FindFirstChild("PondNetworkClient")
+}
+
+for _, path in ipairs(possiblePaths) do
+    if path then
+        local ok, result = pcall(require, path)
+        if ok then
+            NetClient = result
+            break
+        end
+    end
+end
+
+-- Fallback if not found
+if not NetClient then
+    warn("[LakeTool] PondNetworkClient not found, using empty snapshot")
+    NetClient = { snapshot = { ponds = {}, lakes = {} } }
+end
 
 local tool = script:FindFirstAncestorOfClass("Tool") :: Tool?
 if not tool then script.Disabled = true; return end

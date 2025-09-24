@@ -32,10 +32,11 @@ local function buildSegment(parent: Instance, a: Vector2, b: Vector2, y: number,
     part.Material = Enum.Material.Neon
     part.Color = color
     part.Transparency = 0.4
-    -- Use Z as length axis; X as thickness/width for easier lookAt
+    -- Properly orient along the canal direction: Z-axis along path, X-axis as width
     part.Size = Vector3.new(math.max(0.2, width), 0.2, math.max(0.2, len))
     local origin = Vector3.new(mid.X, y, mid.Y)
     local dir3 = Vector3.new(dir.X, 0, dir.Y)
+    -- Create CFrame that aligns Z-axis with canal direction
     local cf = CFrame.lookAt(origin, origin + dir3, Vector3.yAxis)
     part.CFrame = cf
     part.Parent = parent
@@ -78,7 +79,11 @@ local function sampleMaxYPath(path: { Vector2 }): number
 end
 
 local function clipPathOutsideCircleStart(path: { Vector2 }, center: Vector2, R: number): { Vector2 }
-    local function inside(p: Vector2) return (p - center).Magnitude < R end
+    local function inside(p: Vector2) 
+        -- Use a smaller rim offset to stop closer to rim stones, not too far away
+        local rimOffset = 0.5  -- Stop 0.5 studs before pond edge (at rim stones)
+        return (p - center).Magnitude < (R - rimOffset) 
+    end
     if #path < 2 then return path end
     local idx = 1
     while idx <= #path and inside(path[idx]) do idx += 1 end
@@ -101,7 +106,11 @@ local function clipPathOutsideCircleStart(path: { Vector2 }, center: Vector2, R:
 end
 
 local function clipPathOutsideCircleEnd(path: { Vector2 }, center: Vector2, R: number): { Vector2 }
-    local function inside(p: Vector2) return (p - center).Magnitude < R end
+    local function inside(p: Vector2) 
+        -- Use a smaller rim offset to stop closer to rim stones, not too far away
+        local rimOffset = 0.5  -- Stop 0.5 studs before pond edge (at rim stones)
+        return (p - center).Magnitude < (R - rimOffset) 
+    end
     if #path < 2 then return path end
     local idx = #path
     while idx >= 1 and inside(path[idx]) do idx -= 1 end
@@ -144,9 +153,16 @@ function CanalBuilder.BuildFromCenterline(lakeId: string, path: { Vector2 }, wid
     local halfW = visW * 0.5
     local offL = Color3.fromRGB(30, 220, 60)
     local offR = Color3.fromRGB(30, 220, 60)
-    -- Clip entire path to be outside both pond rings (start/end at circumference)
-    if pondA and pondA.pos then path = clipPathOutsideCircleStart(path, pondA.pos, pondA.radius) end
-    if pondB and pondB.pos then path = clipPathOutsideCircleEnd(path, pondB.pos, pondB.radius) end
+    
+    -- Clip entire path to be outside both pond ACTUAL radii (not boundary radii)
+    -- This prevents stones from appearing in the carved pond areas
+    if pondA and pondA.pos and pondA.radius then 
+        path = clipPathOutsideCircleStart(path, pondA.pos, pondA.radius) 
+    end
+    if pondB and pondB.pos and pondB.radius then 
+        path = clipPathOutsideCircleEnd(path, pondB.pos, pondB.radius) 
+    end
+    
     if #path < 2 then
         warn("[CanalBuilder] path fully inside ponds after clipping; skipping build")
         return

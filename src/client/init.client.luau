@@ -1,7 +1,27 @@
 --!strict
+print("[CLIENT_BOOT] init.client starting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- Note: Avoid hard requires before showing the loading screen.
+-- SafeRequire was unused here and could fail early; removed to ensure UI always shows.
 
-local SafeRequire = require(ReplicatedStorage.Shared.SafeRequire)
+-- Loading Screen Integration
+local LoadingScreen
+do
+    local loadingScreenMod = script.Parent:FindFirstChild("LoadingScreen")
+    if loadingScreenMod and loadingScreenMod:IsA("ModuleScript") then
+        local ok, mod = pcall(function() return require(loadingScreenMod) end)
+        if ok and mod then
+            LoadingScreen = mod
+            LoadingScreen:Show()
+            LoadingScreen:UpdateProgress({percentage = 5, message = "Initializing QuietWinds..."})
+            print("[LoadingScreen] Show (client bootstrap)")
+        else
+            warn("[CLIENT_BOOT] Failed to require LoadingScreen module:", mod)
+        end
+    else
+        warn("[CLIENT_BOOT] LoadingScreen ModuleScript not found under Client folder")
+    end
+end
 
 -- Policy and Report (safe load with fallbacks)
 local Policy: any = { timeoutSeconds = function() return 5.0 end, debugLoggingEnabled = function() return false end }
@@ -44,6 +64,7 @@ local TIMEOUT = (Policy and Policy.timeoutSeconds and Policy.timeoutSeconds()) o
 
 -- UIRouter (only require ModuleScript; LocalScript runs itself)
  do
+    if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 20, message = "Loading UI Router..."}) end
     local uiRouter = waitChild(script.Parent, "UIRouter", TIMEOUT)
     if uiRouter and uiRouter:IsA("ModuleScript") then
         local ok, err = pcall(function() require(uiRouter) end)
@@ -53,6 +74,7 @@ end
 
 -- ExpeditionClient (only require ModuleScript; LocalScript runs itself)
  do
+    if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 35, message = "Loading Expedition System..."}) end
     local exp = waitChild(script.Parent, "ExpeditionClient", TIMEOUT)
     if exp and exp:IsA("ModuleScript") then
         local ok, err = pcall(function() require(exp) end)
@@ -61,7 +83,8 @@ end
 end
 
 -- Lanterns V2 client FX + HUD
- local systems = waitChild(ReplicatedStorage, "systems", TIMEOUT)
+if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 50, message = "Loading Lantern Systems..."}) end
+local systems = waitChild(ReplicatedStorage, "systems", TIMEOUT)
 local lanternFolder = systems and waitChild(systems, "Lantern", TIMEOUT) or nil
 local runLanternClient = lanternFolder and waitChild(lanternFolder, "RunLanternClient", TIMEOUT) or nil
 if runLanternClient then
@@ -86,8 +109,26 @@ if lanternHudMod and lanternHudMod:IsA("ModuleScript") then
     end
 end
 
+-- Oil HUD (loading bar style)
+if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 65, message = "Loading Oil HUD..."}) end
+local oilHudMod = uiFolder and waitChild(uiFolder, "OilHUD", TIMEOUT) or nil
+if oilHudMod and oilHudMod:IsA("ModuleScript") then
+    local ok, mod = pcall(function() return require(oilHudMod) end)
+    if ok and mod and mod.Init then
+        mod.Init()
+        print("[CLIENT_BOOT] OilHUD initialized")
+    else
+        warn("[CLIENT_BOOT] OilHUD require/init failed")
+        Report.noteMissing(fullPath(oilHudMod))
+    end
+else
+    warn("[CLIENT_BOOT] OilHUD not found or not a ModuleScript")
+    Report.noteMissing(fullPath(uiFolder) .. ".OilHUD")
+end
+
 -- Net subscriptions for new events (optional)
  do
+    if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 80, message = "Establishing Network..."}) end
     local shared = ReplicatedStorage:FindFirstChild("Shared")
     local netMod = shared and shared:FindFirstChild("Net") or nil
     if netMod and netMod:IsA("ModuleScript") then
@@ -111,8 +152,29 @@ end
     end
 end
 
+-- Mobility System
+ do
+    if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 85, message = "Loading Mobility System..."}) end
+    local mobilityFolder = waitChild(script.Parent, "Mobility", TIMEOUT)
+    local mobilityController = mobilityFolder and waitChild(mobilityFolder, "MobilityController", TIMEOUT) or nil
+    if mobilityController and mobilityController:IsA("ModuleScript") then
+        local ok, mod = pcall(function() return require(mobilityController) end)
+        if ok and mod then
+            local controller = mod.new()
+            if controller and controller.Init then
+                controller:Init()
+                print("[CLIENT_BOOT] MobilityController initialized")
+            end
+        else
+            warn("[CLIENT_BOOT] MobilityController require/init failed")
+            Report.noteMissing(fullPath(mobilityController))
+        end
+    end
+ end
+
 -- Start crowd controller (deterministic client simulation stubs)
  do
+    if LoadingScreen then LoadingScreen:UpdateProgress({percentage = 90, message = "Loading Crowd Systems..."}) end
     local crowds = waitChild(script.Parent, "Crowds", TIMEOUT)
     local controller = crowds and waitChild(crowds, "CrowdController", TIMEOUT) or nil
     if controller then
@@ -126,4 +188,69 @@ end
     end
 end
 
+-- Studio Dev UI (Studio only)
+ do
+    local RunService = game:GetService("RunService")
+    if RunService:IsStudio() then
+        local studioDevUI = script.Parent:FindFirstChild("StudioDevUI")
+        if studioDevUI and studioDevUI:IsA("LocalScript") then
+            -- LocalScript will run automatically
+            print("[CLIENT_BOOT] StudioDevUI LocalScript found - will run automatically")
+        else
+            warn("[CLIENT_BOOT] StudioDevUI LocalScript not found")
+            Report.noteMissing(fullPath(script.Parent) .. ".StudioDevUI")
+        end
+    end
+end
+
+-- Loading Screen is handled at the beginning of this script
+
 Report.summary()
+
+-- Complete loading
+do
+    if LoadingScreen then
+        -- If server exposes RE_LoadingProgress, let server drive completion
+        local net = ReplicatedStorage:FindFirstChild("Net")
+        local remotes = net and net:FindFirstChild("Remotes")
+        local hasServerProgress = remotes and remotes:FindFirstChild("RE_LoadingProgress")
+        if hasServerProgress then
+            print("[LoadingScreen] Waiting on server progress...")
+            local progressHeard = false
+            local progressRemote = remotes:FindFirstChild("RE_LoadingProgress")
+            if progressRemote and progressRemote:IsA("RemoteEvent") then
+                progressRemote.OnClientEvent:Connect(function()
+                    progressHeard = true
+                end)
+            end
+            task.delay(8, function()
+                if LoadingScreen and not progressHeard then
+                    warn("[LoadingScreen] No server progress within 8s; hiding (fallback)")
+                    LoadingScreen:UpdateProgress({percentage = 100, message = "Ready"})
+                    LoadingScreen:Hide()
+                end
+            end)
+        else
+            -- Remote not present yet; keep the loading screen while we wait briefly
+            print("[LoadingScreen] Server progress remote not ready; waiting for replication...")
+            local tries = 0
+            local found = false
+            while tries < 30 do -- ~15s total
+                tries += 1
+                task.wait(0.5)
+                local net2 = ReplicatedStorage:FindFirstChild("Net")
+                local rem2 = net2 and net2:FindFirstChild("Remotes")
+                if rem2 and rem2:FindFirstChild("RE_LoadingProgress") then
+                    found = true
+                    print("[LoadingScreen] Progress remote appeared; deferring hide to server")
+                    break
+                end
+            end
+            if not found then
+                warn("[LoadingScreen] Progress remote missing after wait; hiding (long fallback)")
+                LoadingScreen:UpdateProgress({percentage = 100, message = "Ready"})
+                LoadingScreen:Hide()
+            end
+        end
+    end
+end

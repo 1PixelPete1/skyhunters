@@ -1,0 +1,194 @@
+--!strict
+-- StormService.server.luau
+-- Server-side storm orchestration and state management
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local StormTypes = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("StormTypes"))
+local StormConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("StormConfig"))
+
+type StormState = StormTypes.StormState
+type StormProfile = StormTypes.StormProfile
+type GustEvent = StormTypes.GustEvent
+
+local StormService = {}
+StormService.CurrentState = nil :: StormState?
+
+-- Storm state replication remote
+local stormStateRemote: RemoteEvent = Instance.new("RemoteEvent")
+stormStateRemote.Name = "StormState"
+stormStateRemote.Parent = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage
+
+-- Storm state value for easier access
+local stormStateFolder = Instance.new("Folder")
+stormStateFolder.Name = "StormState"
+stormStateFolder.Parent = ReplicatedStorage
+
+local stormVector = Instance.new("Vector3Value")
+stormVector.Name = "Vector"
+stormVector.Parent = stormStateFolder
+
+local stormIntensity = Instance.new("NumberValue")
+stormIntensity.Name = "Intensity"
+stormIntensity.Parent = stormStateFolder
+
+local stormProfile = Instance.new("StringValue")
+stormProfile.Name = "Profile"
+stormProfile.Parent = stormStateFolder
+
+-- Generate random storm vectors with bias toward horizontal movement
+local function generateStormVector(): Vector3
+    local yaw = math.random() * math.pi * 2
+    local pitch = (math.random() - 0.5) * 0.2  -- Slight vertical component
+    
+    local vector = Vector3.new(
+        math.cos(yaw) * math.cos(pitch),
+        math.sin(pitch),
+        math.sin(yaw) * math.cos(pitch)
+    )
+    
+    return vector.Unit
+end
+
+-- Select a random storm profile
+local function selectRandomProfile(): StormProfile
+    local profiles: {StormProfile} = {"RAIN_HEAVY", "RAIN_LIGHT", "SNOW", "DUST"}
+    return profiles[math.random(1, #profiles)]
+end
+
+-- Initialize a new storm
+function StormService:InitStorm(profile: StormProfile?, customVector: Vector3?)
+    local selectedProfile = profile or selectRandomProfile()
+    local profileConfig = StormConfig.Profiles[selectedProfile]
+    
+    if not profileConfig then
+        warn("Invalid storm profile:", selectedProfile)
+        selectedProfile = "RAIN_HEAVY"
+        profileConfig = StormConfig.Profiles[selectedProfile]
+    end
+    
+    local state: StormState = {
+        vector = customVector or generateStormVector(),
+        profile = selectedProfile,
+        intensity = profileConfig.intensity,
+        gusts = profileConfig.gusts
+    }
+    
+    self.CurrentState = state
+    self:ReplicateState()
+    
+    return state
+end
+
+-- Replicate current state to all clients
+function StormService:ReplicateState()
+    if not self.CurrentState then return end
+    
+    -- Update value objects for easy access
+    stormVector.Value = self.CurrentState.vector
+    stormIntensity.Value = self.CurrentState.intensity
+    stormProfile.Value = self.CurrentState.profile
+    
+    -- Fire remote to all clients with full state
+    stormStateRemote:FireAllClients(self.CurrentState)
+end
+
+-- Update storm intensity (for dynamic changes)
+function StormService:SetIntensity(intensity: number)
+    if not self.CurrentState then return end
+    
+    self.CurrentState.intensity = math.clamp(intensity, 0, 1)
+    self:ReplicateState()
+end
+
+-- Stop the current storm
+function StormService:StopStorm()
+    if not self.CurrentState then return end
+    
+    self.CurrentState.intensity = 0
+    self:ReplicateState()
+    
+    task.wait(2)  -- Allow fade out
+    self.CurrentState = nil
+end
+
+-- Handle round/game state changes
+function StormService:OnRoundStart()
+    -- Initialize with random storm
+    self:InitStorm()
+    
+    -- Schedule intensity changes based on game progression
+    task.spawn(function()
+        -- Example: Ramp up intensity over time
+        for i = 0.5, 0.9, 0.1 do
+            task.wait(30)  -- Every 30 seconds
+            if self.CurrentState then
+                self:SetIntensity(i)
+            end
+        end
+    end)
+end
+
+function StormService:OnRoundEnd()
+    self:StopStorm()
+end
+
+-- Service initialization
+function StormService:Init()
+    print("[StormService] Initializing...")
+    
+    -- Connect to game state events if they exist
+    -- For now, start a default storm for testing
+    task.wait(5)  -- Wait for clients to load
+    self:InitStorm("RAIN_HEAVY")
+    
+    -- Debug commands in Studio
+    if RunService:IsStudio() then
+        local function onPlayerCommand(player: Player, command: string, ...)
+            if command == "storm" then
+                local args = {...}
+                local subCommand = args[1]
+                
+                if subCommand == "start" then
+                    local profile = args[2] as StormProfile?
+                    self:InitStorm(profile)
+                    print("[StormService] Started storm:", profile or "random")
+                elseif subCommand == "stop" then
+                    self:StopStorm()
+                    print("[StormService] Stopped storm")
+                elseif subCommand == "intensity" then
+                    local intensity = tonumber(args[2])
+                    if intensity then
+                        self:SetIntensity(intensity)
+                        print("[StormService] Set intensity:", intensity)
+                    end
+                elseif subCommand == "vector" then
+                    local x, y, z = tonumber(args[2]), tonumber(args[3]), tonumber(args[4])
+                    if x and y and z then
+                        if self.CurrentState then
+                            self.CurrentState.vector = Vector3.new(x, y, z).Unit
+                            self:ReplicateState()
+                            print("[StormService] Set vector:", self.CurrentState.vector)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Set up debug remote if needed
+        game.Players.PlayerAdded:Connect(function(player)
+            player.Chatted:Connect(function(msg)
+                local parts = string.split(msg, " ")
+                if parts[1] == "/storm" then
+                    table.remove(parts, 1)
+                    onPlayerCommand(player, "storm", table.unpack(parts))
+                end
+            end)
+        end)
+    end
+    
+    print("[StormService] Initialized")
+end
+
+return StormService

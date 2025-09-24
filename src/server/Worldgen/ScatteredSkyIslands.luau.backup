@@ -1,0 +1,593 @@
+-- ScatteredSkyIslands.luau
+-- Generates a scattered asteroid belt of sky islands with varied sizes and guaranteed traversability
+-- Small islands (3x player size) for parkour, medium for resting, large POIs for objectives
+
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local WorldConfig = require(RS:WaitForChild("Config"):WaitForChild("WorldConfig"))
+local OrganicIslandBuilder = require(script.Parent:WaitForChild("OrganicIslandBuilder"))
+local DiamondIslandBuilder = require(script.Parent:WaitForChild("DiamondIslandBuilder"))
+
+local ScatteredSkyIslands = {}
+local currentHubPos: Vector3 = Vector3.new(0, 0, 0)
+
+export type IslandType = "Tiny" | "Small" | "Medium" | "Large" | "POI"
+
+export type IslandData = {
+    position: Vector3,
+    radius: number,
+    height: number,
+    type: IslandType,
+    model: Model?,
+    visible: boolean,
+}
+
+export type ScatteredConfig = {
+    -- Generation bounds
+    MinRadius: number?,      -- Minimum distance from hub
+    MaxRadius: number?,      -- Maximum distance from hub  
+    MinHeight: number?,      -- Minimum Y coordinate
+    MaxHeight: number?,      -- Maximum Y coordinate
+    
+    -- Island distribution
+    TinyIslandCount: number?,    -- ~3x player size, most common
+    SmallIslandCount: number?,   -- ~10-20 stud radius
+    MediumIslandCount: number?,  -- ~25-40 stud radius
+    LargeIslandCount: number?,   -- ~50-80 stud radius
+    POICount: number?,           -- Large special islands
+    
+    -- Traversability
+    MaxGapDistance: number?,     -- Maximum gap between traversable islands
+    JumpPackRange: number?,      -- How far players can traverse with jump packs
+    
+    -- Performance
+    RenderDistance: number?,     -- Distance at which to render islands
+    LowLODDistance: number?,     -- Distance at which to show low-detail versions
+    UsePartIslands: boolean?,    -- Use Part-based islands instead of terrain for performance
+    
+    Seed: number?,
+}
+
+-- Default configuration based on your requirements
+local DEFAULT_CONFIG: ScatteredConfig = {
+    MinRadius = 250,          -- Start outside hub area
+    MaxRadius = 1500,         -- Large playable area
+    MinHeight = 50,           -- Above ground level (fallback if not using relative)
+    MaxHeight = 300,          -- Sky level variation (fallback)
+    
+    TinyIslandCount = 150,    -- Majority are tiny parkour islands
+    SmallIslandCount = 40,    -- Some small resting spots
+    MediumIslandCount = 15,   -- Medium outposts
+    LargeIslandCount = 8,     -- Large waypoints
+    POICount = 4,             -- Major objectives
+    
+    MaxGapDistance = 45,      -- Ensure traversability with jump packs
+    JumpPackRange = 50,       -- Player jump pack capabilities
+    
+    RenderDistance = 800,     -- Render islands within this distance
+    LowLODDistance = 400,     -- Show low detail beyond this
+    UsePartIslands = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.UsePartIslands) == true,
+    
+    Seed = 12345,
+}
+
+-- Island size configurations  
+local ISLAND_CONFIGS = {
+    Tiny = { radius = {8, 15}, height = {4, 8} },        -- 3x player size, thin pucks
+    Small = { radius = {18, 25}, height = {6, 12} },     -- Small platforms, slightly thicker
+    Medium = { radius = {30, 45}, height = {8, 16} },    -- Medium outposts
+    Large = { radius = {50, 75}, height = {10, 20} },    -- Large waypoints
+    POI = { radius = {80, 120}, height = {12, 24} },     -- Major structures, thickest
+}
+
+local activeIslands: {IslandData} = {}
+local spatialGrid: {[string]: {IslandData}} = {}
+local GRID_SIZE = 100 -- studs per grid cell
+
+-- Utility: compute Y at world radius using config
+local function computeYAtRadius(rand: Random, radius: number, minR: number, maxR: number)
+    local useRel = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.UseRelativeHeights) == true
+    if useRel then
+        local cfg = WorldConfig.WORLDGEN.SkyIslands
+        local s = if maxR > minR then (radius - minR) / (maxR - minR) else 0
+        s = math.clamp(s, 0, 1)
+        local offMin = cfg.HeightOffsetMin or -12
+        local offMax = cfg.HeightOffsetMax or 6
+        local jitter = cfg.HeightJitter or 3
+        local offset = offMin + (offMax - offMin) * s + rand:NextNumber(-jitter, jitter)
+        return currentHubPos.Y + offset
+    else
+        local minH = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.MinHeight) or DEFAULT_CONFIG.MinHeight
+        local maxH = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.MaxHeight) or DEFAULT_CONFIG.MaxHeight
+        return rand:NextNumber(minH, maxH)
+    end
+end
+
+-- Utility: spacing at radius
+local function spacingAtRadius(radius: number, minR: number, maxR: number)
+    local cfg = WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands or {}
+    local base = (cfg.SparsityBase or 10)
+    local range = (cfg.SparsityRange or 30)
+    local s = if maxR > minR then (radius - minR) / (maxR - minR) else 0
+    s = math.clamp(s, 0, 1)
+    return base + range * s
+end
+
+-- Deterministic banded layout (rings with arc spacing that grows with radius)
+local function generateBanded(rng: Random, config)
+    local minR = config.MinRadius or DEFAULT_CONFIG.MinRadius
+    local maxR = config.MaxRadius or DEFAULT_CONFIG.MaxRadius
+    local rings = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.Rings) or 10
+    local jitterFrac = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.AngularJitter) or 0.15
+
+    -- Type counts
+    local remaining = {
+        POI = config.POICount or 0,
+        Large = config.LargeIslandCount or 0,
+        Medium = config.MediumIslandCount or 0,
+        Small = config.SmallIslandCount or 0,
+        Tiny = config.TinyIslandCount or 0,
+    }
+    local order: {IslandType} = {"POI", "Large", "Medium", "Small", "Tiny"}
+
+    -- Average diameter (weighted) for conservative arc spacing
+    local totalCount = 0
+    local accDiam = 0
+    for t, cnt in pairs(remaining) do
+        local sc = ISLAND_CONFIGS[t]
+        local avgR = (sc.radius[1] + sc.radius[2]) * 0.5
+        accDiam += (cnt or 0) * (2 * avgR)
+        totalCount += (cnt or 0)
+    end
+    local avgDiam = if totalCount > 0 then accDiam / totalCount else 20
+
+    local function nextType(): IslandType?
+        for _, t in ipairs(order) do
+            if (remaining[t] or 0) > 0 then return (t :: any) end
+        end
+        return nil
+    end
+
+    local islandsOut: {IslandData} = {}
+    local totalSlots = 0
+
+    for j = 1, rings do
+        -- Equal-area rings: map [1..rings] to r via sqrt
+        local u0 = (j - 1) / rings
+        local u1 = j / rings
+        local r0 = math.sqrt(minR * minR + (maxR * maxR - minR * minR) * u0)
+        local r1 = math.sqrt(minR * minR + (maxR * maxR - minR * minR) * u1)
+        local r = 0.5 * (r0 + r1)
+
+        local arcSpacing = spacingAtRadius(r, minR, maxR) + avgDiam
+        local circumference = 2 * math.pi * r
+        local slots = math.max(1, math.floor(circumference / math.max(arcSpacing, 1)))
+        if slots <= 0 then slots = 1 end
+        local step = 2 * math.pi / slots
+        local offset = rng:NextNumber(0, 2 * math.pi)
+        totalSlots += slots
+
+        for k = 0, slots - 1 do
+            local t = nextType()
+            if not t then break end
+            remaining[t] -= 1
+
+            local jitter = (rng:NextNumber(-jitterFrac, jitterFrac)) * step
+            local ang = offset + k * step + jitter
+            local x = currentHubPos.X + math.cos(ang) * r
+            local z = currentHubPos.Z + math.sin(ang) * r
+            local y = computeYAtRadius(rng, r, minR, maxR)
+
+            local sc = ISLAND_CONFIGS[t]
+            local rad = rng:NextNumber(sc.radius[1], sc.radius[2])
+            local h = rng:NextNumber(sc.height[1], sc.height[2])
+
+            table.insert(islandsOut, {
+                position = Vector3.new(x, y, z),
+                radius = rad,
+                height = h,
+                type = t,
+                model = nil,
+                visible = false,
+            })
+        end
+    end
+
+    -- If types remain due to too few slots, add extra rings at the edge conservatively
+    local guard = 0
+    while nextType() and guard < 3 do
+        guard += 1
+        local r = maxR
+        local arcSpacing = spacingAtRadius(r, minR, maxR) + avgDiam
+        local slots = math.max(1, math.floor(2 * math.pi * r / math.max(arcSpacing, 1)))
+        local step = 2 * math.pi / slots
+        local offset = rng:NextNumber(0, 2 * math.pi)
+        totalSlots += slots
+        for k = 0, slots - 1 do
+            local t = nextType()
+            if not t then break end
+            remaining[t] -= 1
+            local jitter = (rng:NextNumber(-jitterFrac, jitterFrac)) * step
+            local ang = offset + k * step + jitter
+            local x = currentHubPos.X + math.cos(ang) * r
+            local z = currentHubPos.Z + math.sin(ang) * r
+            local y = computeYAtRadius(rng, r, minR, maxR)
+            local sc = ISLAND_CONFIGS[t]
+            local rad = rng:NextNumber(sc.radius[1], sc.radius[2])
+            local h = rng:NextNumber(sc.height[1], sc.height[2])
+            table.insert(islandsOut, {
+                position = Vector3.new(x, y, z),
+                radius = rad,
+                height = h,
+                type = t,
+                model = nil,
+                visible = false,
+            })
+        end
+    end
+
+    -- Overwrite active islands and spatial grid (no neighbor checks necessary)
+    activeIslands = islandsOut
+    spatialGrid = {}
+    -- Inline grid insert to avoid forward-decl issues
+    for _, island in ipairs(activeIslands) do
+        local gridX = math.floor(island.position.X / GRID_SIZE)
+        local gridZ = math.floor(island.position.Z / GRID_SIZE)
+        local key = gridX .. "," .. gridZ
+        if not spatialGrid[key] then spatialGrid[key] = {} end
+        table.insert(spatialGrid[key], island)
+    end
+
+    print(string.format("[ScatteredSkyIslands] Banded layout rings=%d slots=%d islands=%d", rings, totalSlots, #activeIslands))
+    return #activeIslands
+end
+-- Generate a random position within the annular region with height variation
+local function generateRandomPosition(rng: Random, config: ScatteredConfig): Vector3
+    local minR = config.MinRadius or DEFAULT_CONFIG.MinRadius
+    local maxR = config.MaxRadius or DEFAULT_CONFIG.MaxRadius
+    local minH = config.MinHeight or DEFAULT_CONFIG.MinHeight
+    local maxH = config.MaxHeight or DEFAULT_CONFIG.MaxHeight
+    
+    -- Random point in annulus (ring)
+    local angle = rng:NextNumber(0, math.pi * 2)
+    local radiusT = rng:NextNumber(0, 1)
+    -- Square root for uniform distribution in annulus
+    local radius = minR + (maxR - minR) * math.sqrt(radiusT)
+    
+    local x = currentHubPos.X + math.cos(angle) * radius
+    local z = currentHubPos.Z + math.sin(angle) * radius
+
+    -- Height behavior: relative to hub Y if configured
+    local useRel = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.UseRelativeHeights) == true
+    local y
+    if useRel then
+        local cfg = WorldConfig.WORLDGEN.SkyIslands
+        local s = if maxR > minR then (radius - minR) / (maxR - minR) else 0
+        s = math.clamp(s, 0, 1)
+        local offMin = cfg.HeightOffsetMin or -12
+        local offMax = cfg.HeightOffsetMax or 6
+        local jitter = cfg.HeightJitter or 3
+        local offset = offMin + (offMax - offMin) * s + rng:NextNumber(-jitter, jitter)
+        y = currentHubPos.Y + offset
+    else
+        y = rng:NextNumber(minH, maxH)
+    end
+
+    return Vector3.new(x, y, z)
+end
+
+-- Check if a position conflicts with existing islands
+local function isPositionValid(pos: Vector3, radius: number, config: ScatteredConfig): boolean
+    local gridX = math.floor(pos.X / GRID_SIZE)
+    local gridZ = math.floor(pos.Z / GRID_SIZE)
+    
+    -- Sparsity increases with distance from hub
+    local function dynamicBuffer(otherPos: Vector3, otherRadius: number): number
+        local cfg = WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands or {}
+        local minR = config.MinRadius or DEFAULT_CONFIG.MinRadius
+        local maxR = config.MaxRadius or DEFAULT_CONFIG.MaxRadius
+        local base = (cfg.SparsityBase or 10)
+        local range = (cfg.SparsityRange or 30)
+        local d1 = (Vector2.new(pos.X, pos.Z) - Vector2.new(currentHubPos.X, currentHubPos.Z)).Magnitude
+        local d2 = (Vector2.new(otherPos.X, otherPos.Z) - Vector2.new(currentHubPos.X, currentHubPos.Z)).Magnitude
+        local s = if maxR > minR then ((d1 + d2) * 0.5 - minR) / (maxR - minR) else 0
+        s = math.clamp(s, 0, 1)
+        return base + range * s
+    end
+    
+    -- Check surrounding grid cells
+    for dx = -1, 1 do
+        for dz = -1, 1 do
+            local key = (gridX + dx) .. "," .. (gridZ + dz)
+            local nearby = spatialGrid[key]
+            if nearby then
+                for _, island in ipairs(nearby) do
+                    local distance = (pos - island.position).Magnitude
+                    local minDistance = radius + island.radius + dynamicBuffer(island.position, island.radius)
+                    if distance < minDistance then
+                        return false
+                    end
+                end
+            end
+        end
+    end
+    
+    return true
+end
+
+-- Add island to spatial grid
+local function addToSpatialGrid(island: IslandData)
+    local gridX = math.floor(island.position.X / GRID_SIZE)
+    local gridZ = math.floor(island.position.Z / GRID_SIZE)
+    local key = gridX .. "," .. gridZ
+    
+    if not spatialGrid[key] then
+        spatialGrid[key] = {}
+    end
+    table.insert(spatialGrid[key], island)
+end
+
+-- Generate islands of a specific type with guaranteed spacing
+local function generateIslandsOfType(
+    islandType: IslandType, 
+    count: number, 
+    rng: Random, 
+    config: ScatteredConfig
+)
+    local sizeConfig = ISLAND_CONFIGS[islandType]
+    local generated = 0
+    local maxAttempts = count * 10 -- Prevent infinite loops
+    local attempts = 0
+    
+    while generated < count and attempts < maxAttempts do
+        attempts += 1
+        
+        local pos = generateRandomPosition(rng, config)
+        local radius = rng:NextNumber(sizeConfig.radius[1], sizeConfig.radius[2])
+        local height = rng:NextNumber(sizeConfig.height[1], sizeConfig.height[2])
+        
+        if isPositionValid(pos, radius, config) then
+            local island: IslandData = {
+                position = pos,
+                radius = radius,
+                height = height,
+                type = islandType,
+                model = nil,
+                visible = false,
+            }
+            
+            table.insert(activeIslands, island)
+            addToSpatialGrid(island)
+            generated += 1
+        end
+    end
+    
+    print(string.format("[ScatteredSkyIslands] Generated %d/%d %s islands", generated, count, islandType))
+    return generated
+end
+
+-- Create the physical island model (Part-based for better rendering control)
+local function createPartIsland(island: IslandData, parent: Instance): Model
+    local model = Instance.new("Model")
+    model.Name = string.format("SkyIsland_%s_%d", island.type, tick())
+    model.Parent = parent
+    
+    -- Main island part - hockey puck shape (flat cylinder)
+    local part = Instance.new("Part")
+    part.Name = "IslandBase"
+    -- For hockey puck: diameter stays same, but make it flat (height becomes the 'thickness')
+    part.Size = Vector3.new(island.radius * 2, island.height * 0.3, island.radius * 2)  -- Much flatter
+    part.Position = island.position
+    part.Anchored = true
+    part.Material = Enum.Material.Rock
+    part.BrickColor = BrickColor.new("Brown")
+    
+    -- Cylinder with vertical axis (default) gives circular top silhouette (puck)
+    if island.type == "Tiny" then
+        part.Shape = Enum.PartType.Ball  -- Keep tiny as balls for parkour
+    else
+        part.Shape = Enum.PartType.Cylinder
+        -- No rotation needed; default cylinder axis is vertical (Y)
+    end
+    
+    part.Parent = model
+    
+    -- Add some visual variety based on island type
+    if island.type == "POI" then
+        part.BrickColor = BrickColor.new("Bright blue")
+        part.Material = Enum.Material.Neon
+        
+        -- Add a beacon light
+        local light = Instance.new("PointLight")
+        light.Color = Color3.fromRGB(0, 150, 255)
+        light.Brightness = 2
+        light.Range = island.radius * 3
+        light.Parent = part
+        
+    elseif island.type == "Large" then
+        part.BrickColor = BrickColor.new("Dark stone grey")
+        part.Material = Enum.Material.Concrete
+        
+    elseif island.type == "Medium" then
+        part.BrickColor = BrickColor.new("Medium stone grey")
+        part.Material = Enum.Material.Sandstone
+        
+    elseif island.type == "Tiny" then
+        part.BrickColor = BrickColor.new("Reddish brown")
+        part.Material = Enum.Material.Sandstone
+        -- Make tiny islands slightly more circular for parkour
+        part.Shape = Enum.PartType.Ball
+    end
+    
+    -- Add collision detection
+    part.Touched:Connect(function(hit)
+        local humanoid = hit.Parent:FindFirstChild("Humanoid")
+        if humanoid then
+            -- Player landed on island - could trigger events here
+        end
+    end)
+    
+    model.PrimaryPart = part
+    return model
+end
+
+-- Sculpt a terrain diamond island at the given island data
+local function createTerrainIsland(island: IslandData)
+    -- Interpret island.position as the TOP of the island so it presents a flat surface
+    local topPos = island.position
+    local radius = island.radius
+    -- Use the provided height as the vertical drop to apex (keeps silhouettes varied)
+    local height = math.max(4, island.height)
+    DiamondIslandBuilder.buildAt(topPos, radius, height, {
+        topSkin = (WorldConfig.ISLANDS and WorldConfig.ISLANDS.TopSkinThickness) or 2,
+        topMaterial = Enum.Material[(WorldConfig.ISLANDS and WorldConfig.ISLANDS.TopMaterial) or "Ground"] or Enum.Material.Ground,
+        coreMaterial = Enum.Material[(WorldConfig.ISLANDS and WorldConfig.ISLANDS.CoreMaterial) or "Rock"] or Enum.Material.Rock,
+    })
+end
+
+-- Performance-aware rendering system
+local function updateIslandVisibility(playerPosition: Vector3, config: ScatteredConfig)
+    local renderDist = config.RenderDistance or DEFAULT_CONFIG.RenderDistance
+    local lowLODDist = config.LowLODDistance or DEFAULT_CONFIG.LowLODDistance
+    
+    for _, island in ipairs(activeIslands) do
+        local distance = (island.position - playerPosition).Magnitude
+        
+        if distance <= renderDist then
+            -- Within render distance
+            if (config.UsePartIslands) then
+                if not island.visible then
+                    -- Create the island model
+                    island.model = createPartIsland(island, workspace:FindFirstChild("SkyIslands") or workspace)
+                    island.visible = true
+                end
+            end
+            
+            -- Adjust LOD based on distance
+            if config.UsePartIslands and island.model and island.model.PrimaryPart then
+                if distance > lowLODDist then
+                    -- Low LOD - simpler rendering
+                    island.model.PrimaryPart.Material = Enum.Material.SmoothPlastic
+                else
+                    -- High LOD - full detail
+                    island.model.PrimaryPart.Material = Enum.Material.Rock
+                end
+            end
+        else
+            -- Outside render distance - cleanup
+            if config.UsePartIslands and island.visible and island.model then
+                island.model:Destroy()
+                island.model = nil
+                island.visible = false
+            end
+        end
+    end
+end
+
+-- Main generation function
+function ScatteredSkyIslands.generate(rootFolder: Instance, hubPos: Vector3, config: ScatteredConfig?)
+    local finalConfig = config or {}
+    currentHubPos = hubPos
+    
+    -- Apply defaults
+    for key, value in pairs(DEFAULT_CONFIG) do
+        if finalConfig[key] == nil then
+            finalConfig[key] = value
+        end
+    end
+    
+    -- Clear existing data
+    activeIslands = {}
+    spatialGrid = {}
+    
+    local rng = Random.new(finalConfig.Seed)
+    local totalGenerated = 0
+    
+    print("[ScatteredSkyIslands] Starting generation...")
+    
+    -- Choose layout mode
+    local layoutMode = (WorldConfig.WORLDGEN and WorldConfig.WORLDGEN.SkyIslands and WorldConfig.WORLDGEN.SkyIslands.LayoutMode) or "random"
+    if layoutMode == "banded" then
+        totalGenerated = generateBanded(rng, finalConfig)
+    else
+        -- Random scatter with neighbor checks (legacy)
+        totalGenerated += generateIslandsOfType("POI", finalConfig.POICount, rng, finalConfig)
+        totalGenerated += generateIslandsOfType("Large", finalConfig.LargeIslandCount, rng, finalConfig)
+        totalGenerated += generateIslandsOfType("Medium", finalConfig.MediumIslandCount, rng, finalConfig)
+        totalGenerated += generateIslandsOfType("Small", finalConfig.SmallIslandCount, rng, finalConfig)
+        totalGenerated += generateIslandsOfType("Tiny", finalConfig.TinyIslandCount, rng, finalConfig)
+    end
+    
+    -- Create sky islands folder
+    local skyIslandsFolder = rootFolder:FindFirstChild("SkyIslands") or Instance.new("Folder")
+    skyIslandsFolder.Name = "SkyIslands"
+    skyIslandsFolder.Parent = rootFolder
+
+    print(string.format("[ScatteredSkyIslands] Generated %d total islands in scattered asteroid belt pattern", totalGenerated))
+
+    -- If configured for terrain islands, sculpt them now and mark visible (no Part proxies)
+    if not finalConfig.UsePartIslands then
+        local count = 0
+        for _, island in ipairs(activeIslands) do
+            createTerrainIsland(island)
+            island.visible = true
+            count += 1
+        end
+        print(string.format("[ScatteredSkyIslands] Sculpted %d terrain diamond islands", count))
+    end
+    
+    return {
+        islands = activeIslands,
+        spatialGrid = spatialGrid,
+        config = finalConfig,
+        updateVisibility = updateIslandVisibility,
+        totalCount = totalGenerated,
+    }
+end
+
+-- Runtime visibility management (call this from a service)
+function ScatteredSkyIslands.setupDynamicRendering(generationResult, players)
+    -- This function is deprecated - use SkyIslandRenderingService instead
+    warn("[ScatteredSkyIslands] setupDynamicRendering is deprecated. Use SkyIslandRenderingService.startRendering(islands) instead.")
+    
+    -- Return a dummy connection for backward compatibility
+    return {
+        Disconnect = function() end
+    }
+end
+
+-- Debug function to visualize the island layout
+function ScatteredSkyIslands.debugVisualize()
+    for i, island in ipairs(activeIslands) do
+        local part = Instance.new("Part")
+        part.Name = "Debug_" .. island.type .. "_" .. i
+        part.Size = Vector3.new(2, 2, 2)
+        part.Position = island.position
+        part.Anchored = true
+        part.CanCollide = false
+        part.Transparency = 0.7
+        
+        -- Color code by type
+        if island.type == "POI" then
+            part.BrickColor = BrickColor.new("Bright blue")
+        elseif island.type == "Large" then
+            part.BrickColor = BrickColor.new("Bright green")
+        elseif island.type == "Medium" then
+            part.BrickColor = BrickColor.new("Bright yellow")
+        elseif island.type == "Small" then
+            part.BrickColor = BrickColor.new("Bright orange")
+        else -- Tiny
+            part.BrickColor = BrickColor.new("Bright red")
+        end
+        
+        part.Parent = workspace
+    end
+end
+
+-- Get the islands data for use with SkyIslandRenderingService
+function ScatteredSkyIslands.getIslands()
+    return activeIslands
+end
+
+return ScatteredSkyIslands
