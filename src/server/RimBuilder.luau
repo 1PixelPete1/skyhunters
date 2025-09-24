@@ -1,7 +1,11 @@
 --!strict
 -- RimBuilder: campfire-style stones around a pond rim, tangential orientation
+-- PERFORMANCE NOTE: Default reduced from 32 to 8 stones per rim for 75% part reduction
+-- Use larger stones with more variation to maintain visual quality with fewer parts
 
 local RimBuilder = {}
+local SSS = game:GetService("ServerScriptService")
+local RenderQueue = require(SSS:WaitForChild("Systems"):WaitForChild("RenderQueueSystem"))
 
 export type RimStyle = {
     StoneCount: number,
@@ -16,13 +20,13 @@ export type RimStyle = {
 }
 
 local DEFAULT: RimStyle = {
-    StoneCount = 32,
+    StoneCount = 8,  -- OPTIMIZED: Reduced from 32 to 8 for better performance
     InnerGap = 1.25,
-    ArcJitter = 0.06,
+    ArcJitter = 0.0, -- ensure stones sit on a perfect circle
     YawJitter = 8,
     RollJitter = 3,
-    StoneSize = Vector3.new(3.6, 1.4, 1.7),
-    SizeJitter = Vector3.new(0.8, 0.5, 0.6),
+    StoneSize = Vector3.new(4.5, 2.0, 2.2),  -- OPTIMIZED: Larger stones to compensate for fewer count
+    SizeJitter = Vector3.new(1.0, 0.6, 0.8),  -- OPTIMIZED: More size variation
     Color = Color3.fromRGB(118,116,112),
     Material = Enum.Material.Rock,
 }
@@ -61,25 +65,15 @@ function RimBuilder.build(parent: Instance, centerXZ: Vector2 | Vector3, radius:
         local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
         local surfY = (hit and hit.Position.Y) or 0
 
-        local stone = Instance.new("Part")
-        stone.Name = "RimStone"
-        stone.Anchored = true
-        stone.CanCollide = true
-        stone.Material = s.Material
-        stone.Color = s.Color
-        stone.TopSurface = Enum.SurfaceType.Smooth
-        stone.BottomSurface = Enum.SurfaceType.Smooth
-
         local size = Vector3.new(
             math.max(0.9, s.StoneSize.X + rng:NextNumber(-s.SizeJitter.X, s.SizeJitter.X)),
             math.max(0.6, s.StoneSize.Y + rng:NextNumber(-s.SizeJitter.Y, s.SizeJitter.Y)),
             math.max(0.7, s.StoneSize.Z + rng:NextNumber(-s.SizeJitter.Z, s.SizeJitter.Z))
         )
-        stone.Size = size
 
         local tangent = Vector3.new(-sinT, 0, cosT).Unit
         local up = Vector3.yAxis
-        local stoneTop = surfY + (stone.Size.Y * 0.5)
+        local stoneTop = surfY + (size.Y * 0.5)
         local pos = Vector3.new(baseXZ.X, stoneTop, baseXZ.Z)
         local cframe = CFrame.fromMatrix(pos, tangent, up)
         cframe *= CFrame.fromOrientation(
@@ -87,9 +81,63 @@ function RimBuilder.build(parent: Instance, centerXZ: Vector2 | Vector3, radius:
             math.rad(rand(rng, 0, s.YawJitter)),
             0
         )
-        stone.CFrame = cframe
-        stone.Parent = parent
+
+        RenderQueue.EnqueueRimStone(parent, {
+            Size = size,
+            CFrame = cframe,
+            Color = s.Color,
+            Material = s.Material,
+        })
     end
+end
+
+-- PERFORMANCE ANALYSIS: Check rim stone counts across the world
+function RimBuilder.analyzePerformance()
+    local analysis = {
+        totalRimStones = 0,
+        rimFolders = 0,
+        averageStonesPerRim = 0,
+        recommendation = ""
+    }
+    
+    local pondRims = workspace:FindFirstChild("PondRims")
+    if pondRims then
+        for _, rimFolder in ipairs(pondRims:GetChildren()) do
+            if rimFolder:IsA("Folder") then
+                analysis.rimFolders = analysis.rimFolders + 1
+                local stoneCount = 0
+                
+                for _, child in ipairs(rimFolder:GetChildren()) do
+                    if child.Name == "RimStone" then
+                        stoneCount = stoneCount + 1
+                    end
+                end
+                
+                analysis.totalRimStones = analysis.totalRimStones + stoneCount
+            end
+        end
+    end
+    
+    if analysis.rimFolders > 0 then
+        analysis.averageStonesPerRim = analysis.totalRimStones / analysis.rimFolders
+    end
+    
+    -- Generate recommendation
+    if analysis.averageStonesPerRim > 20 then
+        analysis.recommendation = "HIGH: Consider reducing rim stone count for better performance"
+    elseif analysis.averageStonesPerRim > 12 then
+        analysis.recommendation = "MEDIUM: Rim stone count is moderate"
+    else
+        analysis.recommendation = "GOOD: Rim stone count is optimized"
+    end
+    
+    print("[RimBuilder] Performance Analysis:")
+    print(`  Total rim stones: {analysis.totalRimStones}`)
+    print(`  Rim folders: {analysis.rimFolders}`)
+    print(string.format("  Average stones per rim: %.1f", analysis.averageStonesPerRim))
+    print(`  Recommendation: {analysis.recommendation}`)
+    
+    return analysis
 end
 
 return RimBuilder

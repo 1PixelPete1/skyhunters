@@ -89,6 +89,8 @@ loadService("JobQueueService", Systems:FindFirstChild("JobQueueService"))
 loadService("ThreadVisualizationService", Systems:FindFirstChild("ThreadVisualizationService"))
 loadService("EconomyService", Systems:FindFirstChild("EconomyService"))
 loadService("InventoryService", Systems:FindFirstChild("InventoryService"))
+loadService("InventoryIntegrationService", Systems:FindFirstChild("InventoryIntegrationService"))
+loadService("ToolService", Systems:FindFirstChild("ToolService"))
 loadService("ExpeditionService", Systems:FindFirstChild("ExpeditionService"))
 loadService("StreamingService", Systems:FindFirstChild("StreamingService"))
 loadService("MemoryPoolService", Systems:FindFirstChild("MemoryPoolService"))
@@ -96,8 +98,30 @@ loadService("NetworkOptimizationService", Systems:FindFirstChild("NetworkOptimiz
 loadService("AntiCheatService", Systems:FindFirstChild("AntiCheatService"))
 loadService("StateHashService", Systems:FindFirstChild("StateHashService"))
 loadService("ZoneService", Systems:FindFirstChild("ZoneService"))
+loadService("RemovalSystem", Systems:FindFirstChild("RemovalSystem"))
 -- Load our top-level pond network service under a unique key to avoid name collision
 loadService("PondNetworkCore", Systems:FindFirstChild("PondNetworkService"))
+loadService("PondPersistence", Systems:FindFirstChild("PondPersistence"))
+
+-- Enhanced Systems (New)
+loadService("EnhancedRemovalSystem", Systems:FindFirstChild("EnhancedRemovalSystem"))
+loadService("AsyncLoadingSystem", Systems:FindFirstChild("AsyncLoadingSystem"))
+loadService("EnhancedCanalStones", Systems:FindFirstChild("EnhancedCanalStones"))
+loadService("StudioDevRemotes", Systems:FindFirstChild("StudioDevRemotes"))
+loadService("RenderQueueSystem", Systems:FindFirstChild("RenderQueueSystem"))
+-- Async pond/canal loader (progressive, for loading screen)
+loadService("AsyncPondLoader", Systems:FindFirstChild("AsyncPondLoader"))
+
+-- Storm System
+loadService("StormService", Systems:FindFirstChild("StormService"))
+
+-- Mobility System
+local Mobility = Systems:FindFirstChild("Mobility")
+if Mobility then
+    loadService("MobilityService", Mobility:FindFirstChild("MobilityService"))
+else
+    skipped += 1
+end
 
 -- Lanterns V2 services
 local Lantern = Systems:FindFirstChild("Lantern")

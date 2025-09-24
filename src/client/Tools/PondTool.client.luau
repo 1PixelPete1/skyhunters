@@ -9,6 +9,20 @@ local Net = RS:WaitForChild("Net")
 local Remotes = Net:WaitForChild("Remotes")
 local RF_Add: RemoteFunction = Remotes:WaitForChild("RF_AddPond")
 
+-- Track authoritative player state; only allow placement in Build
+local currentPlayerState = "Neutral"
+do
+    local ok, ev = pcall(function() return RS:WaitForChild("PlayerStateRemote") end)
+    if ok and ev and ev:IsA("RemoteEvent") then
+        ev.OnClientEvent:Connect(function(eventType, data)
+            if eventType == "StateChanged" and data and data.state then
+                currentPlayerState = data.state
+            end
+        end)
+        pcall(function() ev:FireServer("RequestState") end)
+    end
+end
+
 -- DISABLED: Old ghost system - now using unified PlacementClient ghost
 -- Tool still works for activating pond placement mode
 local tool = script:FindFirstAncestorOfClass("Tool") :: Tool?
@@ -18,6 +32,11 @@ local radius = 10  -- Default radius
 
 -- Just handle activation, let PlacementClient handle the ghost
 tool.Activated:Connect(function()
+    -- CRITICAL: Enforce Build state for pond placement
+    if currentPlayerState ~= "Build" then
+        warn(string.format("[PondTool] Cannot place pond - current state is '%s', must be in 'Build' state", currentPlayerState))
+        return
+    end
     -- Get mouse world position
     local cam = workspace.CurrentCamera
     if not cam then return end

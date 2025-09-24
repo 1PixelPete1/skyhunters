@@ -1,0 +1,341 @@
+--!strict
+-- PlacementGhost.client.luau: Enhanced ghost placement with real-time validation feedback
+-- Shows red ghosts when placement is invalid, green when valid
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RS = game:GetService("ReplicatedStorage")
+local CS = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+
+local PlacementTransaction = require(RS.Shared.PlacementTransaction)
+local BoundarySDF = require(RS.Shared.Boundary.BoundarySDF)
+
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+
+-- Ghost state
+local PlacementGhost = {}
+local activeGhost: Instance? = nil
+local ghostUpdateConnection: RBXScriptConnection? = nil
+local currentPlacementType = "lantern"  -- "lantern" or "pond"
+local lastValidationResult: { success: boolean, reason: string? }? = nil
+local lastValidationTime = 0
+
+-- Ghost materials and colors
+local VALID_MATERIAL = Enum.Material.ForceField
+local INVALID_MATERIAL = Enum.Material.Neon
+local VALID_COLOR = Color3.fromRGB(100, 255, 100)  -- Green
+local INVALID_COLOR = Color3.fromRGB(255, 100, 100)  -- Red
+local GHOST_TRANSPARENCY = 0.5
+
+-- Rate limiting for validation checks
+local VALIDATION_INTERVAL = 0.1  -- Check every 100ms
+
+-- Create a ghost model for lanterns
+local function createLanternGhost(): Model
+    local ghost = Instance.new("Model")
+    ghost.Name = "LanternGhost"
+    
+    -- Main body
+    local body = Instance.new("Part")
+    body.Name = "Body"
+    body.Size = Vector3.new(2, 3, 2)
+    body.Shape = Enum.PartType.Cylinder
+    body.Material = VALID_MATERIAL
+    body.Color = VALID_COLOR
+    body.Transparency = GHOST_TRANSPARENCY
+    body.CanCollide = false
+    body.Anchored = true
+    body.TopSurface = Enum.SurfaceType.Smooth
+    body.BottomSurface = Enum.SurfaceType.Smooth
+    body.Parent = ghost
+    
+    -- Top cap
+    local cap = Instance.new("Part")
+    cap.Name = "Cap"
+    cap.Size = Vector3.new(1.5, 0.5, 1.5)
+    cap.Shape = Enum.PartType.Cylinder
+    cap.Material = VALID_MATERIAL
+    cap.Color = VALID_COLOR
+    cap.Transparency = GHOST_TRANSPARENCY
+    cap.CanCollide = false
+    cap.Anchored = true
+    cap.TopSurface = Enum.SurfaceType.Smooth
+    cap.BottomSurface = Enum.SurfaceType.Smooth
+    cap.Parent = ghost
+    
+    -- Position cap relative to body
+    local bodyWeld = Instance.new("WeldConstraint")
+    bodyWeld.Part0 = body
+    bodyWeld.Part1 = cap
+    bodyWeld.Parent = body
+    
+    cap.CFrame = body.CFrame * CFrame.new(0, 1.75, 0)
+    
+    ghost.PrimaryPart = body
+    return ghost
+end
+
+-- Create a ghost model for ponds
+local function createPondGhost(radius: number): Model
+    local ghost = Instance.new("Model")
+    ghost.Name = "PondGhost"
+    
+    -- Rim ring (visual representation of pond boundary)
+    local rim = Instance.new("Part")
+    rim.Name = "Rim"
+    rim.Size = Vector3.new(radius * 2 + 2, 0.5, radius * 2 + 2)  -- Slightly larger than pond
+    rim.Shape = Enum.PartType.Cylinder
+    rim.Material = VALID_MATERIAL
+    rim.Color = VALID_COLOR
+    rim.Transparency = GHOST_TRANSPARENCY
+    rim.CanCollide = false
+    rim.Anchored = true
+    rim.TopSurface = Enum.SurfaceType.Smooth
+    rim.BottomSurface = Enum.SurfaceType.Smooth
+    rim.Parent = ghost
+    
+    -- Center indicator
+    local center = Instance.new("Part")
+    center.Name = "Center"
+    center.Size = Vector3.new(1, 1, 1)
+    center.Shape = Enum.PartType.Ball
+    center.Material = VALID_MATERIAL
+    center.Color = VALID_COLOR
+    center.Transparency = GHOST_TRANSPARENCY + 0.2
+    center.CanCollide = false
+    center.Anchored = true
+    center.Parent = ghost
+    
+    ghost.PrimaryPart = rim
+    return ghost
+end
+
+-- Update ghost appearance based on validation result
+local function updateGhostAppearance(isValid: boolean, reason: string?)
+    if not activeGhost then return end
+    
+    local material = isValid and VALID_MATERIAL or INVALID_MATERIAL
+    local color = isValid and VALID_COLOR or INVALID_COLOR
+    
+    -- Update all parts in the ghost
+    for _, part in ipairs(activeGhost:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Material = material
+            part.Color = color
+        end
+    end
+    
+    -- Update mouse cursor
+    if isValid then
+        Mouse.Icon = "rbxasset://textures/Cursors/DragDetector/HoverCursor.png"
+    else
+        Mouse.Icon = "rbxasset://textures/Cursors/DragDetector/ClosedHand.png"
+    end
+    
+    -- Store validation result for placement attempt
+    lastValidationResult = { success = isValid, reason = reason }
+end
+
+-- Perform client-side validation for immediate feedback
+local function validateGhostPlacement(position: Vector3, placementType: string): (boolean, string?)
+    local posXZ = Vector2.new(position.X, position.Z)
+    
+    -- Basic bounds checking (simple rectangular bounds for now)
+    local ISLAND_SIZE = 128  -- Approximate island size
+    local bounds = ISLAND_SIZE / 2
+    
+    if math.abs(posXZ.X) > bounds or math.abs(posXZ.Y) > bounds then
+        return false, "OUT_OF_BOUNDS"
+    end
+    
+    -- Material check - ensure we're not on water
+    local origin = position + Vector3.new(0, 10, 0)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Whitelist
+    params.FilterDescendantsInstances = { workspace.Terrain }
+    params.IgnoreWater = false
+    
+    local hit = workspace:Raycast(origin, Vector3.new(0, -20, 0), params)
+    if hit and hit.Material == Enum.Material.Water then
+        return false, "ON_WATER"
+    end
+    
+    -- Use PlacementTransaction for detailed validation
+    local result, reason = PlacementTransaction.quickValidateForGhost(placementType, posXZ, 10)
+    return result, reason
+end
+
+-- Get terrain surface position at mouse location
+local function getTerrainSurfacePosition(): Vector3?
+    local camera = workspace.CurrentCamera
+    if not camera then return nil end
+    
+    local ray = camera:ScreenPointToRay(Mouse.X, Mouse.Y)
+    
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Whitelist
+    params.FilterDescendantsInstances = { workspace.Terrain }
+    params.IgnoreWater = false
+    
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+    return hit and hit.Position or nil
+end
+
+-- Update ghost position and validation
+local function updateGhost()
+    if not activeGhost then return end
+    
+    local surfacePos = getTerrainSurfacePosition()
+    if not surfacePos then
+        activeGhost.Parent = nil  -- Hide ghost when not over terrain
+        return
+    end
+    
+    activeGhost.Parent = workspace
+    
+    -- Position the ghost
+    if currentPlacementType == "lantern" then
+        activeGhost:SetPrimaryPartCFrame(CFrame.new(surfacePos))
+    elseif currentPlacementType == "pond" then
+        -- Position pond ghost slightly above terrain
+        activeGhost:SetPrimaryPartCFrame(CFrame.new(surfacePos + Vector3.new(0, 0.25, 0)))
+    end
+    
+    -- Rate-limited validation
+    local now = os.clock()
+    if now - lastValidationTime >= VALIDATION_INTERVAL then
+        lastValidationTime = now
+        
+        local isValid, reason = validateGhostPlacement(surfacePos, currentPlacementType)
+        updateGhostAppearance(isValid, reason)
+    end
+end
+
+-- Show ghost for placement type
+function PlacementGhost.showGhost(placementType: string, radius: number?)
+    PlacementGhost.hideGhost()
+    
+    currentPlacementType = placementType
+    
+    if placementType == "lantern" then
+        activeGhost = createLanternGhost()
+    elseif placementType == "pond" then
+        activeGhost = createPondGhost(radius or 10)
+    else
+        warn("[PlacementGhost] Unknown placement type:", placementType)
+        return
+    end
+    
+    -- Start updating ghost position
+    ghostUpdateConnection = RunService.Heartbeat:Connect(updateGhost)
+    
+    print(string.format("[PlacementGhost] Showing %s ghost", placementType))
+end
+
+-- Hide the current ghost
+function PlacementGhost.hideGhost()
+    if ghostUpdateConnection then
+        ghostUpdateConnection:Disconnect()
+        ghostUpdateConnection = nil
+    end
+    
+    if activeGhost then
+        activeGhost:Destroy()
+        activeGhost = nil
+    end
+    
+    lastValidationResult = nil
+    Mouse.Icon = ""
+    
+    print("[PlacementGhost] Hidden ghost")
+end
+
+-- Check if current ghost placement is valid
+function PlacementGhost.isCurrentPlacementValid(): boolean
+    return lastValidationResult and lastValidationResult.success or false
+end
+
+-- Get current validation reason
+function PlacementGhost.getCurrentValidationReason(): string?
+    return lastValidationResult and lastValidationResult.reason
+end
+
+-- Get current ghost position
+function PlacementGhost.getCurrentGhostPosition(): Vector3?
+    if activeGhost and activeGhost.PrimaryPart then
+        return activeGhost.PrimaryPart.Position
+    end
+    return nil
+end
+
+-- Handle placement attempt (called when player clicks)
+function PlacementGhost.attemptPlacement(): (boolean, string?)
+    if not lastValidationResult then
+        return false, "NO_VALIDATION"
+    end
+    
+    if not lastValidationResult.success then
+        return false, lastValidationResult.reason or "INVALID_PLACEMENT"
+    end
+    
+    local position = PlacementGhost.getCurrentGhostPosition()
+    if not position then
+        return false, "NO_POSITION"
+    end
+    
+    -- Validation passed, allow the placement to proceed
+    return true, nil
+end
+
+-- Key bindings for testing
+UIS.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.L then
+        if activeGhost and currentPlacementType == "lantern" then
+            PlacementGhost.hideGhost()
+        else
+            PlacementGhost.showGhost("lantern")
+        end
+    elseif input.KeyCode == Enum.KeyCode.P then
+        if activeGhost and currentPlacementType == "pond" then
+            PlacementGhost.hideGhost()
+        else
+            PlacementGhost.showGhost("pond", 10)
+        end
+    elseif input.KeyCode == Enum.KeyCode.Escape then
+        PlacementGhost.hideGhost()
+    end
+end)
+
+-- Mouse click handling for placement attempts
+Mouse.Button1Down:Connect(function()
+    if activeGhost then
+        local canPlace, reason = PlacementGhost.attemptPlacement()
+        if canPlace then
+            print("[PlacementGhost] Placement valid, proceeding...")
+            -- Actual placement logic would go here
+            -- For now, just hide the ghost
+            PlacementGhost.hideGhost()
+        else
+            print(string.format("[PlacementGhost] Cannot place: %s", reason or "unknown"))
+        end
+    end
+end)
+
+-- Cleanup on character respawn
+if Player.Character then
+    Player.Character.AncestryChanged:Connect(function()
+        PlacementGhost.hideGhost()
+    end)
+end
+
+Player.CharacterAdded:Connect(function()
+    PlacementGhost.hideGhost()
+end)
+
+print("[PlacementGhost] Loaded - L for lantern ghost, P for pond ghost, Esc to hide")
+
+return PlacementGhost

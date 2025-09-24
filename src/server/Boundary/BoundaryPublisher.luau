@@ -16,6 +16,7 @@ RE_Delta.Name = "RE_BoundaryDelta"; RE_Delta.Parent = Remotes
 -- Require after remotes are available so clients can wait even if modules fail later
 local BoundaryGraph = require(script.Parent:WaitForChild("BoundaryGraph"))
 local BoundaryGeometry = require(script.Parent:WaitForChild("BoundaryGeometry"))
+local BoundaryHeightUtil = require(RS.Shared:WaitForChild("BoundaryHeightUtil"))
 
 local lastPublishedVersion = -1
 local lastGoodSoup: any = nil
@@ -58,24 +59,8 @@ local function countDots(batches: { any }): number
     return n
 end
 
-local function raycastToTerrain(worldPos: Vector3): number
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Whitelist
-    params.FilterDescendantsInstances = { workspace.Terrain }
-    params.IgnoreWater = false  -- We want to hit the terrain surface, not water
-    
-    local origin = worldPos + Vector3.new(0, 100, 0)  -- Start above
-    local direction = Vector3.new(0, -200, 0)  -- Ray down
-    
-    local hit = workspace:Raycast(origin, direction, params)
-    if hit then
-        -- Return the actual terrain surface hit
-        return hit.Position.Y
-    else
-        -- Fallback to configured height if no terrain
-        return (WorldConfig.ISLANDS and WorldConfig.ISLANDS.DefaultHeightY) or 1
-    end
-end
+-- Centralized height calculation using BoundaryHeightUtil
+-- Removed local raycastToTerrain function to use centralized version
 
 local function buildAllDotBatches(graph): { any }
     local cfg = BoundaryConfig
@@ -100,12 +85,8 @@ local function buildAllDotBatches(graph): { any }
             local R = n.radius * (1 + (cfg.pond_scale or 0)) + (cfg.pad or 0)
             local okG, gaps = pcall(function() return require(script.Parent.BoundaryGeometry).computePondGaps(graph, pondId, R, half) end)
             
-            -- Boundary markers should be at actual terrain surface around the pond
-            -- Raycast to find the rim height (should be at island surface)
-            local rimPoint = n.posXZ + n.posXZ.Unit * (n.radius + 2)  -- Sample point on rim
-            local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
-            local terrainY = raycastToTerrain(centerWorld)
-            local pondY = terrainY + lift  -- Surface level plus small lift
+            -- Use centralized height calculation for consistency
+            local pondY = BoundaryHeightUtil.getBoundaryRenderY("pond_rim", n.posXZ, pondId)
             
             local okB, batch = pcall(function() return require(script.Parent.BoundaryGeometry).samplePondRim(graph, pondId, n.posXZ, R, okG and gaps or {}, sp, pondY) end)
             if okB and batch then
@@ -118,11 +99,9 @@ local function buildAllDotBatches(graph): { any }
             end
         end
         for lakeId, e in pairs(graph.edges or {}) do
-            -- Canal rails should also be at terrain surface level
-            -- Sample a point along the path for height
+            -- Use centralized height calculation for rails
             local pathMidpoint = #e.path > 0 and e.path[math.ceil(#e.path / 2)] or Vector2.new(0, 0)
-            local railWorld = Vector3.new(pathMidpoint.X, islandSurfaceY, pathMidpoint.Y)
-            local railY = raycastToTerrain(railWorld) + lift
+            local railY = BoundaryHeightUtil.getCanalRailY(lakeId, pathMidpoint)
             
             -- Use denser spacing for canal rails but not too dense
             local railSpacing = math.min(sp * 0.7, 2.5)  -- Slightly denser than ponds but not excessive
@@ -259,10 +238,9 @@ local function onGraphChanged(version: number, op: string?, id: string?)
             local e = snap.edges[idKey]
             local n = snap.nodes[idKey]
             if e then
-                -- Use terrain surface level for rails
+                -- Use centralized height calculation for rails
                 local pathMidpoint = #e.path > 0 and e.path[math.ceil(#e.path / 2)] or Vector2.new(0, 0)
-                local railWorld = Vector3.new(pathMidpoint.X, islandSurfaceY, pathMidpoint.Y)
-                local railY = raycastToTerrain(railWorld) + lift
+                local railY = BoundaryHeightUtil.getCanalRailY(idKey, pathMidpoint)
                 local okLR, L, Rr = pcall(function() return BoundaryGeometry.sampleCanalRails(snap, idKey, e.path, half, spacing, railY) end)
                 if okLR and L and Rr then
                     L.id = "lake_"..idKey.."_L"; Rr.id = "lake_"..idKey.."_R"
@@ -280,10 +258,8 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                     local R = na.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                     local okG, gaps = pcall(function() return BoundaryGeometry.computePondGaps(snap, e.a, R, half) end)
                     
-                    -- Use terrain surface level for pond A
-                    local rimPoint = na.posXZ + na.posXZ.Unit * (na.radius + 2)
-                    local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
-                    local pondYa = raycastToTerrain(centerWorld) + lift
+                    -- Use centralized height calculation for pond A
+                    local pondYa = BoundaryHeightUtil.getBoundaryRenderY("pond_rim", na.posXZ, e.a)
                     local okB, bA = pcall(function() return BoundaryGeometry.samplePondRim(snap, e.a, na.posXZ, R, okG and gaps or {}, spacing, pondYa) end)
                     if okB and bA then
                         bA.id = "pond_"..e.a
@@ -296,10 +272,8 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                     local R = nb.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                     local okG2, gaps2 = pcall(function() return BoundaryGeometry.computePondGaps(snap, e.b, R, half) end)
                     
-                    -- Use terrain surface level for pond B
-                    local rimPoint = nb.posXZ + nb.posXZ.Unit * (nb.radius + 2)
-                    local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
-                    local pondYb = raycastToTerrain(centerWorld) + lift
+                    -- Use centralized height calculation for pond B
+                    local pondYb = BoundaryHeightUtil.getBoundaryRenderY("pond_rim", nb.posXZ, e.b)
                     local okB2, bB = pcall(function() return BoundaryGeometry.samplePondRim(snap, e.b, nb.posXZ, R, okG2 and gaps2 or {}, spacing, pondYb) end)
                     if okB2 and bB then
                         bB.id = "pond_"..e.b
@@ -312,10 +286,8 @@ local function onGraphChanged(version: number, op: string?, id: string?)
                 local R = n.radius * (1 + (BoundaryConfig.pond_scale or 0)) + (BoundaryConfig.pad or 0)
                 local okG, gaps = pcall(function() return BoundaryGeometry.computePondGaps(snap, idKey, R, half) end)
                 
-                -- Use terrain surface level for standalone pond
-                local rimPoint = n.posXZ + n.posXZ.Unit * (n.radius + 2)
-                local centerWorld = Vector3.new(rimPoint.X, islandSurfaceY, rimPoint.Y)
-                local pondY = raycastToTerrain(centerWorld) + lift
+                -- Use centralized height calculation for standalone pond
+                local pondY = BoundaryHeightUtil.getBoundaryRenderY("pond_rim", n.posXZ, idKey)
                 local okB, b = pcall(function() return BoundaryGeometry.samplePondRim(snap, idKey, n.posXZ, R, okG and gaps or {}, spacing, pondY) end)
                 if okB and b then
                     b.id = "pond_"..idKey

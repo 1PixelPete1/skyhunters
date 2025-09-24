@@ -87,6 +87,31 @@ function LanternService.RefillBaseLantern(player: Player, lanternId: string, amo
     if not lrec then return { ok = false, err = "LANTERN_NOT_FOUND" } end
     if lrec.ownerUserId ~= player.UserId then return { ok = false, err = "NOT_OWNER" } end
 
+    -- Check inventory for oil canisters first
+    local InventoryIntegration = LanternService._services and LanternService._services.InventoryIntegrationService
+    if InventoryIntegration then
+        local oilCanisters = InventoryIntegration:ValidateOilCanister(player)
+        if oilCanisters > 0 then
+            -- Each canister provides 50 oil units
+            local canistersNeeded = math.ceil(amount / 50)
+            if oilCanisters >= canistersNeeded then
+                -- Consume canisters instead of stored oil
+                local consumed = InventoryIntegration:ConsumeOilCanister(player, canistersNeeded)
+                if consumed then
+                    lrec.oilReserve += amount
+                    lrec.isLit = true
+                    lrec.expiresAt = computeExpiry(lrec.oilReserve, lrec.burnRate)
+                    if LanternService._timer then
+                        LanternService._timer.AddOrUpdate(lanternId, lrec.expiresAt :: number)
+                    end
+                    dirty[lanternId] = true
+                    return { ok = true, source = "inventory" }
+                end
+            end
+        end
+    end
+
+    -- Fallback to stored oil
     if profile.lantern.oil.stored < amount then
         return { ok = false, err = "INSUFFICIENT_OIL" }
     end
@@ -98,7 +123,7 @@ function LanternService.RefillBaseLantern(player: Player, lanternId: string, amo
         LanternService._timer.AddOrUpdate(lanternId, lrec.expiresAt :: number)
     end
     dirty[lanternId] = true
-    return { ok = true }
+    return { ok = true, source = "storage" }
 end
 
 function LanternService.DepositOil(player: Player, amount: number)

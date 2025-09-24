@@ -9,14 +9,33 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
 
 local ApplyCore = require(ReplicatedStorage.Shared.ApplyCore)
 local PlacementPolicy = require(ReplicatedStorage.Shared.PlacementPolicy)
 
 local PlotService = require(ServerScriptService.Systems.PlotService)
 
+-- Progress remote under ReplicatedStorage.Net.Remotes
+local Net = ReplicatedStorage:FindFirstChild("Net") or Instance.new("Folder")
+Net.Name = "Net"; Net.Parent = ReplicatedStorage
+local Remotes = Net:FindFirstChild("Remotes") or Instance.new("Folder")
+Remotes.Name = "Remotes"; Remotes.Parent = Net
+local RE_LoadingProgress: RemoteEvent = Remotes:FindFirstChild("RE_LoadingProgress") or Instance.new("RemoteEvent")
+RE_LoadingProgress.Name = "RE_LoadingProgress"; RE_LoadingProgress.Parent = Remotes
+
 local STORE_NAME = "Lanterns_v1"
-local ds = DataStoreService:GetDataStore(STORE_NAME)
+-- Check if DataStore should be used (in production, or in Studio with HTTP enabled)
+local useDataStore = not RunService:IsStudio() or HttpService.HttpEnabled
+local ds = useDataStore and DataStoreService:GetDataStore(STORE_NAME) or nil
+
+if RunService:IsStudio() then
+    if HttpService.HttpEnabled then
+        print("[SaveService] DataStore enabled in Studio (HTTP enabled)")
+    else
+        print("[SaveService] DataStore disabled in Studio (HTTP disabled - enable in Game Settings > Security)")
+    end
+end
 
 local FLUSH_COUNT = 6
 local FLUSH_SECS = 45
@@ -130,6 +149,14 @@ end
 flushPlot = function(plotId: string)
     local cache = ensureCache(plotId)
     if cache.flushing or cache.newCount <= 0 then return end
+    
+    -- Skip if DataStore not available
+    if not useDataStore or not ds then
+        print(string.format("[SaveService] Skipping flush for plot %s - DataStore not available", plotId))
+        cache.newCount = 0  -- Reset count to prevent repeated attempts
+        return
+    end
+    
     cache.flushing = true
     local attempts = 0
     local maxAttempts = 5
@@ -180,7 +207,7 @@ flushPlot = function(plotId: string)
         backoff *= 2
     end
     cache.flushing = false
-    warn(("[Save] flush failed plot=%s attempts=%d"):format(plotId, attempts))
+    warn(("[Save] flush failed plot=%s attempts=%d error=%s"):format(plotId, attempts, tostring(err)))
 end
 
 local function ensureTagLantern(inst: Instance)
@@ -221,32 +248,80 @@ local function isValidRecordForCurrentRules(rec: Record): boolean
     return ok == true
 end
 
-local function loadPlot(plotId: string)
+local function loadPlotPaced(player: Player, plotId: string)
     local cache = ensureCache(plotId)
+
+    -- Skip if DataStore not available
+    if not useDataStore or not ds then
+        print(string.format("[SaveService] Skipping load for plot %s - DataStore not available", plotId))
+        return
+    end
+
     local ok, blob = pcall(function() return ds:GetAsync(plotId) end)
-    local restored, skipped = 0, 0
-    if ok and type(blob) == "table" and type(blob.items) == "table" then
-        for _, rec in ipairs(blob.items) do
-            local r = rec :: any
-            if type(r) == "table" and type(r.id) == "string" then
-                if cache.spawned[r.id] then
-                    skipped += 1
-                elseif isValidRecordForCurrentRules(r) then
-                    cache.items[r.id] = r
-                    local spawned = reconstructAndSpawn(r)
-                    if spawned then
-                        cache.spawned[r.id] = true
-                        restored += 1
-                    else
-                        skipped += 1
-                    end
-                else
-                    skipped += 1
-                end
+    if not ok or type(blob) ~= "table" or type(blob.items) ~= "table" then
+        logLoad(plotId, 0, 0)
+        return
+    end
+
+    -- Collect valid, not-yet-spawned items
+    local items: { Record } = {}
+    for _, rec in ipairs(blob.items) do
+        local r = rec :: any
+        if type(r) == "table" and type(r.id) == "string" then
+            if not cache.spawned[r.id] and isValidRecordForCurrentRules(r) then
+                table.insert(items, r)
             end
         end
     end
+
+    local total = #items
+    if total == 0 then
+        logLoad(plotId, 0, 0)
+        return
+    end
+
+    local restored, skipped = 0, 0
+    local processedThisFrame = 0
+    local frameStart = os.clock()
+    local FRAME_BUDGET = 0.004 -- ~4ms for server-side spawning per frame
+    local MAX_PER_FRAME = 3     -- avoid large replication bursts
+
+    -- Initial progress ping
+    if player then
+        RE_LoadingProgress:FireClient(player, { progress = 0.0, status = "Base", detail = "Restoring base" })
+    end
+
+    for i = 1, total do
+        local r = items[i]
+        local spawned = reconstructAndSpawn(r)
+        if spawned then
+            cache.spawned[r.id] = true
+            restored += 1
+        else
+            skipped += 1
+        end
+
+        processedThisFrame += 1
+
+        -- Throttle updates to client
+        if player and (i == total or (i % 5 == 0)) then
+            local pct = i / total
+            RE_LoadingProgress:FireClient(player, { progress = pct, status = "Base", detail = string.format("Restored %d/%d", i, total) })
+        end
+
+        -- Yield to respect frame budgets
+        if (os.clock() - frameStart) > FRAME_BUDGET or processedThisFrame >= MAX_PER_FRAME then
+            task.wait()
+            processedThisFrame = 0
+            frameStart = os.clock()
+        end
+    end
+
     logLoad(plotId, restored, skipped)
+
+    if player then
+        RE_LoadingProgress:FireClient(player, { progress = 1.0, status = "Base", detail = "Base ready" })
+    end
 end
 
 local function onLanternPlaced(plotId: string, presetKey: string, cf: CFrame, player: Player?)
@@ -278,7 +353,9 @@ be.Event:Connect(onLanternPlaced)
 Players.PlayerAdded:Connect(function(player)
     local assignment = PlotService.ClaimPlot(player)
     if assignment and assignment.plotId then
-        loadPlot(assignment.plotId)
+        task.spawn(function()
+            loadPlotPaced(player, assignment.plotId)
+        end)
     end
 end)
 
@@ -286,6 +363,12 @@ end)
 local M = {}
 
 function M.loadLanternsForPlot(plotKey: string): { LanternRecord }
+    -- Skip if DataStore not available
+    if not useDataStore or not ds then
+        print(string.format("[SaveService] Skipping loadLanternsForPlot %s - DataStore not available", plotKey))
+        return {}
+    end
+    
     local ok, blob = pcall(function() return ds:GetAsync(plotKey) end)
     local items: { LanternRecord } = {}
     if ok and type(blob) == "table" and type(blob.items) == "table" then
@@ -310,6 +393,65 @@ function M.upsertLantern(rec: LanternRecord)
     else
         scheduleFlush(pk)
     end
+end
+
+-- Remove lantern from persistent storage
+function M.removeLanternRecord(lanternId: string)
+    if type(lanternId) ~= "string" then 
+        warn("[SaveService] removeLanternRecord called with invalid lanternId:", lanternId)
+        return false 
+    end
+    
+    -- Skip if DataStore not available
+    if not useDataStore or not ds then
+        print(string.format("[SaveService] Skipping removeLanternRecord %s - DataStore not available", lanternId))
+        return false
+    end
+    
+    print(string.format("[SaveService] Attempting to remove lantern %s from save data", lanternId))
+    
+    -- Find which plot cache contains this lantern
+    for plotId, cache in pairs(byPlot) do
+        if cache.items[lanternId] then
+            cache.items[lanternId] = nil
+            cache.spawned[lanternId] = nil
+            cache.newCount += 1  -- Mark as needing flush to persist the removal
+            
+            print(string.format("[SaveService] Removed lantern %s from plot %s cache", lanternId, plotId))
+            
+            -- Force immediate flush to persist the removal
+            flushPlot(plotId)
+            return true
+        end
+    end
+    
+    -- Also try to remove by searching the pattern
+    local pk = string.match(lanternId, "^lan|([^|]+)|") or "P1"
+    local cache = ensureCache(pk)
+    if cache.items[lanternId] then
+        cache.items[lanternId] = nil
+        cache.spawned[lanternId] = nil
+        cache.newCount += 1
+        flushPlot(pk)
+        print(string.format("[SaveService] Removed lantern %s from derived plot %s", lanternId, pk))
+        return true
+    end
+    
+    -- Debug: Show what's in the caches
+    print(string.format("[SaveService] Could not find lantern %s in any cache", lanternId))
+    for plotId, cache in pairs(byPlot) do
+        local lanternIds = {}
+        for id, _ in pairs(cache.items) do
+            table.insert(lanternIds, id)
+        end
+        if #lanternIds > 0 then
+            print(string.format("  Plot %s has lanterns: %s", plotId, table.concat(lanternIds, ", ")))
+        else
+            print(string.format("  Plot %s has no lanterns", plotId))
+        end
+    end
+    
+    return false
 end
 
 return M

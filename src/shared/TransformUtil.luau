@@ -75,11 +75,15 @@ function TransformUtil.inIslandBoundsAt(pos: Vector3, presetKey: string, islandC
   local localPos = islandCF:PointToObjectSpace(pos)
   local eps = getEpsilon()
   local inclusive = isIslandEdgesInclusive()
+  
+  local inBounds: boolean
   if inclusive then
-    return math.abs(localPos.X) <= half.X + eps and math.abs(localPos.Z) <= half.Z + eps
+    inBounds = math.abs(localPos.X) <= half.X + eps and math.abs(localPos.Z) <= half.Z + eps
   else
-    return math.abs(localPos.X) < half.X - eps and math.abs(localPos.Z) < half.Z - eps
+    inBounds = math.abs(localPos.X) < half.X - eps and math.abs(localPos.Z) < half.Z - eps
   end
+  
+  return inBounds
 end
 
 -- Is WORLD point inside hub exclusion disc (XZ plane).

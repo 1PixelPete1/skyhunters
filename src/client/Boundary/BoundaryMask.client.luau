@@ -26,8 +26,11 @@ end
 function Mask.isInsideBoundary(posXZ: Vector2): boolean
     -- For M0, defer to BoundarySDF (pure) until dots are authoritative
     -- If soup is missing, still evaluate against SDF using current Net snapshot assumptions
-    -- In M1, replace with coarse mask built from dot batches
-    return BoundarySDF.isInside(posXZ, { ponds = {}, lakes = {} })
+    -- Get current pond network snapshot for boundary checking
+    local NetClient = _G.PondNetworkClient or { snapshot = { ponds = {}, lakes = {} } }
+    local snapshot = NetClient.snapshot or { ponds = {}, lakes = {} }
+    
+    return BoundarySDF.isInside(posXZ, snapshot)
 end
 
 -- Bootstrap: pull soup if remotes exist; subscribe to replace events

@@ -1,0 +1,259 @@
+end
+
+-- Create terrain-based island (if preferred, but with optimizations)
+local function createTerrainIsland(island: IslandData): Model
+    local model = Instance.new("Model")
+    model.Name = string.format("TerrainIsland_%s_%d", island.type, tick())
+    model.Parent = workspace:FindFirstChild("Islands") or workspace
+    
+    -- Create pivot for the model
+    local pivot = Instance.new("Part")
+    pivot.Name = "Pivot"
+    pivot.Anchored = true
+    pivot.CanCollide = false
+    pivot.Transparency = 1
+    pivot.Size = Vector3.new(1, 1, 1)
+    pivot.CFrame = CFrame.new(island.position)
+    pivot.Parent = model
+    model.PrimaryPart = pivot
+    
+    -- Use the existing OrganicIslandBuilder but with optimized parameters
+    OrganicIslandBuilder.buildIslandletAt(
+        pivot.CFrame,
+        {
+            radius = island.radius,
+            height = island.height,
+            layers = math.max(3, math.min(6, math.floor(island.radius / 8))), -- Fewer layers for smaller islands
+            jitter = 0.15 -- Reduced jitter for performance
+        }
+    )
+    
+    return model
+end
+
+-- Traversability validation using A* pathfinding concepts
+local function validateTraversability(config: ScatteredConfig): boolean
+    local maxGap = config.MaxGapDistance or DEFAULT_CONFIG.MaxGapDistance
+    local jumpRange = config.JumpPackRange or DEFAULT_CONFIG.JumpPackRange
+    local effectiveRange = math.min(maxGap, jumpRange)
+    
+    -- Simple validation: ensure each island has at least one neighbor within jump range
+    local isolatedCount = 0
+    
+    for _, island in ipairs(activeIslands) do
+        local hasConnection = false
+        
+        for _, otherIsland in ipairs(activeIslands) do
+            if island ~= otherIsland then
+                local distance = (island.position - otherIsland.position).Magnitude
+                if distance <= effectiveRange then
+                    hasConnection = true
+                    break
+                end
+            end
+        end
+        
+        if not hasConnection then
+            isolatedCount += 1
+        end
+    end
+    
+    local isolatedPercent = (isolatedCount / #activeIslands) * 100
+    print(string.format("[ScatteredSkyIslands] Traversability: %d isolated islands (%.1f%%)", isolatedCount, isolatedPercent))
+    
+    -- Allow up to 10% isolated islands (tiny ones at edges are ok)
+    return isolatedPercent <= 10
+end
+
+-- Add bridge islands to improve traversability
+local function addBridgeIslands(config: ScatteredConfig)
+    local maxGap = config.MaxGapDistance or DEFAULT_CONFIG.MaxGapDistance
+    local bridgesAdded = 0
+    local rng = Random.new((config.Seed or DEFAULT_CONFIG.Seed) + 999)
+    
+    -- Find gaps that need bridges
+    for _, island in ipairs(activeIslands) do
+        for _, otherIsland in ipairs(activeIslands) do
+            if island ~= otherIsland then
+                local distance = (island.position - otherIsland.position).Magnitude
+                if distance > maxGap and distance < maxGap * 2 then
+                    -- Add a bridge island halfway between them
+                    local bridgePos = island.position:Lerp(otherIsland.position, 0.5)
+                    
+                    -- Add some height variation to make it interesting
+                    bridgePos = bridgePos + Vector3.new(
+                        rng:NextNumber(-15, 15),
+                        rng:NextNumber(-10, 10),
+                        rng:NextNumber(-15, 15)
+                    )
+                    
+                    if isPositionValid(bridgePos, 12, config) then
+                        local bridge: IslandData = {
+                            position = bridgePos,
+                            radius = rng:NextNumber(8, 12),
+                            height = rng:NextNumber(4, 8),
+                            type = "Tiny",
+                            model = nil,
+                            visible = false,
+                        }
+                        
+                        table.insert(activeIslands, bridge)
+                        addToSpatialGrid(bridge)
+                        bridgesAdded += 1
+                    end
+                end
+            end
+        end
+    end
+    
+    print(string.format("[ScatteredSkyIslands] Added %d bridge islands", bridgesAdded))
+end
+
+-- Performance-aware rendering system
+local function updateIslandVisibility(playerPosition: Vector3, config: ScatteredConfig)
+    local renderDist = config.RenderDistance or DEFAULT_CONFIG.RenderDistance
+    local lowLODDist = config.LowLODDistance or DEFAULT_CONFIG.LowLODDistance
+    
+    for _, island in ipairs(activeIslands) do
+        local distance = (island.position - playerPosition).Magnitude
+        
+        if distance <= renderDist then
+            -- Within render distance
+            if not island.visible then
+                -- Create the island model
+                if config.UsePartIslands then
+                    island.model = createPartIsland(island, workspace:FindFirstChild("SkyIslands") or workspace)
+                else
+                    island.model = createTerrainIsland(island)
+                end
+                island.visible = true
+            end
+            
+            -- Adjust LOD based on distance
+            if island.model and island.model.PrimaryPart then
+                if distance > lowLODDist then
+                    -- Low LOD - simpler rendering
+                    island.model.PrimaryPart.Material = Enum.Material.SmoothPlastic
+                    -- Could disable lights, reduce part count, etc.
+                else
+                    -- High LOD - full detail
+                    island.model.PrimaryPart.Material = Enum.Material.Rock
+                end
+            end
+        else
+            -- Outside render distance - cleanup
+            if island.visible and island.model then
+                island.model:Destroy()
+                island.model = nil
+                island.visible = false
+            end
+        end
+    end
+end
+
+-- Main generation function
+function ScatteredSkyIslands.generate(rootFolder: Instance, hubPos: Vector3, config: ScatteredConfig?)
+    local finalConfig = config or {}
+    
+    -- Apply defaults
+    for key, value in pairs(DEFAULT_CONFIG) do
+        if finalConfig[key] == nil then
+            finalConfig[key] = value
+        end
+    end
+    
+    -- Clear existing data
+    activeIslands = {}
+    spatialGrid = {}
+    
+    local rng = Random.new(finalConfig.Seed)
+    local totalGenerated = 0
+    
+    print("[ScatteredSkyIslands] Starting generation with config:", finalConfig)
+    
+    -- Generate islands by type (largest first to claim good spots)
+    totalGenerated += generateIslandsOfType("POI", finalConfig.POICount, rng, finalConfig)
+    totalGenerated += generateIslandsOfType("Large", finalConfig.LargeIslandCount, rng, finalConfig)
+    totalGenerated += generateIslandsOfType("Medium", finalConfig.MediumIslandCount, rng, finalConfig)
+    totalGenerated += generateIslandsOfType("Small", finalConfig.SmallIslandCount, rng, finalConfig)
+    totalGenerated += generateIslandsOfType("Tiny", finalConfig.TinyIslandCount, rng, finalConfig)
+    
+    -- Validate traversability and add bridges if needed
+    local isTraversable = validateTraversability(finalConfig)
+    if not isTraversable then
+        print("[ScatteredSkyIslands] Adding bridge islands to improve traversability")
+        addBridgeIslands(finalConfig)
+        validateTraversability(finalConfig) -- Re-check
+    end
+    
+    -- Create sky islands folder
+    local skyIslandsFolder = rootFolder:FindFirstChild("SkyIslands") or Instance.new("Folder")
+    skyIslandsFolder.Name = "SkyIslands"
+    skyIslandsFolder.Parent = rootFolder
+    
+    print(string.format("[ScatteredSkyIslands] Generated %d total islands in scattered asteroid belt pattern", totalGenerated))
+    
+    return {
+        islands = activeIslands,
+        spatialGrid = spatialGrid,
+        config = finalConfig,
+        updateVisibility = updateIslandVisibility,
+        totalCount = totalGenerated,
+    }
+end
+
+-- Runtime visibility management (call this from a service)
+function ScatteredSkyIslands.setupDynamicRendering(generationResult, players)
+    local config = generationResult.config
+    local lastUpdateTime = 0
+    local UPDATE_INTERVAL = 2 -- seconds
+    
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - lastUpdateTime < UPDATE_INTERVAL then
+            return
+        end
+        lastUpdateTime = now
+        
+        -- Update visibility for all players
+        for _, player in ipairs(players:GetPlayers()) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local playerPos = player.Character.HumanoidRootPart.Position
+                updateIslandVisibility(playerPos, config)
+            end
+        end
+    end)
+    
+    return connection
+end
+
+-- Debug function to visualize the island layout
+function ScatteredSkyIslands.debugVisualize()
+    for i, island in ipairs(activeIslands) do
+        local part = Instance.new("Part")
+        part.Name = "Debug_" .. island.type .. "_" .. i
+        part.Size = Vector3.new(2, 2, 2)
+        part.Position = island.position
+        part.Anchored = true
+        part.CanCollide = false
+        part.Transparency = 0.7
+        
+        -- Color code by type
+        if island.type == "POI" then
+            part.BrickColor = BrickColor.new("Bright blue")
+        elseif island.type == "Large" then
+            part.BrickColor = BrickColor.new("Bright green")
+        elseif island.type == "Medium" then
+            part.BrickColor = BrickColor.new("Bright yellow")
+        elseif island.type == "Small" then
+            part.BrickColor = BrickColor.new("Bright orange")
+        else -- Tiny
+            part.BrickColor = BrickColor.new("Bright red")
+        end
+        
+        part.Parent = workspace
+    end
+end
+
+return ScatteredSkyIslands

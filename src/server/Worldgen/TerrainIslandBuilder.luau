@@ -1,13 +1,19 @@
 -- TerrainIslandBuilder
 -- Clear -> flat rock slab (top at pivot Y) -> vertical pond carve (Air) -> water fill
 -- Idempotent across boots via padded Air clear region.
+-- Enhanced with terrain marking for cleanup
 
 local TerrainIslandBuilder = {}
 
 local Terrain = workspace.Terrain
 local RS = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 local WorldConfig = require(RS.Config.WorldConfig)
 local TerrainUtil = require(RS.Shared.TerrainUtil)
+local UnifiedCarvingUtil = require(RS.Shared.UnifiedCarvingUtil)
+
+-- Sky island content tag for cleanup
+local SKY_ISLAND_TAG = "SkyIslandContent"
 
 local function numberOr(x: any, d: number): number
 	if type(x) == "number" and x == x and x ~= math.huge and x ~= -math.huge then
@@ -50,9 +56,48 @@ local function getFootprintXZ(): (number, number)
 	return numberOr(vx, 64), numberOr(vz, 64)
 end
 
+-- Create a terrain marker for cleanup tracking with precise bounds
+local function createTerrainMarker(position: Vector3, radius: number, islandType: string?, preciseRegion: Region3?)
+    local markersFolder = workspace:FindFirstChild("SkyConstellationMarkers")
+    if not markersFolder then
+        markersFolder = Instance.new("Folder")
+        markersFolder.Name = "SkyConstellationMarkers"
+        markersFolder.Parent = workspace
+        CollectionService:AddTag(markersFolder, SKY_ISLAND_TAG)
+    end
+    
+    local marker = Instance.new("Part")
+    marker.Name = string.format("TerrainMarker_%s_%d", islandType or "Island", tick())
+    marker.Anchored = true
+    marker.CanCollide = false
+    marker.Transparency = 1
+    marker.Size = Vector3.new(1, 1, 1)
+    marker.Position = position
+    marker.Parent = markersFolder
+    marker:SetAttribute("IsConstellation", true)
+    marker:SetAttribute("Kind", islandType or "TerrainIsland")
+    marker:SetAttribute("Radius", radius)
+    
+    -- Store precise region bounds for box-based clearing
+    if preciseRegion then
+        local min, max = preciseRegion.CFrame.Position - preciseRegion.Size/2, preciseRegion.CFrame.Position + preciseRegion.Size/2
+        marker:SetAttribute("RegionMinX", min.X)
+        marker:SetAttribute("RegionMinY", min.Y)
+        marker:SetAttribute("RegionMinZ", min.Z)
+        marker:SetAttribute("RegionMaxX", max.X)
+        marker:SetAttribute("RegionMaxY", max.Y)
+        marker:SetAttribute("RegionMaxZ", max.Z)
+        print(string.format("[TerrainMarker] Stored precise region: min=%s max=%s", tostring(min), tostring(max)))
+    end
+    
+    CollectionService:AddTag(marker, SKY_ISLAND_TAG)
+    
+    return marker
+end
+
 -- Clear a padded box around the pivot to Air, lay a flat slab with top at pivot Y,
 -- then carve a vertical cylinder (Air) and fill slightly smaller with Water.
-function TerrainIslandBuilder.buildIslandAt(pivotCF: CFrame)
+function TerrainIslandBuilder.buildIslandAt(pivotCF: CFrame, islandType: string?)
 	local islands = WorldConfig.ISLANDS or {}
 	local pond = islands.Pond or {}
 
@@ -101,23 +146,53 @@ function TerrainIslandBuilder.buildIslandAt(pivotCF: CFrame)
 		Terrain:FillBlock(capCF, Vector3.new(sizeX, topSkin, sizeZ), topMaterial)
 	end
 
-    -- 3) Carve vertical shallow basin (Air) only; no Water fill
+    -- 3) Carve vertical shallow basin using unified carving for consistency
     if pondDepth > 0 and pondRadius > 0 then
         local pondCenterWorld = pivotCF:PointToWorldSpace(pondOffset)
-        local cylCenterY = topY - (pondDepth * 0.5)
-        local cylCF = CFrame.new(Vector3.new(pondCenterWorld.X, cylCenterY, pondCenterWorld.Z))
-
-        -- Carve slightly larger radius to ensure a clean rim; leave empty (Air) for shallow dry basin
-        local rimGap = 0.5
-        Terrain:FillCylinder(cylCF, pondDepth, pondRadius + rimGap, Enum.Material.Air)
+        local sculptCenter = Vector3.new(pondCenterWorld.X, topY - (pondDepth * 0.5), pondCenterWorld.Z)
+        
+        -- Use unified carving for consistent bowl shape with default and dynamic ponds
+        UnifiedCarvingUtil.carveBowl(sculptCenter, pondRadius, pondDepth, UnifiedCarvingUtil.getDefaultBowlParams())
     end
 
     -- Decorations toggle (centralized guard)
     local decorEnabled = islands.EnableDecorations == true
     TerrainUtil.setTerrainDecorationEnabled(decorEnabled)
+    
+    -- Create terrain marker for cleanup (IMPORTANT for removal!)
+    -- Calculate precise region that encompasses all terrain operations with generous padding
+    local clearPadXZ = 48 -- INCREASED: More generous padding (was 32)
+    local clearPadY = 36 -- INCREASED: More generous padding (was 24)
+    local totalXZ = math.max(sizeX + 2 * clearPadXZ, (pondRadius * 2) + clearPadXZ)
+    local totalY = (heightY + topSkin + pondDepth) + 2 * clearPadY
+    
+    -- Create precise bounding box for the entire island
+    local regionMin = Vector3.new(
+        pivotPos.X - totalXZ/2,
+        topY - totalY,
+        pivotPos.Z - totalXZ/2
+    )
+    local regionMax = Vector3.new(
+        pivotPos.X + totalXZ/2,
+        topY + clearPadY,
+        pivotPos.Z + totalXZ/2
+    )
+    local preciseRegion = Region3.new(regionMin, regionMax)
+    
+    createTerrainMarker(pivotPos, totalXZ/2, islandType, preciseRegion)
 
-    print(("[Terrain] Sculpted flat slab size=%s height=%s top=%s pondR=%s pondD=%s decor=%s")
-		:format(tostring(WorldConfig.ISLANDS.SizeStuds), tostring(heightY), tostring(topMaterial.Name), tostring(pondRadius), tostring(pondDepth), tostring(decorEnabled)))
+    print(("[Terrain] Sculpted flat slab size=%s height=%s top=%s pondR=%s pondD=%s decor=%s region=%s")
+		:format(tostring(WorldConfig.ISLANDS.SizeStuds), tostring(heightY), tostring(topMaterial.Name), tostring(pondRadius), tostring(pondDepth), tostring(decorEnabled), tostring(preciseRegion.Size)))
+end
+
+-- Enhanced version that creates terrain markers for all islands
+function TerrainIslandBuilder.buildIslandAtWithMarker(pivotCF: CFrame, islandType: string, customRadius: number?)
+    TerrainIslandBuilder.buildIslandAt(pivotCF, islandType)
+    
+    -- Additional marker if custom radius specified
+    if customRadius then
+        createTerrainMarker(pivotCF.Position, customRadius, islandType .. "_Custom")
+    end
 end
 
 return TerrainIslandBuilder

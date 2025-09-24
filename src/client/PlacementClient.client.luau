@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local PondFieldMath = require(RS.Shared.PondFieldMath)
+local PlacementTransaction = require(RS.Shared.PlacementTransaction)
 local BoundaryMask = (function()
   local ok, m = pcall(function() return require(script.Parent:FindFirstChild("Boundary") and script.Parent.Boundary:FindFirstChild("BoundaryMask") or error("no mask")) end)
   if ok then return m else
@@ -25,14 +26,71 @@ local NetClient do
     NetClient = { snapshot = { ponds = {}, lakes = {} } }
   end
 end
-local RemotesFolder = RS:FindFirstChild("Remotes") or RS:WaitForChild("Net"):WaitForChild("Remotes")
+-- Make NetClient globally accessible for PlacementTransaction
+_G.PondNetworkClient = NetClient
+local Net = RS:WaitForChild("Net")
+local RemotesFolder = Net:WaitForChild("Remotes")
 local RF: RemoteFunction = RemotesFolder:WaitForChild("RF_PlaceLantern")
+local NetApi = require(RS.Shared.Net)
 
 local camera = workspace.CurrentCamera
+local player = Players.LocalPlayer
 
--- Placement mode: "lantern" or "pond"
-local placementMode = "lantern"
-local lanternPresetKey = "lantern_basic"
+-- Track authoritative player state from server
+local currentPlayerState = "Neutral"
+do
+  local ok, ev = pcall(function() return RS:WaitForChild("PlayerStateRemote") end)
+  if ok and ev and ev:IsA("RemoteEvent") then
+    ev.OnClientEvent:Connect(function(eventType, data)
+      if eventType == "StateChanged" and data and data.state then
+        currentPlayerState = data.state
+      end
+    end)
+    -- Ask server to send current state once
+    pcall(function() ev:FireServer("RequestState") end)
+  end
+end
+
+-- Placement mode and item info from equipped tool
+local placementMode = nil  -- Start with no mode
+local lanternPresetKey = "lantern_basic"  -- Default if no tool
+local currentItemId = nil  -- Track the actual ItemId from tool
+local plotCenter: Vector3? = nil
+local halfSize: Vector3? = nil
+
+local function computeHalfSize(): Vector3
+  local WorldConfig = require(RS.Config.WorldConfig)
+  local PresetUtil = require(RS.Shared.PresetUtil)
+  local presetKey = WorldConfig.ISLANDS.MainPresetKey or "plane_64m"
+  return PresetUtil.getPresetHalfSizeVector(presetKey)
+end
+
+local function setAssignment(assignment)
+  if assignment and typeof(assignment) == "table" then
+    local origin = assignment.origin
+    if origin and typeof(origin) == "CFrame" then
+      plotCenter = origin.Position
+      halfSize = computeHalfSize()
+    end
+  end
+end
+
+-- Listen for plot assignment from server
+task.spawn(function()
+  local ok, ev = pcall(function() return NetApi:GetEvent("RE_BaseAssigned") end)
+  if ok and ev then
+    ev.OnClientEvent:Connect(function(assignment)
+      setAssignment(assignment)
+    end)
+  end
+end)
+
+local function inPlotBounds(pos: Vector3): boolean
+  if not plotCenter or not halfSize then return true end
+  local dx = pos.X - plotCenter.X
+  local dz = pos.Z - plotCenter.Z
+  return math.abs(dx) <= halfSize.X and math.abs(dz) <= halfSize.Z
+end
 
 -- Create separate ghost systems for different placement types
 -- Lantern ghost
@@ -73,24 +131,70 @@ boundaryGhost.Color = Color3.fromRGB(255, 255, 0)  -- Yellow for boundary
 boundaryGhost.Shape = Enum.PartType.Cylinder
 boundaryGhost.Parent = ghostFolder
 
-local function detectPlacementMode(): string
-    -- Check if player has a tool equipped
-    local player = Players.LocalPlayer
+-- Check if player has a lantern item in their inventory (future implementation)
+local function hasLanternItem(): boolean
+    -- TODO: Check actual inventory system when implemented
+    -- For now, return true to allow placement in dev mode
+    -- This is where you'd check if player has lantern items
+    return true
+end
+
+-- Check if player has permission to place ponds (usually dev-only)
+local function canPlacePonds(): boolean
+    -- Pond placement is typically restricted to Studio/dev mode
+    return RunService:IsStudio()
+end
+
+local function detectPlacementMode(): string?
+    -- CRITICAL FIX: Only detect placement mode if in Build state
+    if currentPlayerState ~= "Build" then
+        return nil  -- No placement mode allowed outside Build state
+    end
+    
+    -- Check if player has a tool equipped and read its ItemId
     local char = player and player.Character
     if char then
         for _, inst in ipairs(char:GetChildren()) do
             if inst:IsA("Tool") then
+                -- Read ItemId attribute from tool
+                local itemId = inst:GetAttribute("ItemId")
+                if itemId then
+                    currentItemId = itemId
+                    -- Parse item type from ItemId (e.g., "lantern_basic" -> "lantern")
+                    local itemType = string.match(itemId, "^(%w+)_") or "unknown"
+                    
+                    if itemType == "pond" then
+                        return canPlacePonds() and "pond" or nil
+                    elseif itemType == "lantern" then
+                        -- Set the specific lantern preset from the tool
+                        lanternPresetKey = itemId  -- Use the actual ItemId as preset
+                        return "lantern"
+                    elseif itemType == "oil" then
+                        -- Oil canisters place oil reservoirs anywhere on terrain
+                        return "oil"
+                    elseif itemType == "canal" then
+                        return "canal"  -- For future canal tool support
+                    elseif itemId == "removal_tool" then
+                        return "removal"  -- For removal tool
+                    end
+                end
+                
+                -- Fallback to name-based detection for old tools
                 local name = inst.Name:lower()
                 if name:find("pond") then
-                    return "pond"
+                    currentItemId = "pond_basic"
+                    return canPlacePonds() and "pond" or nil
                 elseif name:find("lantern") then
+                    currentItemId = "lantern_basic"
+                    lanternPresetKey = "lantern_basic"
                     return "lantern"
                 end
             end
         end
     end
-    -- Default to lantern placement when no tool
-    return "lantern"
+    
+    -- No tool equipped = no placement mode
+    return nil  -- No valid placement mode
 end
 
 -- Store last valid hit for rotation
@@ -114,16 +218,16 @@ local function updateLanternGhost(hit: RaycastResult?, isValid: boolean)
     lookDir = lookDir.Unit
     
     local cf = CFrame.lookAt(pos, pos + lookDir, normal)
-    lanternGhost.CFrame = cf * CFrame.new(0, lanternGhost.Size.Y * 0.5, 0)
+    -- Add extra height offset to keep marker above ground
+    local heightOffset = lanternGhost.Size.Y * 0.5 + 0.5  -- Add 0.5 stud clearance
+    lanternGhost.CFrame = cf * CFrame.new(0, heightOffset, 0)
     lanternGhost.Color = isValid and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(255, 100, 100)
     lanternGhost.Parent = workspace
 end
 
 local function updatePondGhost(hit: RaycastResult?, isValid: boolean)
     if not hit then
-        ghostFolder.Parent = workspace
-        pondGhost.Position = Vector3.new(0, -1000, 0)
-        boundaryGhost.Position = Vector3.new(0, -1000, 0)
+        ghostFolder.Parent = nil
         return
     end
     
@@ -148,7 +252,7 @@ local function updatePondGhost(hit: RaycastResult?, isValid: boolean)
     boundaryGhost.Size = Vector3.new(ringHeight, boundaryRadius * 2, boundaryRadius * 2)
     boundaryGhost.CFrame = CFrame.new(adjustedPos + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))  -- Slightly above surface
     
-    -- Color based on validity
+    -- FIXED: Color based on validity (was inverted)
     pondGhost.Color = isValid and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(255, 100, 100)
     boundaryGhost.Color = isValid and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(255, 150, 150)
     
@@ -205,12 +309,14 @@ do
 end
 
 RunService.RenderStepped:Connect(function()
-  -- Detect current placement mode
+  -- Detect current placement mode (returns nil if no valid mode or not in Build state)
   placementMode = detectPlacementMode()
   
-  if not enabled then 
+  -- Hide all ghosts if disabled, no valid placement mode, or not in Build state
+  if not enabled or not placementMode or currentPlayerState ~= "Build" then 
     ghostFolder.Parent = nil  -- Hide pond ghost
     lanternGhost.Parent = nil  -- Hide lantern ghost
+    placeOk = false
     return 
   end
   
@@ -224,51 +330,100 @@ RunService.RenderStepped:Connect(function()
     else
         updateLanternGhost(nil, false)
     end
+    placeOk = false
     return
   end
   
   -- Show appropriate ghost based on mode
+  -- Hard gate: only within assigned plot rectangle
+  if hit and not inPlotBounds(hit.Position) then
+    lanternGhost.Parent = nil
+    ghostFolder.Parent = nil
+    placeOk = false
+    return
+  end
+
   if placementMode == "pond" then
     -- Hide lantern ghost, show pond ghost
     lanternGhost.Parent = nil
     
-    -- Validate pond placement
-    local ok = true
-    local mask = BoundaryMask
-    if mask and mask.isInsideBoundary then
-      ok = mask.isInsideBoundary(Vector2.new(hit.Position.X, hit.Position.Z))
+    -- Enhanced pond validation using PlacementTransaction
+    local isValid, reason = PlacementTransaction.quickValidateForGhost("pond", Vector2.new(hit.Position.X, hit.Position.Z), 10)
+    
+    -- Fallback to boundary mask if transaction validation passes
+    if isValid then
+      local mask = BoundaryMask
+      if mask and mask.isInsideBoundary then
+        isValid = mask.isInsideBoundary(Vector2.new(hit.Position.X, hit.Position.Z))
+        if not isValid then
+          reason = "OUT_OF_BOUNDS"
+        end
+      else
+        -- Direct boundary check using BoundarySDF with current snapshot
+        local BoundarySDF = require(RS.Shared.Boundary.BoundarySDF)
+        local NetClient = _G.PondNetworkClient or { snapshot = { ponds = {}, lakes = {} } }
+        isValid = BoundarySDF.isInside(Vector2.new(hit.Position.X, hit.Position.Z), NetClient.snapshot)
+        if not isValid then
+          reason = "OUT_OF_BOUNDS"
+        end
+      end
     end
-    placeOk = ok
-    updatePondGhost(hit, ok)
-  else
+    
+    placeOk = isValid
+    updatePondGhost(hit, isValid)
+  elseif placementMode == "lantern" then
     -- Hide pond ghost, show lantern ghost
     ghostFolder.Parent = nil
     
-    -- Validate lantern placement
-    local ok = true
-    -- Check if on water
-    if hit.Material == Enum.Material.Water then
-      ok = false
+    -- Enhanced lantern validation using PlacementTransaction
+    local isValid, reason = PlacementTransaction.quickValidateForGhost("lantern", Vector2.new(hit.Position.X, hit.Position.Z))
+    
+    -- Additional check: are we on a rim stone?
+    if not isValid and hit.Instance and hit.Instance.Name == "RimStone" then
+      isValid = true
+      reason = nil
     end
-    -- Check slope
-    if hit.Normal:Dot(Vector3.yAxis) < 0.85 then
-      ok = false
+    
+    placeOk = isValid
+    updateLanternGhost(hit, isValid)
+  elseif placementMode == "oil" then
+    -- No ghost for oil; allow placement on any terrain (not water)
+    lanternGhost.Parent = nil
+    ghostFolder.Parent = nil
+
+    local isValid = false
+    if hit then
+      local onTerrain = (hit.Instance == workspace.Terrain)
+      local notWater = hit.Material ~= Enum.Material.Water
+      isValid = onTerrain and notWater
     end
-    placeOk = ok
-    updateLanternGhost(hit, ok)
+    placeOk = isValid
   end
 end)
 
 UIS.InputBegan:Connect(function(input, gpe)
   if gpe then return end
-  if input.UserInputType == Enum.UserInputType.MouseButton1 and placeOk and lastHit then
+  if input.UserInputType == Enum.UserInputType.MouseButton1 and placeOk and lastHit and placementMode then
+    -- CRITICAL: Double-check Build state at placement time
+    if currentPlayerState ~= "Build" then 
+      warn("[PlacementClient] Placement blocked: not in Build state")
+      return 
+    end
+    if not inPlotBounds(lastHit.Position) then return end
     if placementMode == "pond" then
-      -- Place pond using pond ghost position
-      local success, reason = RF:InvokeServer(pondGhost.CFrame, "pond")
-      if not success then
-        warn("Pond place failed:", reason)
+      -- Find the pond placement remote (only works in Studio)
+      local RF_AddPond = RemotesFolder:FindFirstChild("RF_AddPond")
+      if RF_AddPond and RunService:IsStudio() then
+        local posXZ = Vector2.new(lastHit.Position.X, lastHit.Position.Z)
+        local radius = (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Radius) or 10
+        local success = RF_AddPond:InvokeServer(posXZ, radius)
+        if not success then
+          warn("Pond place failed: validation failed or not in Studio")
+        end
+      else
+        warn("Pond placement only available in Studio")
       end
-    else
+    elseif placementMode == "lantern" then
       -- Place lantern at actual hit position with rotation
       -- Build CFrame from hit position and normal
       local pos = lastHit.Position
@@ -285,6 +440,24 @@ UIS.InputBegan:Connect(function(input, gpe)
       local success, reason = RF:InvokeServer(cf, lanternPresetKey)
       if not success then
         warn("Lantern place failed:", reason)
+      else
+        print(string.format("[PlacementClient] Lantern placed successfully at (%.1f, %.1f)", pos.X, pos.Z))
+      end
+    elseif placementMode == "oil" then
+      -- Place a small oil reservoir at the hit position
+      local pos = lastHit.Position
+      local normal = lastHit.Normal
+      local lookDir = normal:Cross(Vector3.new(1, 0, 0))
+      if lookDir.Magnitude < 0.01 then
+        lookDir = normal:Cross(Vector3.new(0, 0, 1))
+      end
+      lookDir = lookDir.Unit
+      local cf = CFrame.lookAt(pos, pos + lookDir, normal)
+      local success, reason = RF:InvokeServer(cf, "oil_reservoir_small")
+      if not success then
+        warn("Oil reservoir place failed:", reason)
+      else
+        print(string.format("[PlacementClient] Oil reservoir placed at (%.1f, %.1f)", pos.X, pos.Z))
       end
     end
   end

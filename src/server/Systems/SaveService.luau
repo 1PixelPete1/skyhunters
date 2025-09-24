@@ -45,7 +45,10 @@ function SaveService.DefaultProfile(userId: number)
         userId = userId,
         balances = { aether = 0, crumbs = 0 },
         inventory = {},
-        upgrades = {},
+        upgrades = {
+            bagCapacity = 0,  -- Increases temporary bag slots
+            maxHearts = 0,    -- Increases maximum hearts
+        },
         baseState = {
             plotLocalOrigin = nil,
             placements = {},
@@ -61,10 +64,20 @@ function SaveService.DefaultProfile(userId: number)
             flame = { amount = 0, voyageTier = 0 },
             settings = { lowPerf = true, fxStepHz = 10 },
         },
+        -- Player state data
+        hearts = 3,           -- Current hearts
+        maxHearts = 3,        -- Maximum hearts (base + upgrades)
+        crudeOil = 0,         -- Stored crude oil resource
         lastSeen = os.time(),
         baselineAtLogout = 0,
         version = 1,
     }
+end
+
+function SaveService.ResetProfile(player: Player)
+    local userId = player.UserId
+    profiles[userId] = SaveService.DefaultProfile(userId)
+    return profiles[userId]
 end
 
 function SaveService.LoadProfile(player: Player)
@@ -115,6 +128,11 @@ function SaveService._migrate(profile)
             flame = { amount = 0, voyageTier = 0 },
             settings = { lowPerf = true, fxStepHz = 10 },
         }
+        -- ensure player state defaults
+        profile.hearts = profile.hearts or 3
+        profile.maxHearts = profile.maxHearts or 3
+        profile.crudeOil = profile.crudeOil or 0
+        profile.upgrades = profile.upgrades or { bagCapacity = 0, maxHearts = 0 }
         profile.__schemaVersion = target
     elseif not profile.__schemaVersion then
         profile.__schemaVersion = target

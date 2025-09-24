@@ -6,13 +6,23 @@ local SSS = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 local Terrain = workspace.Terrain
 local WorldConfig = require(RS.Config.WorldConfig)
+local RenderQueue = require(SSS:WaitForChild("Systems"):WaitForChild("RenderQueueSystem"))
 local RimBuilder = require(game:GetService("ServerScriptService"):WaitForChild("Server"):WaitForChild("RimBuilder"))
+-- Prefer UnifiedRimSystem for rim creation when available
+local UnifiedRimSystem: any = nil
+local _hasUnified = pcall(function()
+    UnifiedRimSystem = require(game:GetService("ServerScriptService"):WaitForChild("Server"):WaitForChild("UnifiedRimSystem"))
+end)
 local HttpService = game:GetService("HttpService")
+local UnifiedCarvingUtil = require(RS.Shared.UnifiedCarvingUtil)
+local BoundaryHeightUtil = require(RS.Shared.BoundaryHeightUtil)
 
 local Types = require(RS.Shared.PondNetworkTypes)
 local CanalBuilder = require(game:GetService("ServerScriptService"):WaitForChild("Server"):WaitForChild("CanalBuilder"))
 local BoundaryConfig = require(RS.Shared.Boundary.BoundaryConfig)
-local BoundaryGraph = require(SSS:WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryGraph"))
+local BoundaryGraph = require(game:GetService("ServerScriptService"):WaitForChild("Server"):WaitForChild("Boundary"):WaitForChild("BoundaryGraph"))
+local PlotService = require(SSS:WaitForChild("Systems"):WaitForChild("PlotService"))
+local PlayerStateService = require(SSS:WaitForChild("Systems"):WaitForChild("PlayerStateService"))
 
 -- Ensure remotes under ReplicatedStorage/Net/Remotes
 local Net = RS:FindFirstChild("Net") or Instance.new("Folder")
@@ -167,60 +177,135 @@ local function autoLink(newId: string)
         local proj = a + ab * t
         return (proj - c).Magnitude <= r
     end
-    local candidates: { {id:string, dist:number} } = {}
+    
+    -- Enhanced angle-based occlusion detection
+    local function isOccludedByAngle(newPos: Vector2, candidatePos: Vector2, occluderPos: Vector2): boolean
+        local dirToCandidate = (candidatePos - newPos).Unit
+        local dirToOccluder = (occluderPos - newPos).Unit
+        local distToCandidate = (candidatePos - newPos).Magnitude
+        local distToOccluder = (occluderPos - newPos).Magnitude
+        
+        -- Calculate angle between the two directions
+        local dotProduct = dirToCandidate:Dot(dirToOccluder)
+        local angle = math.acos(math.clamp(dotProduct, -1, 1))
+        
+        -- If angle is small (similar direction) and occluder is closer, it's occluded
+        local angleThreshold = math.rad(30) -- 30 degrees threshold
+        return angle < angleThreshold and distToOccluder < distToCandidate
+    end
+    
+    local candidates: { {id:string, dist:number, angle:number} } = {}
     for id, B in pairs(S.snapshot.ponds) do
         if id ~= newId then
             local centerDist = (A.pos - B.pos).Magnitude
             local edgeGap = centerDist - (A.radius + B.radius)
             if edgeGap <= Policy.AutoLinkMaxGap and centerDist <= Policy.MaxLakeSpan then
-                table.insert(candidates, { id = id, dist = centerDist })
+                -- Calculate angle from positive X axis for sorting
+                local dir = (B.pos - A.pos).Unit
+                local angle = math.atan2(dir.Y, dir.X)
+                table.insert(candidates, { id = id, dist = centerDist, angle = angle })
             end
         end
     end
+    
+    -- Sort by distance first
     table.sort(candidates, function(a,b) return a.dist < b.dist end)
+    
     do
         local order = {}
         for _, c in ipairs(candidates) do table.insert(order, c.id) end
         print(string.format("[Boundary/Link] candidates new=%s ordered=%s", newId, table.concat(order, ",")))
     end
+    
     local half = (BoundaryConfig.canalHalfWidth or 2.0)
     local clearance = math.max((BoundaryConfig.dotSpacing or 3.5) * 0.6, 0.4)
-    local linked = false
+    local linkedCount = 0
+    local maxLinks = 2  -- Now allow up to 2 connections
+    
     for _, cand in ipairs(candidates) do
+        if linkedCount >= maxLinks then break end  -- Stop after 2 links
+        
         local id = cand.id
         local B = S.snapshot.ponds[id]
         local blocked = false
+        
+        -- Check traditional geometric occlusion
         for cid, C in pairs(S.snapshot.ponds) do
             if cid ~= newId and cid ~= id then
                 local R = ringR(C) + half + clearance
                 if segCircleIntersect(A.pos, B.pos, C.pos, R) then
                     blocked = true
-                    print(string.format("[Boundary/Link] occluded new=%s skipped_by=%s candidate=%s", newId, cid, id))
+                    print(string.format("[Boundary/Link] geometric_occluded new=%s skipped_by=%s candidate=%s", newId, cid, id))
                     break
                 end
             end
         end
+        
+        -- Check angle-based occlusion (new smart logic)
+        if not blocked then
+            for cid, C in pairs(S.snapshot.ponds) do
+                if cid ~= newId and cid ~= id then
+                    if isOccludedByAngle(A.pos, B.pos, C.pos) then
+                        blocked = true
+                        print(string.format("[Boundary/Link] angle_occluded new=%s skipped_by=%s candidate=%s", newId, cid, id))
+                        break
+                    end
+                end
+            end
+        end
+        
         if not blocked then
             local key = pairKey(newId, id)
             if not S._linkedPairs[key] then
                 local lake = S.connectPonds(newId, id, Policy.DefaultLakeWidth)
                 if lake then
                     S._linkedPairs[key] = true
-                    print(string.format("[Boundary/Link] choose new=%s to=%s dist=%.1f reason=visible", newId, id, cand.dist))
-                    linked = true
+                    linkedCount += 1
+                    print(string.format("[Boundary/Link] choose new=%s to=%s dist=%.1f link=%d/2 reason=visible", newId, id, cand.dist, linkedCount))
                 end
             end
-            break
         end
     end
-    if not linked then
-        print(string.format("[Boundary/Link] none new=%s reason=no_visible_candidate", newId))
+    
+    if linkedCount == 0 then
+        print(string.format("[Boundary/Link] none new=%s reason=no_visible_candidates", newId))
+    else
+        print(string.format("[Boundary/Link] completed new=%s linked=%d/2", newId, linkedCount))
     end
 end
 
-function S.addPond(posXZ: Vector2, radius: number, depth: number?)
+function S.addPond(posXZ: Vector2, radius: number, depth: number?, skipValidation: boolean?)
     radius = math.clamp(radius, Policy.MinPondRadius, Policy.MaxPondRadius)
     depth = depth or ((WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2)
+    
+    -- VALIDATION 1: Check if position is on terrain (not water or parts)
+    -- Skip validation for system-created ponds (e.g., default pond in WorldBootstrap)
+    if not skipValidation then
+        local rayOrigin = Vector3.new(posXZ.X, 500, posXZ.Y)  -- Start from high above
+        local rayDirection = Vector3.new(0, -1000, 0)  -- Ray downward
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.FilterDescendantsInstances = {}
+        params.IgnoreWater = false
+        
+        local hit = workspace:Raycast(rayOrigin, rayDirection, params)
+        if not hit then
+            print("[PondNetwork] addPond failed: no terrain hit at position")
+            return nil
+        end
+        
+        -- Must be on terrain, not on water or parts
+        if hit.Instance ~= workspace.Terrain then
+            print("[PondNetwork] addPond failed: not on terrain (hit", hit.Instance, ")")
+            return nil
+        end
+        
+        if hit.Material == Enum.Material.Water then
+            print("[PondNetwork] addPond failed: cannot place on water")
+            return nil
+        end
+    end
+    
     -- Overlap guard: prevent placing overlapping ponds (by ring radii)
     local POND_SCALE = BoundaryConfig.pond_scale
     local PAD = BoundaryConfig.pad
@@ -235,34 +320,53 @@ function S.addPond(posXZ: Vector2, radius: number, depth: number?)
             return nil
         end
     end
-    -- FIXED: Separate sculpt center from boundary centerY
+    -- FIXED: Use unified carving for consistent bowl profile
     local yTop = WorldConfig.ISLANDS.DefaultHeightY
-    local depth = (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2
-    local sculptCenter = Vector3.new(posXZ.X, yTop - (depth * 0.5), posXZ.Y)  -- For terrain carving
+    local depth = UnifiedCarvingUtil.getPondDepth("dynamic")
+    local sculptCenter = Vector3.new(posXZ.X, yTop - (depth * 0.5), posXZ.Y)
+    
+    local okCarve1, err1 = pcall(function()
+        UnifiedCarvingUtil.carveBowl(sculptCenter, radius, depth, UnifiedCarvingUtil.getDefaultBowlParams())
+    end)
+    
     local surfaceY = yTop  -- For boundary system (surface level)
     local id = newId("pond")
-    local pond = { id = id, pos = posXZ, radius = radius, centerY = surfaceY }  -- Store surface Y
+    local pond = { id = id, pos = posXZ, radius = radius, centerY = surfaceY }
     S.snapshot.ponds[id] = pond
     S.bump({ ponds = { created = { pond } } })
-    -- Sculpt terrain: carve circular crater with proper depth
-    local sculptDepth = depth
-    local height = sculptDepth
-    local clearR = radius + 0.5  -- Slightly larger for clean edges
-    local okCarve1, err1 = pcall(function()
-        Terrain:FillCylinder(CFrame.new(sculptCenter, sculptCenter + Vector3.yAxis), height, clearR, Enum.Material.Air)
-    end)
+    
     if not okCarve1 then
         warn("[PondNetwork] carve pond failed:", err1)
     else
-        print(string.format("[PondNetwork] carved pond surfaceY=%.1f sculptY=%.1f h=%.1f r=%.1f", surfaceY, sculptCenter.Y, height, clearR))
+        print(string.format("[PondNetwork] carved pond surfaceY=%.1f sculptY=%.1f r=%.1f", surfaceY, sculptCenter.Y, radius))
     end
+    -- Rim creation: centralized here to avoid duplicates
     pcall(function()
-        local rims = workspace:FindFirstChild("PondRims") or Instance.new("Folder")
-        rims.Name = "PondRims"; rims.Parent = workspace
-        local pf = rims:FindFirstChild(id) or Instance.new("Folder")
-        pf.Name = id; pf.Parent = rims
-        RimBuilder.build(pf, posXZ, radius)
+        if UnifiedRimSystem then
+            -- Use unified system (it clears any existing stones under the pond folder)
+            local center3 = Vector3.new(posXZ.X, surfaceY, posXZ.Y)
+            UnifiedRimSystem.createRim(id, center3, radius, true)
+        else
+            -- Fallback: direct RimBuilder
+            local rims = workspace:FindFirstChild("PondRims") or Instance.new("Folder")
+            rims.Name = "PondRims"; rims.Parent = workspace
+            local pf = rims:FindFirstChild(id) or Instance.new("Folder")
+            pf.Name = id; pf.Parent = rims
+            RimBuilder.build(pf, posXZ, radius)
+        end
     end)
+    
+    -- NEW: Update oil capacity when pond is added
+    pcall(function()
+        local OilService = require(SSS:WaitForChild("Server"):WaitForChild("OilService"))
+        if OilService and OilService.addPondCapacity then
+            -- For dynamic ponds, we need to figure out which plot this belongs to
+            -- For now, use a default plot key (this could be enhanced later)
+            local plotKey = "P1"  -- TODO: Determine actual plot from position
+            OilService.addPondCapacity(plotKey, radius)
+        end
+    end)
+    
     print(string.format("[PondNetwork] addPond id=%s pos=(%.1f,%.1f) r=%.1f surfaceY=%.1f", id, posXZ.X, posXZ.Y, radius, surfaceY))
     -- Forward to BoundaryGraph (authoritative data)
     pcall(function()
@@ -287,7 +391,18 @@ function S.connectPonds(aId: string, bId: string, width: number?)
     -- Clip path to start/end at ring circumferences for authoritative snapshot
     local aInfo = { pos = A.pos, radius = ringR(A) }
     local bInfo = { pos = B.pos, radius = ringR(B) }
-    local clipped = CanalBuilder.ClipPathToRings(path, aInfo, bInfo)
+    -- Safe clipping with fallback
+    local clipped = path
+    if CanalBuilder and CanalBuilder.ClipPathToRings then
+        local ok, result = pcall(function()
+            return CanalBuilder.ClipPathToRings(path, aInfo, bInfo)
+        end)
+        if ok and result then
+            clipped = result
+        else
+            warn("[PondNetwork] ClipPathToRings failed, using unclipped path")
+        end
+    end
     local baseW = width or Policy.DefaultLakeWidth
     local visW = math.max(2, baseW * 0.4) -- visual and acceptance width use the same now
     local lake = { id = id, a = aId, b = bId, path = clipped, width = visW }
@@ -308,28 +423,14 @@ function S.connectPonds(aId: string, bId: string, width: number?)
     }
     S.snapshot.lakes[id] = lake
     S.bump({ lakes = { created = { lake } } })
-    -- Sculpt a canal along the clipped path: chain of shallow Air-only cylinders
+    -- FIXED: Use unified carving for consistent canal profile and proper stone placement
     local yTop = WorldConfig.ISLANDS.DefaultHeightY
-    local depth = math.min(1, (WorldConfig.ISLANDS.Pond and WorldConfig.ISLANDS.Pond.Depth) or 2) * 0.5  -- Shallower canals
-    local height = depth
-    local clearR = lake.width + 0.5  -- Narrower carving
-    local okCarve2, err2 = pcall(function()
-        -- Use clipped path for carving too
-        for i = 1, #clipped do
-            local p = clipped[i]
-            local sculptCenter = Vector3.new(p.X, yTop - (depth * 0.5), p.Y)  -- Use shallow depth for carving
-            Terrain:FillCylinder(CFrame.new(sculptCenter, sculptCenter + Vector3.yAxis), height, clearR, Enum.Material.Air)
-        end
-    end)
-    if not okCarve2 then
-        warn("[PondNetwork] carve canal failed:", err2)
-    else
-        print(string.format("[PondNetwork] carved canal steps=%d r=%.1f", #path, clearR))
     
-    -- FIXED: Add dense stone rim segments along canal path for visual connection
+    -- Use unified carving for the canal terrain
+    UnifiedCarvingUtil.carveCanal(clipped, visW, yTop)
+    -- RESTORED: Place stone tiles that extend fully to pond rims with better rotation
     pcall(function()
-        local segmentSpacing = 2  -- Much closer spacing for continuous appearance
-        local segmentCount = math.max(2, math.floor((#path * Policy.PathSampleStep) / segmentSpacing))
+        local stoneSpacing = 1.8  -- Closer spacing for continuous stone appearance
         
         local canals = workspace:FindFirstChild("CanalSegments") or Instance.new("Folder")
         canals.Name = "CanalSegments"; canals.Parent = workspace
@@ -341,58 +442,64 @@ function S.connectPonds(aId: string, bId: string, width: number?)
             if child.Name == "CanalStone" then child:Destroy() end
         end
         
-        -- Get the clipped path (rim to rim, not center to center)
-        local clippedPath = lake.path  -- This is already clipped to rings
+        -- Use the CLIPPED path for stones to stop at pond rims, not extend into ponds
+        local pathToUse = clipped  -- Use clipped path so stones stop at rim edges
         
-        -- Place stone segments along the clipped path
-        for i = 1, #clippedPath - 1 do
-            local p1 = clippedPath[i]
-            local p2 = clippedPath[i + 1]
-            local segLen = (p2 - p1).Magnitude
-            local numStones = math.max(1, math.floor(segLen / segmentSpacing))
-            
-            for j = 0, numStones - 1 do
-                local t = j / math.max(1, numStones - 1)
-                local pathPoint = p1 + (p2 - p1) * t
-                
-                -- Create stone segment
-                local stone = Instance.new("Part")
-                stone.Name = "CanalStone"
-                stone.Anchored = true
-                stone.CanCollide = true
-                stone.Material = Enum.Material.Rock
-                stone.Color = Color3.fromRGB(118, 116, 112)
-                stone.Size = Vector3.new(2.5, 0.8, 2)  -- Wider for better coverage
-                stone.TopSurface = Enum.SurfaceType.Smooth
-                stone.BottomSurface = Enum.SurfaceType.Smooth
-                
-                -- Position on terrain surface
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Whitelist
-                params.FilterDescendantsInstances = { workspace.Terrain }
-                
-                local origin = Vector3.new(pathPoint.X, 1000, pathPoint.Y)
-                local hit = workspace:Raycast(origin, Vector3.new(0, -2000, 0), params)
-                local surfY = (hit and hit.Position.Y) or yTop
-                
-                local stoneY = surfY + (stone.Size.Y * 0.5)
-                stone.Position = Vector3.new(pathPoint.X, stoneY, pathPoint.Y)
-                
-                -- Orient along path direction
-                if i < #clippedPath then
-                    local dir = (p2 - p1).Unit
-                    local angle = math.atan2(dir.Y, dir.X)
-                    stone.CFrame = stone.CFrame * CFrame.Angles(0, angle, 0)
-                end
-                
-                stone.Parent = canalFolder
-            end
+        -- Calculate total path length for even stone distribution
+        local totalLength = 0
+        for i = 1, #pathToUse - 1 do
+            totalLength += (pathToUse[i + 1] - pathToUse[i]).Magnitude
         end
         
-        local totalStones = canalFolder:GetChildren()
-        print(string.format("[PondNetwork] canal stones id=%s segments=%d", id, #totalStones))
+        if totalLength > 0 then
+            local numStones = math.max(2, math.floor(totalLength / stoneSpacing))
+            
+            -- Place stones evenly along the entire clipped path
+            for i = 0, numStones - 1 do
+                local t = i / math.max(1, numStones - 1)  -- 0 to 1 along path
+                local targetDist = t * totalLength
+                
+                -- Find position along path at this distance
+                local currentDist = 0
+                local stonePos: Vector2? = nil
+                local stoneDir = Vector2.new(1, 0)  -- Default direction
+                
+                for j = 1, #pathToUse - 1 do
+                    local p1 = pathToUse[j]
+                    local p2 = pathToUse[j + 1]
+                    local segLen = (p2 - p1).Magnitude
+                    
+                    if currentDist + segLen >= targetDist then
+                        local segT = (targetDist - currentDist) / math.max(0.001, segLen)
+                        stonePos = p1 + (p2 - p1) * segT
+                        stoneDir = (p2 - p1).Unit
+                        break
+                    end
+                    currentDist += segLen
+                end
+                
+                if stonePos then
+                    local terrainHeight = WorldConfig.ISLANDS.DefaultHeightY or 0
+                    local stoneY = terrainHeight + 0.3
+                    local position = Vector3.new(stonePos.X, stoneY, stonePos.Y)
+                    local cframe = CFrame.new(position)
+                    if stoneDir.Magnitude > 0 then
+                        local angle = math.atan2(stoneDir.Y, stoneDir.X)
+                        cframe = cframe * CFrame.Angles(0, angle, 0)
+                    end
+                    RenderQueue.EnqueueCanalStone(canalFolder, {
+                        Size = Vector3.new(2.2, 0.6, 1.8),
+                        CFrame = cframe,
+                        Color = Color3.fromRGB(118, 116, 112),
+                        Material = Enum.Material.Rock,
+                        Name = "CanalStone",
+                        Attributes = { lakeId = id },
+                    })
+                end
+            end
+            print(string.format("[PondNetwork] canal stones enqueued id=%s length=%.1f count=%d", id, totalLength, numStones))
+        end
     end)
-    end
     print(string.format("[PondNetwork] connectPonds id=%s a=%s b=%s width=%.1f steps=%d", id, aId, bId, lake.width, #path))
     -- Forward to BoundaryGraph (authoritative data)
     pcall(function()
@@ -422,9 +529,42 @@ RF_Get.OnServerInvoke = function(_player)
 end
 
 RF_Add.OnServerInvoke = function(player, posXZ: Vector2, radius: number)
-    if not RunService:IsStudio() then return nil end
-    if typeof(posXZ) ~= "Vector2" then return nil end
+    -- Studio-only helper, but still enforce build + plot gates
+    if not RunService:IsStudio() then 
+        warn("[PondNetwork] Pond placement only available in Studio")
+        return nil 
+    end
+    if typeof(posXZ) ~= "Vector2" or type(radius) ~= "number" then 
+        warn("[PondNetwork] Invalid parameters for pond placement")
+        return nil 
+    end
+
+    -- Must be in Build state
+    local state = PlayerStateService and PlayerStateService:GetPlayerState(player)
+    if state ~= "Build" then 
+        warn("[PondNetwork] Player not in Build state, cannot place pond")
+        return nil 
+    end
+
+    -- Must be inside player's plot bounds
+    local assignment = PlotService and PlotService.ClaimPlot(player)
+    if not assignment then 
+        warn("[PondNetwork] No plot assignment for player")
+        return nil 
+    end
+    local center = (assignment.origin and assignment.origin.Position) or Vector3.new()
+    local half = Vector2.new(WorldConfig.ISLANDS.SizeStuds/2, WorldConfig.ISLANDS.SizeStuds/2)
+    local dx = posXZ.X - center.X
+    local dz = posXZ.Y - center.Z
+    if math.abs(dx) > half.X or math.abs(dz) > half.Y then 
+        warn(string.format("[PondNetwork] Pond position (%.1f, %.1f) outside plot bounds", posXZ.X, posXZ.Y))
+        return nil 
+    end
+
     local p = S.addPond(posXZ, tonumber(radius) or 10)
+    if p then
+        print(string.format("[PondNetwork] Pond placed successfully by %s at (%.1f, %.1f)", player.Name, posXZ.X, posXZ.Y))
+    end
     return p
 end
 
