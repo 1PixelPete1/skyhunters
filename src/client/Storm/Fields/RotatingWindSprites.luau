@@ -53,7 +53,7 @@ function RotatingWindSprites.new(_perfConfig: PerfConfig?, _perfTier: StormTypes
     
     self:CreateSprites()
     
-    print("[RotatingWindSprites] Proper wind-aligned semicircle system initialized")
+    print("[RotatingWindSprites] Enhanced wind system initialized")
     
     return self
 end
@@ -97,9 +97,12 @@ function RotatingWindSprites:CreateSprites()
             imageLabel.ScaleType = Enum.ScaleType.Stretch
             imageLabel.Parent = billboard
             
-            -- Vary height for each sprite
+            -- Vary height for each sprite with some randomness
             local heightOffset = self.Config.minHeight + 
                                (self.Config.maxHeight - self.Config.minHeight) * ((i - 1) / self.Config.spritesPerSemicircle)
+            
+            -- Add subtle variation to make it less uniform
+            heightOffset = heightOffset + math.sin(i * 1.7) * 1.5
             
             local sprite: WindSprite = {
                 part = part,
@@ -107,9 +110,9 @@ function RotatingWindSprites:CreateSprites()
                 image = imageLabel,
                 angle = baseAngle,
                 targetAngle = baseAngle,
-                radius = self.Config.radius + (i % 2) * 3, -- Slight radius variation
+                radius = self.Config.radius + (i % 2) * 3 + math.sin(i * 2.3) * 2, -- More radius variation
                 height = heightOffset,
-                speed = self.Config.baseSpeed,
+                speed = self.Config.baseSpeed * (0.9 + math.random() * 0.2), -- Slight speed variation
                 opacity = self.Config.baseAlpha,
                 fadeState = "visible",
                 semicircle = semicircle,
