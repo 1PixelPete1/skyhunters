@@ -1,5 +1,5 @@
 --!strict
--- LanternArchetypes.luau
+-- LanternArchetypes.luau (FIXED - branches never aim down initially)
 -- Example archetype definitions for the dynamic lantern system
 
 local Types = require(script.Parent.LanternTypes)
@@ -26,7 +26,7 @@ end
 local DECORATION_FLAG_TIP: Types.DecorationRule = {
 	modelId = "FlagSmall",
 	where = "Ends",
-	mode = "WorldUpright",
+	mode = "TangentAligned",  -- FIXED: Not WorldUpright (better for spirals)
 	density = nil,
 	jitter_deg = makeCurve(0, 5, -15, 15)
 }
@@ -47,12 +47,12 @@ local DECORATION_CHARM_CENTER: Types.DecorationRule = {
 	jitter_deg = makeCurve(0, 2, -5, 5)
 }
 
--- Branch profiles
+-- FIXED: Branch profiles - pitch never goes below 0 (never aims down)
 local BRANCH_SIMPLE: Types.BranchProfile = {
 	id = "simple_arm",
 	max_children = 1,
 	len_frac = makeCurve(0.4, 0.05, 0.3, 0.5),
-	pitch_deg = makeCurve(-20, 10, -45, 0),
+	pitch_deg = makeCurve(10, 8, 0, 30),  -- FIXED: 0 to 30 degrees (horizontal to upward)
 	yaw_deg = makeCurve(0, 30, -60, 60),
 	inherit_rotation = false,
 	jitter_deg = makeCurve(0, 2, -5, 5),
@@ -63,7 +63,7 @@ local BRANCH_ORNATE: Types.BranchProfile = {
 	id = "ornate_arm",
 	max_children = 2,
 	len_frac = makeCurve(0.35, 0.08, 0.25, 0.45),
-	pitch_deg = makeCurve(-30, 15, -60, 15),
+	pitch_deg = makeCurve(15, 10, 0, 45),  -- FIXED: 0 to 45 degrees (never down)
 	yaw_deg = makeCurve(0, 45, -90, 90),
 	inherit_rotation = true,
 	jitter_deg = makeCurve(0, 3, -8, 8),
@@ -76,7 +76,7 @@ local CommonA: Types.Archetype = {
 	-- Core params
 	height = makeParam(12, 1.5, "shape"),
 	bend_deg = makeParam(15, 5, "pose"),
-	twist_deg = makeParam(0, 10, "pose"),
+	twist_deg = makeParam(0, 10, "pose"),  -- Curve plane yaw only
 	tip_drop = makeParam(0.2, 0.05, "pose"),
 	arm_len = makeParam(1.8, 0.3, "shape"),
 	lantern_tilt = makeParam(5, 3, "pose"),
@@ -119,7 +119,7 @@ local OrnateB: Types.Archetype = {
 	-- Core params
 	height = makeParam(14, 2, "shape"),
 	bend_deg = makeParam(20, 8, "pose"),
-	twist_deg = makeParam(15, 10, "pose"),
+	twist_deg = makeParam(15, 10, "pose"),  -- Curve plane yaw only
 	tip_drop = makeParam(0.25, 0.08, "pose"),
 	arm_len = makeParam(2.2, 0.4, "shape"),
 	lantern_tilt = makeParam(8, 5, "pose"),
@@ -160,13 +160,13 @@ local OrnateB: Types.Archetype = {
 local TestSpiral: Types.Archetype = {
 	version = 1,
 	-- Core params (some locked for testing)
-	height = makeParam(10, 0, "shape", true), -- locked at 10
+	height = makeParam(10, 0, "shape", true),
 	bend_deg = makeParam(30, 10, "pose"),
-	twist_deg = makeParam(180, 30, "pose"),
+	twist_deg = makeParam(180, 30, "pose"),  -- Curve plane yaw
 	tip_drop = makeParam(0.3, 0.1, "pose"),
-	arm_len = makeParam(1.5, 0, "shape", true), -- locked at 1.5
-	lantern_tilt = makeParam(0, 0, "pose", true), -- locked at 0
-	lantern_yaw = makeParam(0, 0, "pose", true), -- locked at 0
+	arm_len = makeParam(1.5, 0, "shape", true),
+	lantern_tilt = makeParam(0, 0, "pose", true),
+	lantern_yaw = makeParam(0, 0, "pose", true),
 	head_scale = makeParam(0.9, 0.05, "shape"),
 	base_scale = makeParam(1.0, 0.05, "shape"),
 	paint_wear = makeParam(0.2, 0.05, "look"),

@@ -1,19 +1,19 @@
 --!strict
--- LanternDesigner.client.luau
+-- LanternDesigner.client.luau (FIXED - Remote spawn, no per-param dice)
 -- Studio-only designer UI for authoring lantern presets
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Only run in Studio
 if not RunService:IsStudio() then
 	return
 end
 
-local Shared = game.ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
 local FeatureFlags = require(Shared:WaitForChild("FeatureFlags"))
 local Types = require(Shared:WaitForChild("LanternTypes"))
 local Archetypes = require(Shared:WaitForChild("LanternArchetypes"))
@@ -26,17 +26,36 @@ end
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Designer state
+-- Create RemoteEvent for spawning (if not exists)
+local spawnRemote = ReplicatedStorage:FindFirstChild("SpawnDesignerLantern")
+if not spawnRemote then
+	spawnRemote = Instance.new("RemoteEvent")
+	spawnRemote.Name = "SpawnDesignerLantern"
+	spawnRemote.Parent = ReplicatedStorage
+end
+
+-- FIXED: Designer state (removed per-param RNG, using seed-based only)
 local designerState = {
-	mode = "lamp",  -- "branch" or "lamp"
+	mode = "lamp",
 	visible = false,
-	currentBranch = nil,
-	currentLamp = nil,
+	currentArchetype = nil :: Types.DesignerArchetype?,
 	sessionBranches = {},
 	sessionLamps = {},
+	selectedStyle = "straight",
 	selectedArchetype = "CommonA",
-	paramLocks = {},
-	previewModel = nil
+	currentSeed = math.random(1, 1000000),  -- Global seed for entire lantern
+	paramValues = {} :: {[string]: number},  -- Current param values
+	paramLocked = {} :: {[string]: boolean}, -- Lock state
+	previewModel = nil,
+	activeDropdown = nil,
+}
+
+-- FIXED: Style-specific param visibility rules
+local STYLE_PARAM_VISIBILITY = {
+	straight = {},
+	scurve = {"bend_deg"},
+	planar_spiral = {"twist_deg", "bend_deg"},
+	helix = {"twist_deg"}
 }
 
 -- Create session storage folder
@@ -58,23 +77,8 @@ local function ensureSessionFolder()
 	return folder
 end
 
--- Save branch to session
-local function saveBranchToSession(branch: Types.BranchProfile & {decorations: {Types.DecorationRule}})
-	local sessionFolder = ensureSessionFolder()
-	local branchesFolder = sessionFolder:FindFirstChild("Branches")
-	
-	local count = #branchesFolder:GetChildren() + 1
-	local stringValue = Instance.new("StringValue")
-	stringValue.Name = "Branch_" .. count
-	stringValue.Value = HttpService:JSONEncode(branch)
-	stringValue.Parent = branchesFolder
-	
-	table.insert(designerState.sessionBranches, branch)
-	print("Saved branch:", branch.id)
-end
-
 -- Save lamp to session
-local function saveLampToSession(archetype: Types.Archetype)
+local function saveLampToSession(archetype: Types.DesignerArchetype)
 	local sessionFolder = ensureSessionFolder()
 	local lampsFolder = sessionFolder:FindFirstChild("Lamps")
 	
@@ -85,7 +89,7 @@ local function saveLampToSession(archetype: Types.Archetype)
 	stringValue.Parent = lampsFolder
 	
 	table.insert(designerState.sessionLamps, archetype)
-	print("Saved lamp archetype")
+	print("✅ Saved lamp archetype (Designer format)")
 end
 
 -- Load session data
@@ -95,7 +99,6 @@ local function loadSession()
 		return
 	end
 	
-	-- Load branches
 	local branchesFolder = sessionFolder:FindFirstChild("Branches")
 	if branchesFolder then
 		for _, stringValue in ipairs(branchesFolder:GetChildren()) do
@@ -110,7 +113,6 @@ local function loadSession()
 		end
 	end
 	
-	-- Load lamps
 	local lampsFolder = sessionFolder:FindFirstChild("Lamps")
 	if lampsFolder then
 		for _, stringValue in ipairs(lampsFolder:GetChildren()) do
@@ -128,6 +130,33 @@ local function loadSession()
 	print("Loaded session:", #designerState.sessionBranches, "branches,", #designerState.sessionLamps, "lamps")
 end
 
+-- FIXED: Check if param should be visible for current style
+local function isParamVisible(paramName: string): boolean
+	local visibleParams = STYLE_PARAM_VISIBILITY[designerState.selectedStyle]
+	if not visibleParams then
+		return true
+	end
+	
+	if #visibleParams == 0 then
+		return true
+	end
+	
+	for _, visibleParam in ipairs(visibleParams) do
+		if visibleParam == paramName then
+			return true
+		end
+	end
+	
+	local alwaysVisible = {"height", "arm_len", "head_scale", "base_scale", "paint_wear", "lantern_tilt", "lantern_yaw"}
+	for _, name in ipairs(alwaysVisible) do
+		if name == paramName then
+			return true
+		end
+	end
+	
+	return false
+end
+
 -- Create the main UI
 local function createDesignerUI()
 	local screenGui = Instance.new("ScreenGui")
@@ -138,8 +167,8 @@ local function createDesignerUI()
 	-- Main frame
 	local mainFrame = Instance.new("Frame")
 	mainFrame.Name = "MainFrame"
-	mainFrame.Size = UDim2.new(0, 400, 0, 600)
-	mainFrame.Position = UDim2.new(1, -420, 0.5, -300)
+	mainFrame.Size = UDim2.new(0, 450, 0, 700)
+	mainFrame.Position = UDim2.new(1, -470, 0.5, -350)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Parent = screenGui
@@ -147,75 +176,51 @@ local function createDesignerUI()
 	-- Title bar
 	local titleBar = Instance.new("Frame")
 	titleBar.Name = "TitleBar"
-	titleBar.Size = UDim2.new(1, 0, 0, 30)
+	titleBar.Size = UDim2.new(1, 0, 0, 35)
 	titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 	titleBar.BorderSizePixel = 0
 	titleBar.Parent = mainFrame
 	
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Name = "Title"
-	titleLabel.Size = UDim2.new(1, -30, 1, 0)
+	titleLabel.Size = UDim2.new(1, -35, 1, 0)
 	titleLabel.Position = UDim2.new(0, 5, 0, 0)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "Lantern Designer"
+	titleLabel.Text = "🏮 Lantern Designer"
 	titleLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-	titleLabel.TextScaled = true
+	titleLabel.TextSize = 18
 	titleLabel.Font = Enum.Font.SourceSansBold
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Parent = titleBar
 	
 	-- Close button
 	local closeButton = Instance.new("TextButton")
 	closeButton.Name = "CloseButton"
-	closeButton.Size = UDim2.new(0, 30, 1, 0)
-	closeButton.Position = UDim2.new(1, -30, 0, 0)
+	closeButton.Size = UDim2.new(0, 35, 1, 0)
+	closeButton.Position = UDim2.new(1, -35, 0, 0)
 	closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-	closeButton.Text = "X"
+	closeButton.Text = "✕"
 	closeButton.TextColor3 = Color3.new(1, 1, 1)
-	closeButton.TextScaled = true
+	closeButton.TextSize = 20
 	closeButton.Font = Enum.Font.SourceSansBold
 	closeButton.Parent = titleBar
 	
-	-- Mode tabs
-	local tabFrame = Instance.new("Frame")
-	tabFrame.Name = "Tabs"
-	tabFrame.Size = UDim2.new(1, 0, 0, 40)
-	tabFrame.Position = UDim2.new(0, 0, 0, 30)
-	tabFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	tabFrame.BorderSizePixel = 0
-	tabFrame.Parent = mainFrame
-	
-	local branchTab = Instance.new("TextButton")
-	branchTab.Name = "BranchTab"
-	branchTab.Size = UDim2.new(0.5, -1, 1, 0)
-	branchTab.Position = UDim2.new(0, 0, 0, 0)
-	branchTab.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	branchTab.Text = "Branch Mode"
-	branchTab.TextColor3 = Color3.fromRGB(180, 180, 180)
-	branchTab.TextScaled = true
-	branchTab.Font = Enum.Font.SourceSans
-	branchTab.Parent = tabFrame
-	
-	local lampTab = Instance.new("TextButton")
-	lampTab.Name = "LampTab"
-	lampTab.Size = UDim2.new(0.5, -1, 1, 0)
-	lampTab.Position = UDim2.new(0.5, 1, 0, 0)
-	lampTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-	lampTab.Text = "Lamp Mode"
-	lampTab.TextColor3 = Color3.new(1, 1, 1)
-	lampTab.TextScaled = true
-	lampTab.Font = Enum.Font.SourceSans
-	lampTab.Parent = tabFrame
-	
-	-- Content area
+	-- Content area with scroll
 	local contentFrame = Instance.new("ScrollingFrame")
 	contentFrame.Name = "Content"
-	contentFrame.Size = UDim2.new(1, -10, 1, -120)
-	contentFrame.Position = UDim2.new(0, 5, 0, 70)
+	contentFrame.Size = UDim2.new(1, -10, 1, -85)
+	contentFrame.Position = UDim2.new(0, 5, 0, 40)
 	contentFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 	contentFrame.BorderSizePixel = 0
 	contentFrame.ScrollBarThickness = 8
-	contentFrame.CanvasSize = UDim2.new(0, 0, 2, 0)
+	contentFrame.CanvasSize = UDim2.new(0, 0, 3, 0)
 	contentFrame.Parent = mainFrame
+	
+	-- Add list layout
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = contentFrame
 	
 	-- Bottom buttons
 	local buttonFrame = Instance.new("Frame")
@@ -225,153 +230,108 @@ local function createDesignerUI()
 	buttonFrame.BackgroundTransparency = 1
 	buttonFrame.Parent = mainFrame
 	
-	local saveButton = Instance.new("TextButton")
-	saveButton.Name = "SaveButton"
-	saveButton.Size = UDim2.new(0.3, -2, 1, 0)
-	saveButton.Position = UDim2.new(0, 0, 0, 0)
-	saveButton.BackgroundColor3 = Color3.fromRGB(50, 120, 50)
-	saveButton.Text = "Save"
-	saveButton.TextColor3 = Color3.new(1, 1, 1)
-	saveButton.TextScaled = true
-	saveButton.Font = Enum.Font.SourceSansBold
-	saveButton.Parent = buttonFrame
+	-- FIXED: Reroll All button (generates new seed)
+	local rerollButton = Instance.new("TextButton")
+	rerollButton.Name = "RerollButton"
+	rerollButton.Size = UDim2.new(0.25, -3, 1, 0)
+	rerollButton.Position = UDim2.new(0, 0, 0, 0)
+	rerollButton.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
+	rerollButton.Text = "🎲 Reroll"
+	rerollButton.TextColor3 = Color3.new(1, 1, 1)
+	rerollButton.TextSize = 16
+	rerollButton.Font = Enum.Font.SourceSansBold
+	rerollButton.Parent = buttonFrame
 	
 	local previewButton = Instance.new("TextButton")
 	previewButton.Name = "PreviewButton"
-	previewButton.Size = UDim2.new(0.3, -2, 1, 0)
-	previewButton.Position = UDim2.new(0.35, 0, 0, 0)
-	previewButton.BackgroundColor3 = Color3.fromRGB(50, 50, 120)
-	previewButton.Text = "Preview"
+	previewButton.Size = UDim2.new(0.25, -3, 1, 0)
+	previewButton.Position = UDim2.new(0.25, 0, 0, 0)
+	previewButton.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+	previewButton.Text = "👁 Preview"
 	previewButton.TextColor3 = Color3.new(1, 1, 1)
-	previewButton.TextScaled = true
+	previewButton.TextSize = 16
 	previewButton.Font = Enum.Font.SourceSansBold
 	previewButton.Parent = buttonFrame
 	
 	local spawnButton = Instance.new("TextButton")
 	spawnButton.Name = "SpawnButton"
-	spawnButton.Size = UDim2.new(0.3, -2, 1, 0)
-	spawnButton.Position = UDim2.new(0.7, 0, 0, 0)
-	spawnButton.BackgroundColor3 = Color3.fromRGB(120, 50, 50)
-	spawnButton.Text = "Spawn Test"
+	spawnButton.Size = UDim2.new(0.25, -3, 1, 0)
+	spawnButton.Position = UDim2.new(0.5, 0, 0, 0)
+	spawnButton.BackgroundColor3 = Color3.fromRGB(200, 80, 50)
+	spawnButton.Text = "🚀 Spawn"
 	spawnButton.TextColor3 = Color3.new(1, 1, 1)
-	spawnButton.TextScaled = true
+	spawnButton.TextSize = 16
 	spawnButton.Font = Enum.Font.SourceSansBold
 	spawnButton.Parent = buttonFrame
 	
-	-- Wire up tab switching
-	branchTab.MouseButton1Click:Connect(function()
-		designerState.mode = "branch"
-		branchTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-		branchTab.TextColor3 = Color3.new(1, 1, 1)
-		lampTab.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-		lampTab.TextColor3 = Color3.fromRGB(180, 180, 180)
-		-- Update content
-		updateContent(contentFrame)
-	end)
+	local saveButton = Instance.new("TextButton")
+	saveButton.Name = "SaveButton"
+	saveButton.Size = UDim2.new(0.25, -3, 1, 0)
+	saveButton.Position = UDim2.new(0.75, 0, 0, 0)
+	saveButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+	saveButton.Text = "💾 Save"
+	saveButton.TextColor3 = Color3.new(1, 1, 1)
+	saveButton.TextSize = 16
+	saveButton.Font = Enum.Font.SourceSansBold
+	saveButton.Parent = buttonFrame
 	
-	lampTab.MouseButton1Click:Connect(function()
-		designerState.mode = "lamp"
-		lampTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-		lampTab.TextColor3 = Color3.new(1, 1, 1)
-		branchTab.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-		branchTab.TextColor3 = Color3.fromRGB(180, 180, 180)
-		-- Update content
-		updateContent(contentFrame)
-	end)
-	
-	-- Wire up buttons
-	saveButton.MouseButton1Click:Connect(function()
-		if designerState.mode == "branch" and designerState.currentBranch then
-			saveBranchToSession(designerState.currentBranch)
-		elseif designerState.mode == "lamp" and designerState.currentLamp then
-			saveLampToSession(designerState.currentLamp)
+	-- FIXED: Reroll button - generates new seed
+	rerollButton.MouseButton1Click:Connect(function()
+		designerState.currentSeed = math.random(1, 1000000)
+		print("🎲 New seed:", designerState.currentSeed)
+		-- Update UI to show new seed
+		local seedLabel = contentFrame:FindFirstChild("SeedDisplay", true)
+		if seedLabel and seedLabel:IsA("TextLabel") then
+			seedLabel.Text = "Seed: " .. designerState.currentSeed
 		end
 	end)
 	
+	-- FIXED: Preview button - use RemoteEvent
 	previewButton.MouseButton1Click:Connect(function()
-		-- Preview functionality - spawn a temporary ghost model
 		if designerState.previewModel then
 			designerState.previewModel:Destroy()
 			designerState.previewModel = nil
-			print("Preview cleared")
+			previewButton.Text = "👁 Preview"
 		else
 			local character = player.Character
 			if character and character:FindFirstChild("HumanoidRootPart") then
-				local previewPos = character.HumanoidRootPart.Position + Vector3.new(8, 0, 0)
+				local previewPos = character.HumanoidRootPart.Position + character.HumanoidRootPart.CFrame.LookVector * 8
 				
-				-- Create a simple preview model
-				local previewModel = Instance.new("Model")
-				previewModel.Name = "LanternPreview"
+				-- Fire remote to server
+				spawnRemote:FireServer("preview", previewPos, designerState.selectedArchetype, designerState.currentSeed)
+				previewButton.Text = "⏳ Loading..."
 				
-				local part = Instance.new("Part")
-				part.Name = "PreviewPart"
-				part.Size = Vector3.new(2, 10, 2)
-				part.Position = previewPos
-				part.Anchored = true
-				part.CanCollide = false
-				part.Material = Enum.Material.ForceField
-				part.BrickColor = BrickColor.new("Bright blue")
-				part.Transparency = 0.5
-				part.Parent = previewModel
-				
-				local selectionBox = Instance.new("SelectionBox")
-				selectionBox.Adornee = part
-				selectionBox.Color3 = Color3.fromRGB(100, 150, 255)
-				selectionBox.LineThickness = 0.05
-				selectionBox.Parent = part
-				
-				previewModel.Parent = workspace
-				designerState.previewModel = previewModel
-				
-				print("✅ Preview created at", previewPos)
-				print("   Archetype:", designerState.selectedArchetype)
-			else
-				warn("Character not found - unable to create preview")
+				-- Wait for lantern to appear
+				task.wait(0.5)
+				local lantern = workspace:FindFirstChild("DynamicLantern")
+				if lantern and lantern:GetAttribute("IsPreview") then
+					designerState.previewModel = lantern
+					previewButton.Text = "❌ Clear"
+				else
+					previewButton.Text = "👁 Preview"
+				end
 			end
 		end
 	end)
 	
+	-- FIXED: Spawn button - use RemoteEvent
 	spawnButton.MouseButton1Click:Connect(function()
-		-- Spawn test lantern
-		local archetype = designerState.currentLamp or Archetypes[designerState.selectedArchetype]
-		if archetype then
-			-- Get player's position for spawn location
-			local character = player.Character
-			if character and character:FindFirstChild("HumanoidRootPart") then
-				local spawnPos = character.HumanoidRootPart.Position + Vector3.new(5, 0, 5)
-				
-				-- Create RemoteEvent if it doesn't exist
-				local remoteEvent = game.ReplicatedStorage:FindFirstChild("SpawnDynamicLantern")
-				if not remoteEvent then
-					-- Try to spawn directly if we have access (Studio)
-					local success, err = pcall(function()
-						local LanternSpawnService = require(game.ServerScriptService:WaitForChild("LanternSpawnService", 2))
-						if LanternSpawnService then
-							local lantern = LanternSpawnService.SpawnDynamicLantern(
-								"designer_test",
-								spawnPos,
-								"designer",
-								designerState.selectedArchetype
-							)
-							if lantern then
-								lantern:SetAttribute("SpawnedByDesigner", true)
-								print("✅ Spawned lantern at", spawnPos)
-							end
-						end
-					end)
-					
-					if not success then
-						warn("Failed to spawn lantern:", err)
-						print("Tip: Make sure LanternSpawnService is loaded")
-					end
-				else
-					-- Use RemoteEvent
-					remoteEvent:FireServer(spawnPos, designerState.selectedArchetype)
-					print("Requested lantern spawn at", spawnPos)
-				end
-			else
-				warn("Character not found - unable to determine spawn position")
-			end
+		local character = player.Character
+		if character and character:FindFirstChild("HumanoidRootPart") then
+			local spawnPos = character.HumanoidRootPart.Position + Vector3.new(5, 0, 5)
+			
+			-- Fire remote to server
+			spawnRemote:FireServer("spawn", spawnPos, designerState.selectedArchetype, designerState.currentSeed)
+			print("✅ Spawn requested at", spawnPos, "with seed", designerState.currentSeed)
+		end
+	end)
+	
+	-- Save button
+	saveButton.MouseButton1Click:Connect(function()
+		if designerState.currentArchetype then
+			saveLampToSession(designerState.currentArchetype)
+		else
+			warn("No archetype to save!")
 		end
 	end)
 	
@@ -388,182 +348,169 @@ local function createDesignerUI()
 	return screenGui
 end
 
--- Update content based on mode
-function updateContent(contentFrame: ScrollingFrame)
-	-- Clear existing content
-	for _, child in ipairs(contentFrame:GetChildren()) do
-		if not child:IsA("UIListLayout") then
-			child:Destroy()
-		end
-	end
-	
-	-- Add list layout if missing
-	local layout = contentFrame:FindFirstChild("UIListLayout")
-	if not layout then
-		layout = Instance.new("UIListLayout")
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.Padding = UDim.new(0, 5)
-		layout.Parent = contentFrame
-	end
-	
-	if designerState.mode == "branch" then
-		createBranchControls(contentFrame)
-	else
-		createLampControls(contentFrame)
-	end
-end
-
--- Create branch mode controls
-function createBranchControls(parent: ScrollingFrame)
-	-- Branch ID
-	local idFrame = createLabeledInput(parent, "Branch ID:", "simple_arm", 1)
-	
-	-- Max children
-	local maxChildrenFrame = createSlider(parent, "Max Children:", 0, 5, 1, 2)
-	
-	-- Length fraction
-	local lenFracFrame = createCurveControl(parent, "Length Fraction:", 
-		{mu = 0.4, sigma = 0.05, lo = 0.3, hi = 0.5}, 3)
-	
-	-- Pitch degrees
-	local pitchFrame = createCurveControl(parent, "Pitch (deg):", 
-		{mu = -20, sigma = 10, lo = -45, hi = 0}, 4)
-	
-	-- Yaw degrees
-	local yawFrame = createCurveControl(parent, "Yaw (deg):", 
-		{mu = 0, sigma = 30, lo = -60, hi = 60}, 5)
-	
-	-- Inherit rotation
-	local inheritFrame = createCheckbox(parent, "Inherit Rotation", false, 6)
-	
-	-- Jitter
-	local jitterFrame = createCurveControl(parent, "Jitter (deg):", 
-		{mu = 0, sigma = 2, lo = -5, hi = 5}, 7)
-	
-	-- Decorations section
-	local decorLabel = Instance.new("TextLabel")
-	decorLabel.Size = UDim2.new(1, 0, 0, 30)
-	decorLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-	decorLabel.BorderSizePixel = 0
-	decorLabel.Text = "Decorations"
-	decorLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-	decorLabel.TextScaled = true
-	decorLabel.Font = Enum.Font.SourceSansBold
-	decorLabel.LayoutOrder = 8
-	decorLabel.Parent = parent
-end
-
--- Create lamp mode controls
-function createLampControls(parent: ScrollingFrame)
-	-- Archetype selector
-	local archetypeFrame = createDropdown(parent, "Archetype:", 
-		{"CommonA", "OrnateB", "TestSpiral"}, designerState.selectedArchetype, 1)
-	
-	-- Core parameters
-	local heightFrame = createSlider(parent, "Height:", 8, 20, 12, 2)
-	local bendFrame = createSlider(parent, "Bend (deg):", 0, 45, 15, 3)
-	local twistFrame = createSlider(parent, "Twist (deg):", 0, 360, 0, 4)
-	local tipDropFrame = createSlider(parent, "Tip Drop:", 0, 0.5, 0.2, 5)
-	local armLenFrame = createSlider(parent, "Arm Length:", 1, 3, 1.8, 6)
-	local tiltFrame = createSlider(parent, "Lantern Tilt:", -30, 30, 5, 7)
-	local yawFrame = createSlider(parent, "Lantern Yaw:", -45, 45, 0, 8)
-	
-	-- Scales
-	local headScaleFrame = createSlider(parent, "Head Scale:", 0.5, 1.5, 1.0, 9)
-	local baseScaleFrame = createSlider(parent, "Base Scale:", 0.5, 1.5, 1.0, 10)
-	
-	-- Style weights
-	local styleLabel = Instance.new("TextLabel")
-	styleLabel.Size = UDim2.new(1, 0, 0, 30)
-	styleLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-	styleLabel.BorderSizePixel = 0
-	styleLabel.Text = "Style Weights"
-	styleLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-	styleLabel.TextScaled = true
-	styleLabel.Font = Enum.Font.SourceSansBold
-	styleLabel.LayoutOrder = 11
-	styleLabel.Parent = parent
-	
-	local straightWeight = createSlider(parent, "Straight:", 0, 1, 0.5, 12)
-	local scurveWeight = createSlider(parent, "S-Curve:", 0, 1, 0.4, 13)
-	local spiralWeight = createSlider(parent, "Spiral:", 0, 1, 0.1, 14)
-	local helixWeight = createSlider(parent, "Helix:", 0, 1, 0, 15)
-end
-
--- UI Helper functions
-function createLabeledInput(parent: Instance, label: string, defaultValue: string, order: number): Frame
+-- FIXED: Create real dropdown
+function createRealDropdown(parent: Instance, label: string, options: {string}, defaultValue: string, order: number, callback: (string) -> ()): Frame
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 30)
+	frame.Name = "Dropdown_" .. label
+	frame.Size = UDim2.new(1, -10, 0, 35)
 	frame.BackgroundTransparency = 1
 	frame.LayoutOrder = order
 	frame.Parent = parent
 	
 	local labelObj = Instance.new("TextLabel")
-	labelObj.Size = UDim2.new(0.4, 0, 1, 0)
+	labelObj.Size = UDim2.new(0.35, 0, 1, 0)
 	labelObj.BackgroundTransparency = 1
 	labelObj.Text = label
-	labelObj.TextColor3 = Color3.fromRGB(180, 180, 180)
-	labelObj.TextScaled = true
+	labelObj.TextColor3 = Color3.fromRGB(200, 200, 200)
+	labelObj.TextSize = 14
 	labelObj.TextXAlignment = Enum.TextXAlignment.Left
 	labelObj.Font = Enum.Font.SourceSans
 	labelObj.Parent = frame
 	
-	local input = Instance.new("TextBox")
-	input.Size = UDim2.new(0.6, -5, 1, 0)
-	input.Position = UDim2.new(0.4, 5, 0, 0)
-	input.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	input.BorderSizePixel = 0
-	input.Text = defaultValue
-	input.TextColor3 = Color3.new(1, 1, 1)
-	input.TextScaled = true
-	input.Font = Enum.Font.SourceSans
-	input.Parent = frame
+	local dropdown = Instance.new("TextButton")
+	dropdown.Name = "Button"
+	dropdown.Size = UDim2.new(0.65, -10, 1, -4)
+	dropdown.Position = UDim2.new(0.35, 5, 0, 2)
+	dropdown.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+	dropdown.BorderSizePixel = 0
+	dropdown.Text = defaultValue .. " ▼"
+	dropdown.TextColor3 = Color3.new(1, 1, 1)
+	dropdown.TextSize = 14
+	dropdown.Font = Enum.Font.SourceSans
+	dropdown.Parent = frame
+	
+	local menu = Instance.new("Frame")
+	menu.Name = "Menu"
+	menu.Size = UDim2.new(0.65, -10, 0, #options * 30)
+	menu.Position = UDim2.new(0.35, 5, 1, 2)
+	menu.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	menu.BorderSizePixel = 1
+	menu.BorderColor3 = Color3.fromRGB(80, 80, 80)
+	menu.Visible = false
+	menu.ZIndex = 10
+	menu.Parent = frame
+	
+	local menuLayout = Instance.new("UIListLayout")
+	menuLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	menuLayout.Parent = menu
+	
+	for i, option in ipairs(options) do
+		local optionButton = Instance.new("TextButton")
+		optionButton.Name = "Option_" .. option
+		optionButton.Size = UDim2.new(1, 0, 0, 30)
+		optionButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+		optionButton.BorderSizePixel = 0
+		optionButton.Text = option
+		optionButton.TextColor3 = Color3.new(1, 1, 1)
+		optionButton.TextSize = 13
+		optionButton.Font = Enum.Font.SourceSans
+		optionButton.LayoutOrder = i
+		optionButton.ZIndex = 11
+		optionButton.Parent = menu
+		
+		optionButton.MouseEnter:Connect(function()
+			optionButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+		end)
+		
+		optionButton.MouseLeave:Connect(function()
+			optionButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+		end)
+		
+		optionButton.MouseButton1Click:Connect(function()
+			dropdown.Text = option .. " ▼"
+			menu.Visible = false
+			callback(option)
+		end)
+	end
+	
+	dropdown.MouseButton1Click:Connect(function()
+		menu.Visible = not menu.Visible
+		if menu.Visible and designerState.activeDropdown and designerState.activeDropdown ~= menu then
+			designerState.activeDropdown.Visible = false
+		end
+		designerState.activeDropdown = menu.Visible and menu or nil
+	end)
 	
 	return frame
 end
 
-function createSlider(parent: Instance, label: string, min: number, max: number, default: number, order: number): Frame
+-- FIXED: Create param control (no per-param dice, just lock and slider)
+function createParamControl(parent: Instance, paramName: string, label: string, min: number, max: number, default: number, order: number): Frame
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 40)
+	frame.Name = "Param_" .. paramName
+	frame.Size = UDim2.new(1, -10, 0, 50)
 	frame.BackgroundTransparency = 1
 	frame.LayoutOrder = order
 	frame.Parent = parent
 	
+	if not isParamVisible(paramName) then
+		frame.Visible = false
+	end
+	
+	-- Initialize value
+	designerState.paramValues[paramName] = default
+	
+	-- Top row: label, value, lock
+	local topRow = Instance.new("Frame")
+	topRow.Size = UDim2.new(1, 0, 0, 25)
+	topRow.BackgroundTransparency = 1
+	topRow.Parent = frame
+	
 	local labelObj = Instance.new("TextLabel")
-	labelObj.Size = UDim2.new(0.4, 0, 0.5, 0)
+	labelObj.Size = UDim2.new(0.6, 0, 1, 0)
 	labelObj.BackgroundTransparency = 1
 	labelObj.Text = label
-	labelObj.TextColor3 = Color3.fromRGB(180, 180, 180)
-	labelObj.TextScaled = true
+	labelObj.TextColor3 = Color3.fromRGB(200, 200, 200)
+	labelObj.TextSize = 14
 	labelObj.TextXAlignment = Enum.TextXAlignment.Left
 	labelObj.Font = Enum.Font.SourceSans
-	labelObj.Parent = frame
+	labelObj.Parent = topRow
 	
 	local valueLabel = Instance.new("TextLabel")
-	valueLabel.Size = UDim2.new(0.2, 0, 0.5, 0)
-	valueLabel.Position = UDim2.new(0.8, 0, 0, 0)
+	valueLabel.Name = "Value"
+	valueLabel.Size = UDim2.new(0.25, 0, 1, 0)
+	valueLabel.Position = UDim2.new(0.6, 0, 0, 0)
 	valueLabel.BackgroundTransparency = 1
-	valueLabel.Text = tostring(default)
+	valueLabel.Text = string.format("%.2f", default)
 	valueLabel.TextColor3 = Color3.new(1, 1, 1)
-	valueLabel.TextScaled = true
+	valueLabel.TextSize = 14
 	valueLabel.Font = Enum.Font.SourceSansBold
-	valueLabel.Parent = frame
+	valueLabel.Parent = topRow
+	
+	-- Lock button
+	local lockButton = Instance.new("TextButton")
+	lockButton.Name = "Lock"
+	lockButton.Size = UDim2.new(0, 25, 0, 25)
+	lockButton.Position = UDim2.new(0.88, 0, 0, 0)
+	lockButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	lockButton.BorderSizePixel = 0
+	lockButton.Text = "🔓"
+	lockButton.TextSize = 16
+	lockButton.Parent = topRow
+	
+	-- Slider
+	local sliderRow = Instance.new("Frame")
+	sliderRow.Size = UDim2.new(1, 0, 0, 20)
+	sliderRow.Position = UDim2.new(0, 0, 0, 28)
+	sliderRow.BackgroundTransparency = 1
+	sliderRow.Parent = frame
 	
 	local sliderBack = Instance.new("Frame")
-	sliderBack.Size = UDim2.new(0.6, -10, 0, 4)
-	sliderBack.Position = UDim2.new(0.4, 5, 0.75, -2)
-	sliderBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	sliderBack.Size = UDim2.new(1, -5, 0, 6)
+	sliderBack.Position = UDim2.new(0, 0, 0.5, -3)
+	sliderBack.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	sliderBack.BorderSizePixel = 0
-	sliderBack.Parent = frame
+	sliderBack.Parent = sliderRow
 	
 	local sliderButton = Instance.new("TextButton")
-	sliderButton.Size = UDim2.new(0, 16, 0, 16)
-	sliderButton.Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8)
+	sliderButton.Size = UDim2.new(0, 18, 0, 18)
+	sliderButton.Position = UDim2.new((default - min) / (max - min), -9, 0.5, -9)
 	sliderButton.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
+	sliderButton.BorderSizePixel = 0
 	sliderButton.Text = ""
 	sliderButton.Parent = sliderBack
 	
-	-- Make it draggable
+	-- Slider dragging
 	local dragging = false
 	sliderButton.MouseButton1Down:Connect(function()
 		dragging = true
@@ -581,145 +528,98 @@ function createSlider(parent: Instance, label: string, min: number, max: number,
 			local relativeX = mouse.X - sliderBack.AbsolutePosition.X
 			local percent = math.clamp(relativeX / sliderBack.AbsoluteSize.X, 0, 1)
 			
-			sliderButton.Position = UDim2.new(percent, -8, 0.5, -8)
+			sliderButton.Position = UDim2.new(percent, -9, 0.5, -9)
 			
 			local value = min + (max - min) * percent
 			valueLabel.Text = string.format("%.2f", value)
+			designerState.paramValues[paramName] = value
 		end
 	end)
 	
-	return frame
-end
-
-function createCheckbox(parent: Instance, label: string, default: boolean, order: number): Frame
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 30)
-	frame.BackgroundTransparency = 1
-	frame.LayoutOrder = order
-	frame.Parent = parent
-	
-	local checkbox = Instance.new("TextButton")
-	checkbox.Size = UDim2.new(0, 20, 0, 20)
-	checkbox.Position = UDim2.new(0, 5, 0.5, -10)
-	checkbox.BackgroundColor3 = default and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(50, 50, 50)
-	checkbox.Text = default and "✓" or ""
-	checkbox.TextColor3 = Color3.new(1, 1, 1)
-	checkbox.TextScaled = true
-	checkbox.Font = Enum.Font.SourceSansBold
-	checkbox.Parent = frame
-	
-	local labelObj = Instance.new("TextLabel")
-	labelObj.Size = UDim2.new(1, -35, 1, 0)
-	labelObj.Position = UDim2.new(0, 30, 0, 0)
-	labelObj.BackgroundTransparency = 1
-	labelObj.Text = label
-	labelObj.TextColor3 = Color3.fromRGB(180, 180, 180)
-	labelObj.TextScaled = true
-	labelObj.TextXAlignment = Enum.TextXAlignment.Left
-	labelObj.Font = Enum.Font.SourceSans
-	labelObj.Parent = frame
-	
-	checkbox.MouseButton1Click:Connect(function()
-		local checked = checkbox.Text == ""
-		checkbox.Text = checked and "✓" or ""
-		checkbox.BackgroundColor3 = checked and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(50, 50, 50)
+	-- Lock button
+	lockButton.MouseButton1Click:Connect(function()
+		designerState.paramLocked[paramName] = not designerState.paramLocked[paramName]
+		lockButton.Text = designerState.paramLocked[paramName] and "🔒" or "🔓"
+		lockButton.BackgroundColor3 = designerState.paramLocked[paramName] and Color3.fromRGB(100, 60, 60) or Color3.fromRGB(60, 60, 60)
 	end)
 	
 	return frame
 end
 
-function createDropdown(parent: Instance, label: string, options: {string}, default: string, order: number): Frame
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 30)
-	frame.BackgroundTransparency = 1
-	frame.LayoutOrder = order
-	frame.Parent = parent
+-- Update content based on mode
+function updateContent(contentFrame: ScrollingFrame)
+	for _, child in ipairs(contentFrame:GetChildren()) do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
 	
-	local labelObj = Instance.new("TextLabel")
-	labelObj.Size = UDim2.new(0.4, 0, 1, 0)
-	labelObj.BackgroundTransparency = 1
-	labelObj.Text = label
-	labelObj.TextColor3 = Color3.fromRGB(180, 180, 180)
-	labelObj.TextScaled = true
-	labelObj.TextXAlignment = Enum.TextXAlignment.Left
-	labelObj.Font = Enum.Font.SourceSans
-	labelObj.Parent = frame
-	
-	local dropdown = Instance.new("TextButton")
-	dropdown.Size = UDim2.new(0.6, -5, 1, 0)
-	dropdown.Position = UDim2.new(0.4, 5, 0, 0)
-	dropdown.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	dropdown.BorderSizePixel = 0
-	dropdown.Text = default
-	dropdown.TextColor3 = Color3.new(1, 1, 1)
-	dropdown.TextScaled = true
-	dropdown.Font = Enum.Font.SourceSans
-	dropdown.Parent = frame
-	
-	-- Dropdown would expand on click (simplified for now)
-	dropdown.MouseButton1Click:Connect(function()
-		-- Cycle through options
-		local currentIndex = table.find(options, dropdown.Text) or 1
-		local nextIndex = (currentIndex % #options) + 1
-		dropdown.Text = options[nextIndex]
-		designerState.selectedArchetype = options[nextIndex]
-	end)
-	
-	return frame
+	createLampControls(contentFrame)
 end
 
-function createCurveControl(parent: Instance, label: string, curve: Types.Curve, order: number): Frame
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 60)
-	frame.BackgroundTransparency = 1
-	frame.LayoutOrder = order
-	frame.Parent = parent
+-- Create lamp mode controls (FIXED)
+function createLampControls(parent: ScrollingFrame)
+	-- Seed display
+	local seedFrame = Instance.new("Frame")
+	seedFrame.Size = UDim2.new(1, -10, 0, 30)
+	seedFrame.BackgroundTransparency = 1
+	seedFrame.LayoutOrder = 0
+	seedFrame.Parent = parent
 	
-	local labelObj = Instance.new("TextLabel")
-	labelObj.Size = UDim2.new(1, 0, 0, 20)
-	labelObj.BackgroundTransparency = 1
-	labelObj.Text = label
-	labelObj.TextColor3 = Color3.fromRGB(180, 180, 180)
-	labelObj.TextScaled = true
-	labelObj.TextXAlignment = Enum.TextXAlignment.Left
-	labelObj.Font = Enum.Font.SourceSansBold
-	labelObj.Parent = frame
+	local seedLabel = Instance.new("TextLabel")
+	seedLabel.Name = "SeedDisplay"
+	seedLabel.Size = UDim2.new(1, 0, 1, 0)
+	seedLabel.BackgroundTransparency = 1
+	seedLabel.Text = "Seed: " .. designerState.currentSeed
+	seedLabel.TextColor3 = Color3.fromRGB(150, 150, 255)
+	seedLabel.TextSize = 14
+	seedLabel.Font = Enum.Font.SourceSansBold
+	seedLabel.TextXAlignment = Enum.TextXAlignment.Left
+	seedLabel.Parent = seedFrame
 	
-	-- Mu slider
-	local muSlider = createSlider(frame, "μ:", curve.lo, curve.hi, curve.mu, 1)
-	muSlider.Position = UDim2.new(0, 0, 0, 20)
-	muSlider.Size = UDim2.new(0.5, -5, 0, 40)
+	-- Archetype selector
+	createRealDropdown(parent, "Archetype:", 
+		{"CommonA", "OrnateB", "TestSpiral"}, 
+		designerState.selectedArchetype, 
+		1,
+		function(archetype)
+			designerState.selectedArchetype = archetype
+			print("Archetype:", archetype)
+		end
+	)
 	
-	-- Sigma slider
-	local sigmaSlider = createSlider(frame, "σ:", 0, (curve.hi - curve.lo) / 4, curve.sigma, 2)
-	sigmaSlider.Position = UDim2.new(0.5, 5, 0, 20)
-	sigmaSlider.Size = UDim2.new(0.5, -5, 0, 40)
+	-- Style selector
+	createRealDropdown(parent, "Style:", 
+		{"straight", "scurve", "planar_spiral", "helix"}, 
+		designerState.selectedStyle, 
+		2,
+		function(newStyle)
+			designerState.selectedStyle = newStyle
+			print("Style changed to:", newStyle)
+			updateContent(parent)
+		end
+	)
 	
-	return frame
+	-- Params
+	createParamControl(parent, "height", "Height:", 8, 20, 12, 3)
+	createParamControl(parent, "bend_deg", "Bend (deg):", 0, 60, 15, 4)
+	createParamControl(parent, "twist_deg", "Twist (deg):", 0, 360, 0, 5)
+	createParamControl(parent, "tip_drop", "Tip Drop:", 0, 0.5, 0.2, 6)
+	createParamControl(parent, "arm_len", "Arm Length:", 1, 4, 1.8, 7)
+	createParamControl(parent, "lantern_tilt", "Lantern Tilt:", -45, 45, 5, 8)
+	createParamControl(parent, "lantern_yaw", "Lantern Yaw:", -90, 90, 0, 9)
+	createParamControl(parent, "head_scale", "Head Scale:", 0.5, 2, 1.0, 10)
+	createParamControl(parent, "base_scale", "Base Scale:", 0.5, 2, 1.0, 11)
+	createParamControl(parent, "paint_wear", "Paint Wear:", 0, 1, 0.3, 12)
 end
 
 -- Hotkey handling
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	
-	if input.KeyCode == Enum.KeyCode.B and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then
-		-- Alt+B: Save Branch
-		if designerState.mode == "branch" and designerState.currentBranch then
-			saveBranchToSession(designerState.currentBranch)
-		end
-		
-	elseif input.KeyCode == Enum.KeyCode.L and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then
-		-- Alt+L: Save Lamp
-		if designerState.mode == "lamp" and designerState.currentLamp then
-			saveLampToSession(designerState.currentLamp)
-		end
-		
-	elseif input.KeyCode == Enum.KeyCode.R and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then
-		-- Alt+R: Reroll Pose channel
-		print("Reroll pose parameters")
-		
-	elseif input.KeyCode == Enum.KeyCode.D and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then
-		-- Alt+D: Toggle designer visibility
+	local isAltDown = UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
+	
+	if isAltDown and input.KeyCode == Enum.KeyCode.D then
 		designerState.visible = not designerState.visible
 		if designerUI then
 			designerUI.Enabled = designerState.visible
@@ -727,29 +627,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- Clean up on stop
-RunService:BindToRenderStep("LanternDesignerCleanup", Enum.RenderPriority.Last.Value, function()
-	if not RunService:IsRunning() then
-		local sessionFolder = workspace:FindFirstChild("__LanternDesignerSession")
-		if sessionFolder then
-			sessionFolder:Destroy()
-		end
-		RunService:UnbindFromRenderStep("LanternDesignerCleanup")
-	end
-end)
-
 -- Initialize
 local designerUI = createDesignerUI()
 loadSession()
 
--- Watch for attribute changes to toggle UI
-player:GetAttributeChangedSignal("LanternDesignerEnabled"):Connect(function()
-	local enabled = player:GetAttribute("LanternDesignerEnabled")
-	if enabled ~= nil then
-		designerState.visible = enabled
-		designerUI.Enabled = enabled
-	end
-end)
-
-print("Lantern Designer initialized (Studio only)")
-print("Hotkeys: Alt+B (Save Branch), Alt+L (Save Lamp), Alt+R (Reroll), Alt+D (Toggle UI)")
+print("✅ Lantern Designer initialized (Studio only)")
+print("📋 Hotkey: Alt+D (Toggle UI)")
+print("🎲 Use 'Reroll' button to generate new seed for entire lantern")

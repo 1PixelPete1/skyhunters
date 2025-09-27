@@ -1,6 +1,6 @@
 --!strict
 -- LanternFactory.luau
--- Main assembly module for dynamic lanterns
+-- Main assembly module for dynamic lanterns (FIXED)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -16,7 +16,7 @@ local BranchBuilder = require(script.Parent:WaitForChild("BranchBuilder"))
 local LanternFactory = {}
 
 -- Constants
-local POLE_OVERLAP = 0.02  -- Small overlap to hide seams
+local POLE_OVERLAP = 0.02  -- Small overlap to hide seams (epsilon overlap)
 local SOCKET_POSITIONS = {
 	S1 = 0.45,  -- 45% up the pole
 	S2 = 0.80,  -- 80% up the pole
@@ -68,10 +68,12 @@ local function resolveParam(spec: Types.ParamSpec, slicer: BitSlicer.BitSlicer):
 	end
 end
 
--- Create a cylinder segment for the pole
+-- Create a cylinder segment for the pole (FIXED: tangent-aligned)
 local function createPoleSegment(
 	startPos: Vector3,
 	endPos: Vector3,
+	startFrame: FrameTransport.Frame,
+	endFrame: FrameTransport.Frame,
 	radius: number,
 	color: Color3?
 ): Part
@@ -82,24 +84,30 @@ local function createPoleSegment(
 	segment.Material = Enum.Material.Wood
 	segment.Color = color or Color3.fromRGB(92, 64, 51)
 	
-	-- Calculate dimensions
+	-- Calculate dimensions with epsilon overlap
 	local length = (endPos - startPos).Magnitude + POLE_OVERLAP
 	local midpoint = (startPos + endPos) / 2
-	local direction = (endPos - startPos).Unit
 	
-	-- Set size (cylinder along Y axis)
+	-- Use tangent from midpoint frame for proper orientation
+	local midTangent = (startFrame.forward + endFrame.forward).Unit
+	
+	-- Set size (cylinder)
 	segment.Shape = Enum.PartType.Cylinder
 	segment.Size = Vector3.new(length, radius * 2, radius * 2)
 	
-	-- Orient cylinder
-	local cf = CFrame.lookAt(midpoint, midpoint + direction)
-	-- Rotate 90 degrees to align cylinder axis with direction
-	segment.CFrame = cf * CFrame.Angles(0, math.pi/2, 0)
+	-- Orient cylinder along tangent
+	-- Cylinder's long axis is X, so we create CFrame with tangent as right vector
+	local up = (startFrame.up + endFrame.up).Unit
+	local right = midTangent
+	local forward = right:Cross(up).Unit
+	up = forward:Cross(right).Unit
+	
+	segment.CFrame = CFrame.fromMatrix(midpoint, right, up, forward)
 	
 	return segment
 end
 
--- Build the pole from curve samples
+-- Build the pole from curve samples (FIXED)
 local function buildPole(
 	samples: {CurveEval.Sample},
 	frames: {FrameTransport.Frame},
@@ -108,16 +116,18 @@ local function buildPole(
 	local poleModel = Instance.new("Model")
 	poleModel.Name = "Pole"
 	
-	-- Create segments between consecutive samples
+	-- Create segments between consecutive samples, using frame orientation
 	for i = 2, #samples do
 		local startPos = samples[i-1].p
 		local endPos = samples[i].p
+		local startFrame = frames[i-1]
+		local endFrame = frames[i]
 		
-		local segment = createPoleSegment(startPos, endPos, radius)
+		local segment = createPoleSegment(startPos, endPos, startFrame, endFrame, radius)
 		segment.Parent = poleModel
 	end
 	
-	-- Add socket attachments
+	-- Add socket attachments using proper frame transforms
 	local sockets = FrameTransport.getSocketFrames(frames, SOCKET_POSITIONS)
 	
 	for name, frame in pairs(sockets) do
@@ -153,7 +163,7 @@ local function loadPrefab(kitPath: string, prefabName: string): Model?
 	return prefab:Clone()
 end
 
--- Main assembly function
+-- Main assembly function (FIXED)
 function LanternFactory.assembleLantern(
 	plotId: string,
 	position: Vector3,
@@ -185,18 +195,21 @@ function LanternFactory.assembleLantern(
 		paint_wear = resolveParam(archetype.paint_wear, slicer),
 	}
 	
-	-- Pick style
+	-- Pick style (FIXED: style_weights only in runtime, not designer)
 	local style = slicer:weightedChoice(archetype.style_weights) or "straight"
 	
 	-- Create root model
 	local lanternModel = Instance.new("Model")
 	lanternModel.Name = "DynamicLantern"
 	
-	-- Store attributes for debugging
+	-- FIXED: Store attributes for debugging (seed + resolved params)
 	lanternModel:SetAttribute("Seed", seed)
 	lanternModel:SetAttribute("Archetype", archetypeName)
 	lanternModel:SetAttribute("Style", style)
 	lanternModel:SetAttribute("Height", params.height)
+	lanternModel:SetAttribute("BendDeg", params.bend_deg)
+	lanternModel:SetAttribute("TwistDeg", params.twist_deg)
+	lanternModel:SetAttribute("TipDrop", params.tip_drop)
 	
 	-- Generate curve
 	local curveFn = CurveEval.getCurveFunction(style)
@@ -205,9 +218,10 @@ function LanternFactory.assembleLantern(
 		curveFn = CurveEval.straight
 	end
 	
+	-- FIXED: twist_deg is ONLY for curve plane yaw, not other rotations
 	local curveOpts = {
 		bend_deg = params.bend_deg,
-		twist_deg = params.twist_deg,
+		twist_deg = params.twist_deg,  -- Curve plane rotation only
 		tip_drop = params.tip_drop
 	}
 	
@@ -215,11 +229,11 @@ function LanternFactory.assembleLantern(
 	local maxSegments = getMaxSegments()
 	local samples = CurveEval.evalAdaptive(curveFn, params.height, curveOpts, 0.08, 3, maxSegments)
 	
-	-- Build frames
+	-- FIXED: Build frames with proper parallel transport
 	local frames = FrameTransport.buildFrames(samples)
 	
 	-- Build pole
-	local pole = buildPole(samples, frames, 0.15)  -- Default radius
+	local pole = buildPole(samples, frames, 0.15)
 	pole.Parent = lanternModel
 	
 	-- Pick and place base
@@ -261,7 +275,7 @@ function LanternFactory.assembleLantern(
 		end
 	end
 	
-	-- Build branches
+	-- Build branches (FIXED context)
 	if archetype.branches then
 		local poleKit = ReplicatedStorage:FindFirstChild("LanternKit"):FindFirstChild("Pole")
 		local headKit = ReplicatedStorage:FindFirstChild("LanternKit"):FindFirstChild("Head")
@@ -274,7 +288,8 @@ function LanternFactory.assembleLantern(
 			limits = archetype.branches.limits,
 			poleKit = poleKit,
 			headKit = headKit,
-			decorKit = decorKit
+			decorKit = decorKit,
+			parentSegmentLength = params.height / #samples  -- Add parent segment length estimate
 		}
 		
 		BranchBuilder.buildBranches(lanternModel, archetype.branches, ctx)
@@ -288,7 +303,7 @@ function LanternFactory.assembleLantern(
 			head.Name = "Head"
 			head:ScaleTo(params.head_scale)
 			
-			-- Get tip frame
+			-- Get tip frame (FIXED: use proper frame not just position)
 			local tipFrame = frames[#frames]
 			local tipCFrame = FrameTransport.cframeFrom(tipFrame)
 			

@@ -1,5 +1,5 @@
 --!strict
--- RotatingWindSprites.luau  
+-- RotatingWindSprites.luau (FIXED - simple camera following, no complex adjustments)
 -- Proper rotating wind sprite system with wind-aligned semicircles
 
 local Workspace = game:GetService("Workspace")
@@ -15,14 +15,12 @@ type WindSprite = {
     part: BasePart,
     billboard: BillboardGui,
     image: ImageLabel,
-    angle: number,       -- Current angle around the circle
-    targetAngle: number, -- Target angle to rotate towards
+    angle: number,
     radius: number,
-    height: number,
+    heightOffset: number,  -- Fixed offset from camera
     speed: number,
     opacity: number,
-    fadeState: "in" | "out" | "visible",
-    semicircle: number, -- Which semicircle: 1 or 2
+    semicircle: number,
 }
 
 local RotatingWindSprites = {}
@@ -37,23 +35,23 @@ function RotatingWindSprites.new(_perfConfig: PerfConfig?, _perfTier: StormTypes
     
     self.Sprites = {} :: {WindSprite}
     self.Enabled = true
-    self.WindAngle = 0 -- Current wind direction angle
+    self.WindAngle = 0
     
     -- Configuration
     self.Config = {
-        spritesPerSemicircle = 8,  -- Number of sprites per half circle
-        radius = 15,                -- Closer to camera
-        minHeight = -3,
-        maxHeight = 8,
-        spriteSize = 80,            -- Much larger sprites
-        baseSpeed = 0.5,            -- Rotation speed
+        spritesPerSemicircle = 8,
+        radius = 15,
+        minHeightOffset = -3,  -- Offset from camera, not absolute height
+        maxHeightOffset = 8,
+        spriteSize = 80,
+        baseSpeed = 0.5,
         baseAlpha = 0.4,
-        fadeZoneAngle = 30,         -- Degrees from meeting point to start fading
+        fadeZoneAngle = 30,
     }
     
     self:CreateSprites()
     
-    print("[RotatingWindSprites] Enhanced wind system initialized")
+    print("[RotatingWindSprites] Simplified camera-following wind system initialized")
     
     return self
 end
@@ -62,11 +60,11 @@ function RotatingWindSprites:CreateSprites()
     -- Create two semicircles of sprites
     for semicircle = 1, 2 do
         for i = 1, self.Config.spritesPerSemicircle do
-            -- Calculate base angle for this sprite in its semicircle
+            -- Calculate base angle
             local angleInSemicircle = (i - 1) / self.Config.spritesPerSemicircle * math.pi
             local baseAngle = angleInSemicircle + (semicircle - 1) * math.pi
             
-            -- Create the sprite part (just an anchor point)
+            -- Create sprite part
             local part = Instance.new("Part")
             part.Name = string.format("WindSprite_S%d_%d", semicircle, i)
             part.Anchored = true
@@ -75,10 +73,10 @@ function RotatingWindSprites:CreateSprites()
             part.CanTouch = false
             part.Transparency = 1
             part.Size = Vector3.new(0.1, 0.1, 0.1)
-            part.CastShadow = false -- No shadows from wind sprites
+            part.CastShadow = false
             part.Parent = self.Container
             
-            -- Create billboard with large gust sprite
+            -- Create billboard
             local billboard = Instance.new("BillboardGui")
             billboard.Name = "WindSpriteBillboard"
             billboard.Adornee = part
@@ -97,11 +95,11 @@ function RotatingWindSprites:CreateSprites()
             imageLabel.ScaleType = Enum.ScaleType.Stretch
             imageLabel.Parent = billboard
             
-            -- Vary height for each sprite with some randomness
-            local heightOffset = self.Config.minHeight + 
-                               (self.Config.maxHeight - self.Config.minHeight) * ((i - 1) / self.Config.spritesPerSemicircle)
+            -- SIMPLE: Just a fixed offset from camera for each sprite
+            local heightOffset = self.Config.minHeightOffset + 
+                               (self.Config.maxHeightOffset - self.Config.minHeightOffset) * ((i - 1) / self.Config.spritesPerSemicircle)
             
-            -- Add subtle variation to make it less uniform
+            -- Add some variation
             heightOffset = heightOffset + math.sin(i * 1.7) * 1.5
             
             local sprite: WindSprite = {
@@ -109,12 +107,10 @@ function RotatingWindSprites:CreateSprites()
                 billboard = billboard,
                 image = imageLabel,
                 angle = baseAngle,
-                targetAngle = baseAngle,
-                radius = self.Config.radius + (i % 2) * 3 + math.sin(i * 2.3) * 2, -- More radius variation
-                height = heightOffset,
-                speed = self.Config.baseSpeed * (0.9 + math.random() * 0.2), -- Slight speed variation
+                radius = self.Config.radius + (i % 2) * 3 + math.sin(i * 2.3) * 2,
+                heightOffset = heightOffset,  -- FIXED offset from camera
+                speed = self.Config.baseSpeed * (0.9 + math.random() * 0.2),
                 opacity = self.Config.baseAlpha,
-                fadeState = "visible",
                 semicircle = semicircle,
             }
             
@@ -130,92 +126,68 @@ function RotatingWindSprites:Update(state: StormState, _conePose, _forbidden, la
     if not camera then return end
     
     local delta = dt or (1/60)
-    local cameraPos = camera.CFrame.Position
+    local cameraPos = camera.CFrame.Position  -- SIMPLE: Just use camera position directly
     local intensity = state.intensity
     
     -- Calculate wind direction angle
     local windDir = state.vector.Magnitude > 0.01 and state.vector.Unit or Vector3.new(0.3, 0, -0.8).Unit
     self.WindAngle = math.atan2(windDir.Z, windDir.X)
     
-    -- The semicircles should meet at points perpendicular to wind direction
-    -- Meeting points are at windAngle + π/2 and windAngle - π/2
+    -- Meeting points perpendicular to wind
     local meetPoint1 = self.WindAngle + math.pi/2
     local meetPoint2 = self.WindAngle - math.pi/2
     
-    -- Update each sprite
+    -- SIMPLE: Update each sprite with minimal calculations
     for _, sprite in ipairs(self.Sprites) do
-        -- Determine the semicircle's rotation direction and meeting points
-        local startMeet, endMeet
-        if sprite.semicircle == 1 then
-            startMeet = meetPoint1
-            endMeet = meetPoint2
-        else
-            startMeet = meetPoint2
-            endMeet = meetPoint1
-        end
-        
-        -- Normalize angles to 0-2π
-        local normalizeAngle = function(angle)
-            while angle < 0 do angle = angle + math.pi * 2 end
-            while angle >= math.pi * 2 do angle = angle - math.pi * 2 end
-            return angle
-        end
-        
-        sprite.angle = normalizeAngle(sprite.angle)
-        startMeet = normalizeAngle(startMeet)
-        endMeet = normalizeAngle(endMeet)
-        
-        -- Rotate the sprite
+        -- Rotate sprite
         sprite.angle = sprite.angle + sprite.speed * delta * intensity
-        sprite.angle = normalizeAngle(sprite.angle)
         
-        -- Check if sprite is near meeting points for fading
+        -- Normalize angle (keep between 0 and 2π)
+        while sprite.angle < 0 do sprite.angle = sprite.angle + math.pi * 2 end
+        while sprite.angle >= math.pi * 2 do sprite.angle = sprite.angle - math.pi * 2 end
+        
+        -- SIMPLE: Calculate fade based on distance to meeting point
+        local targetMeet = sprite.semicircle == 1 and meetPoint2 or meetPoint1
+        
+        -- Normalize target meet
+        while targetMeet < 0 do targetMeet = targetMeet + math.pi * 2 end
+        while targetMeet >= math.pi * 2 do targetMeet = targetMeet - math.pi * 2 end
+        
+        local angleDiff = math.abs(sprite.angle - targetMeet)
+        if angleDiff > math.pi then angleDiff = math.pi * 2 - angleDiff end
+        
+        -- Simple fade zone
         local fadeZoneRad = math.rad(self.Config.fadeZoneAngle)
-        local distToEnd = math.abs(sprite.angle - endMeet)
-        if distToEnd > math.pi then distToEnd = math.pi * 2 - distToEnd end
-        
-        -- Handle fading and respawning
-        if distToEnd < fadeZoneRad then
-            -- Approaching end meeting point - fade out
-            sprite.fadeState = "out"
-            sprite.opacity = self.Config.baseAlpha * (distToEnd / fadeZoneRad)
-        elseif sprite.fadeState == "out" and distToEnd > fadeZoneRad then
-            -- Respawn at start meeting point
-            sprite.angle = startMeet
-            sprite.fadeState = "in"
-            sprite.opacity = 0
-        elseif sprite.fadeState == "in" then
-            -- Fading in after respawn
-            local distFromStart = math.abs(sprite.angle - startMeet)
-            if distFromStart > math.pi then distFromStart = math.pi * 2 - distFromStart end
+        local alpha = self.Config.baseAlpha
+        if angleDiff < fadeZoneRad then
+            alpha = self.Config.baseAlpha * (angleDiff / fadeZoneRad)
             
-            if distFromStart < fadeZoneRad then
-                sprite.opacity = self.Config.baseAlpha * (distFromStart / fadeZoneRad)
-            else
-                sprite.fadeState = "visible"
-                sprite.opacity = self.Config.baseAlpha
+            -- Respawn at opposite meeting point when fully faded
+            if angleDiff < fadeZoneRad * 0.1 then
+                local startMeet = sprite.semicircle == 1 and meetPoint1 or meetPoint2
+                while startMeet < 0 do startMeet = startMeet + math.pi * 2 end
+                while startMeet >= math.pi * 2 do startMeet = startMeet - math.pi * 2 end
+                sprite.angle = startMeet
+                alpha = 0
             end
-        else
-            sprite.fadeState = "visible"
-            sprite.opacity = self.Config.baseAlpha
         end
         
-        -- Calculate world position
+        -- SIMPLE: Calculate position directly from camera position (no complex adjustments!)
         local x = math.cos(sprite.angle) * sprite.radius
         local z = math.sin(sprite.angle) * sprite.radius
-        local position = cameraPos + Vector3.new(x, sprite.height, z)
+        local position = cameraPos + Vector3.new(x, sprite.heightOffset, z)  -- Direct addition, no smoothing
         
         sprite.part.CFrame = CFrame.new(position)
         
-        -- Apply transparency with intensity and lantern modulation
-        local alpha = sprite.opacity * intensity
+        -- Apply transparency
+        local finalAlpha = alpha * intensity
         if lanternEnabled then
-            alpha *= 0.3 -- Reduce visibility with lantern
+            finalAlpha = finalAlpha * 0.3
         end
         
-        sprite.image.ImageTransparency = 1 - alpha
+        sprite.image.ImageTransparency = 1 - finalAlpha
         
-        -- Scale sprites based on distance and intensity
+        -- Scale based on intensity
         local sizeMult = 0.8 + intensity * 0.4
         sprite.billboard.Size = UDim2.fromOffset(
             self.Config.spriteSize * 10 * sizeMult,
