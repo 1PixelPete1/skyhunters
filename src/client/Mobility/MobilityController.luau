@@ -44,6 +44,38 @@ MobilityController.__index = MobilityController
 
 local LocalPlayer = Players.LocalPlayer
 
+local DEBUG_CHANNELS = {
+	boot = false,
+	init = false,
+	character = false,
+	input = false,
+	ability = false,
+	net = false,
+	ui = false,
+	effects = false,
+	cleanup = false,
+}
+
+local function debugLog(channel: string, ...)
+	if not DEBUG_CHANNELS[channel] then
+		return
+	end
+	print(('[Diag][Mobility][%s]'):format(channel), ...)
+end
+
+function MobilityController.SetDebugChannel(channel: string, enabled: boolean)
+	if DEBUG_CHANNELS[channel] == nil then
+		return
+	end
+	DEBUG_CHANNELS[channel] = enabled and true or false
+end
+
+function MobilityController.SetDebugChannels(map: {[string]: boolean})
+	for channel, enabled in pairs(map) do
+		MobilityController.SetDebugChannel(channel, enabled)
+	end
+end
+
 function MobilityController.new()
 	local self = setmetatable({}, MobilityController)
 	
@@ -66,14 +98,11 @@ function MobilityController.new()
 	-- Connection tracking for cleanup
 	self.Connections = {}
 	
-	-- Debug flags
-	self.DebugEnabled = true
-	
 	return self
 end
 
 function MobilityController:Init()
-	print("[MobilityController] Initializing...")
+	debugLog("init", "Initializing")
 	
 	-- Check if Net loaded
 	if not Net then
@@ -88,14 +117,14 @@ function MobilityController:Init()
 	
 	-- Store character added connection for cleanup
 	self.Connections.CharacterAdded = LocalPlayer.CharacterAdded:Connect(function(character)
-		print("[MobilityController] Character added")
+		debugLog("character", "Character added", character:GetFullName())
 		self:Cleanup() -- Clean up previous character state
 		self:OnCharacterAdded(character)
 	end)
-	
+
 	-- Handle character removing for cleanup
 	self.Connections.CharacterRemoving = LocalPlayer.CharacterRemoving:Connect(function(character)
-		print("[MobilityController] Character removing - cleaning up")
+		debugLog("character", "Character removing", character:GetFullName())
 		self:OnCharacterRemoving(character)
 	end)
 	
@@ -105,11 +134,11 @@ function MobilityController:Init()
 	-- Setup input handlers
 	self:SetupInput()
 	
-	print("[MobilityController] Initialized successfully")
+	debugLog("init", "Initialized")
 end
 
 function MobilityController:OnCharacterAdded(character: Model)
-	print("[MobilityController] Setting up character:", character)
+	debugLog("character", "Setting up character", character:GetFullName())
 	
 	self.Character = character
 	self.Humanoid = character:WaitForChild("Humanoid", 5)
@@ -126,10 +155,10 @@ function MobilityController:OnCharacterAdded(character: Model)
 	local camera = Workspace.CurrentCamera
 	if camera then
 		self.OriginalFOV = camera.FieldOfView
-		print("[MobilityController] Stored original FOV:", self.OriginalFOV)
+		debugLog("character", "Stored original FOV", self.OriginalFOV)
 	end
 	
-	print("[MobilityController] Character components found - Humanoid:", self.Humanoid, "HRP:", self.HumanoidRootPart)
+	debugLog("character", "Character components ready", self.Humanoid, self.HumanoidRootPart)
 	
 	-- Reset jump count on landing (store connection for cleanup)
 	if self.Connections.HumanoidStateChanged then
@@ -137,21 +166,15 @@ function MobilityController:OnCharacterAdded(character: Model)
 	end
 	
 	self.Connections.HumanoidStateChanged = self.Humanoid.StateChanged:Connect(function(old, new)
-		if self.DebugEnabled then
-			print("[MobilityController] Humanoid state changed:", old, "->", new)
-		end
+		debugLog("character", "Humanoid state", old, "->", new)
 		
 		if new == Enum.HumanoidStateType.Landed or new == Enum.HumanoidStateType.Running then
 			self.JumpCount = 0
-			if self.DebugEnabled then
-				print("[MobilityController] Jump count reset to 0")
-			end
+			debugLog("character", "Jump count reset")
 		elseif new == Enum.HumanoidStateType.Freefall then
 			if tick() - self.LastLeapTime > 0.1 then -- Not from our leap
 				self.JumpCount = 1 -- Regular jump counts as first jump
-				if self.DebugEnabled then
-					print("[MobilityController] Jump count set to 1 (regular jump)")
-				end
+				debugLog("character", "Jump count set for regular jump")
 			end
 		end
 	end)
@@ -159,7 +182,7 @@ function MobilityController:OnCharacterAdded(character: Model)
 	-- Initialize UI
 	if self.UI then
 		self.UI:SetupForCharacter(character)
-		print("[MobilityController] UI setup complete")
+		debugLog("ui", "UI setup complete")
 	else
 		warn("[MobilityController] UI module not available")
 	end
@@ -167,7 +190,7 @@ function MobilityController:OnCharacterAdded(character: Model)
 	-- Set default state if not received from server
 	task.wait(1)
 	if not self.State then
-		print("[MobilityController] No state from server - using default state")
+		debugLog("init", "Applying default mobility state")
 		self.State = {
 			Leap = {
 				LastUsed = 0,
@@ -193,7 +216,7 @@ function MobilityController:OnCharacterAdded(character: Model)
 end
 
 function MobilityController:OnCharacterRemoving(character: Model)
-	print("[MobilityController] Character removing - performing cleanup")
+	debugLog("character", "Character removing cleanup", character:GetFullName())
 	
 	-- Cancel all active FOV tweens
 	for _, tween in pairs(self.ActiveFOVTweens) do
@@ -207,7 +230,7 @@ function MobilityController:OnCharacterRemoving(character: Model)
 	local camera = Workspace.CurrentCamera
 	if camera then
 		camera.FieldOfView = self.OriginalFOV
-		print("[MobilityController] Reset FOV to:", self.OriginalFOV)
+		debugLog("character", "Reset FOV", self.OriginalFOV)
 	end
 	
 	-- Clean up connections
@@ -230,26 +253,65 @@ function MobilityController:OnCharacterRemoving(character: Model)
 end
 
 function MobilityController:SetupNetworking()
-	print("[MobilityController] Setting up networking...")
-	
+	debugLog("net", "Setting up networking")
+
 	if not Net then
 		warn("[MobilityController] Net not available - skipping networking setup")
 		return
 	end
-	
+
+	local netRoot = ReplicatedStorage:FindFirstChild("Net")
+	if not netRoot then
+		netRoot = ReplicatedStorage:WaitForChild("Net", 5)
+	end
+	if not netRoot then
+		warn("[MobilityController] Net folder missing; cannot bind remotes")
+		return
+	end
+
+	local remotesFolder = netRoot:FindFirstChild("Remotes") or netRoot:WaitForChild("Remotes", 5)
+	if not remotesFolder then
+		warn("[MobilityController] Net remotes folder missing; cannot bind remotes")
+		return
+	end
+
+	local requiredRemotes = {
+		"MobilityRequest",
+		"MobilityResponse",
+		"MobilityStateSync",
+		"MobilityEffects",
+	}
+
+	for _, remoteName in ipairs(requiredRemotes) do
+		if not remotesFolder:FindFirstChild(remoteName) then
+			local remote = remotesFolder:WaitForChild(remoteName, 5)
+			if not remote then
+				warn(string.format("[MobilityController] Remote '%s' not found; networking disabled", remoteName))
+				return
+			end
+		end
+	end
+
 	-- Handle server responses
 	local success = pcall(function()
 		Net.On("MobilityResponse", function(response)
-			print("[MobilityController] Received MobilityResponse:", response)
+			debugLog("net", "MobilityResponse", response)
 			self:HandleServerResponse(response)
 		end)
 		
 		-- Handle state sync
 		Net.On("MobilityStateSync", function(state)
-			print("[MobilityController] Received state sync")
+			debugLog("net", "State sync received")
 			if state and state.Leap and state.Dash then
-				print("  Leap charges:", state.Leap.ChargesRemaining, "Cooldown:", state.Leap.IsOnCooldown)
-				print("  Dash cooldown:", state.Dash.IsOnCooldown)
+				debugLog(
+					"net",
+					string.format(
+						"Leap charges=%d cooldown=%s Dash cooldown=%s",
+						state.Leap.ChargesRemaining,
+						tostring(state.Leap.IsOnCooldown),
+						tostring(state.Dash.IsOnCooldown)
+					)
+				)
 				self.State = state
 				self:UpdateUI()
 			else
@@ -260,21 +322,21 @@ function MobilityController:SetupNetworking()
 		-- Handle effects from other players
 		Net.On("MobilityEffects", function(player, effectData)
 			if player ~= LocalPlayer and self.Effects then
-				print("[MobilityController] Playing effect from other player:", player.Name)
+				debugLog("effects", "Remote effect", player.Name)
 				self.Effects:PlayEffect(effectData)
 			end
 		end)
 	end)
 	
 	if success then
-		print("[MobilityController] Networking setup complete")
+		debugLog("net", "Networking ready")
 	else
 		warn("[MobilityController] Failed to setup networking")
 	end
 end
 
 function MobilityController:SetupInput()
-	print("[MobilityController] Setting up input handlers...")
+	debugLog("input", "Setting up input handlers")
 
 	self.Connections.JumpRequest = UserInputService.JumpRequest:Connect(function()
 		if not self.JumpRequestArmed then
@@ -282,41 +344,42 @@ function MobilityController:SetupInput()
 		end
 		self.JumpRequestArmed = false
 
-		print("[MobilityController] Jump request received")
-		print("  Jump count:", self.JumpCount)
-		print("  State exists:", self.State ~= nil)
+		debugLog(
+			"input",
+			string.format("Jump request count=%d hasState=%s", self.JumpCount, tostring(self.State ~= nil))
+		)
 
 		if not self.Humanoid then
-			print("[MobilityController] No humanoid available; skipping leap")
+			debugLog("ability", "Leap aborted: no humanoid")
 			return
 		end
 
 		local humanoidState = self.Humanoid:GetState()
 		local isAirborne = humanoidState == Enum.HumanoidStateType.Freefall
 			or humanoidState == Enum.HumanoidStateType.FallingDown
-		print("  Humanoid state:", humanoidState)
+		debugLog("input", "Humanoid state", humanoidState)
 
 		if self.JumpCount >= 1 and isAirborne then
 			local canLeap = true
 
 			if self.State and self.State.Leap then
 				canLeap = self.State.Leap.ChargesRemaining > 0
-				print("  Leap charges:", self.State.Leap.ChargesRemaining)
+				debugLog("ability", string.format("Leap charges=%d", self.State.Leap.ChargesRemaining))
 			else
-				print("  No state - attempting leap anyway")
+				debugLog("ability", "No server state; attempting leap")
 			end
 
 			if canLeap then
-				print("[MobilityController] Conditions met for leap - performing leap")
+				debugLog("ability", "Leap conditions met")
 				self:PerformLeap()
 			else
-				print("[MobilityController] No leap charges remaining")
+				debugLog("ability", "Leap denied: no charges")
 			end
 		else
 			if not isAirborne then
-				print("[MobilityController] Humanoid not airborne; ignoring leap request")
+				debugLog("ability", "Leap ignored: humanoid not airborne")
 			else
-				print("[MobilityController] Jump count too low for leap")
+				debugLog("ability", "Leap ignored: jump count too low")
 			end
 		end
 	end)
@@ -334,21 +397,21 @@ function MobilityController:SetupInput()
 		end
 
 		if input.KeyCode == Enum.KeyCode.Q then
-			print("[MobilityController] Q key pressed for dash")
+			debugLog("input", "Dash key pressed")
 
 			local canDash = true
 
 			if self.State and self.State.Dash then
 				canDash = not self.State.Dash.IsOnCooldown
-				print("  Dash cooldown:", self.State.Dash.IsOnCooldown)
+				debugLog("ability", string.format("Dash cooldown=%s", tostring(self.State.Dash.IsOnCooldown)))
 			else
-				print("  No state - attempting dash anyway")
+				debugLog("ability", "No server state; attempting dash")
 			end
 
 			if canDash then
 				self:PerformDash()
 			else
-				print("[MobilityController] Dash is on cooldown")
+				debugLog("ability", "Dash denied: cooldown")
 			end
 		end
 	end)
@@ -359,18 +422,18 @@ function MobilityController:SetupInput()
 		end
 	end)
 
-	print("[MobilityController] Input setup complete")
+	debugLog("input", "Input handlers ready")
 end
 
 function MobilityController:PerformLeap()
-	print("[MobilityController] PerformLeap called")
+	debugLog("ability", "PerformLeap invoked")
 	
 	if not self.Character or not self.Humanoid or not self.HumanoidRootPart then 
-		print("[MobilityController] Missing character components for leap")
+		debugLog("ability", "Leap aborted: missing components")
 		return 
 	end
 	
-	print("[MobilityController] Executing leap ability")
+	debugLog("ability", "Executing leap")
 	
 	-- Predict on client immediately for responsiveness
 	self.JumpCount = self.JumpCount + 1
@@ -384,7 +447,7 @@ function MobilityController:PerformLeap()
 	local leapVelocity = (upVector * MobilityConfig.LeapVerticalBoost) + 
 	                     (lookDirection * MobilityConfig.LeapHorizontalBoost)
 	
-	print("[MobilityController] Applying leap velocity:", leapVelocity)
+	debugLog("ability", "Leap velocity", leapVelocity)
 	
 	-- Apply velocity
 	self.HumanoidRootPart.AssemblyLinearVelocity = self.HumanoidRootPart.AssemblyLinearVelocity + leapVelocity
@@ -410,25 +473,25 @@ function MobilityController:PerformLeap()
 		self:UpdateUI()
 	end
 	
-	print("[MobilityController] Leap executed successfully")
+	debugLog("ability", "Leap complete")
 end
 
 function MobilityController:PerformDash()
-	print("[MobilityController] PerformDash called")
+	debugLog("ability", "PerformDash invoked")
 	
 	if not self.Character or not self.Humanoid or not self.HumanoidRootPart then 
-		print("[MobilityController] Missing character components for dash")
+		debugLog("ability", "Dash aborted: missing components")
 		return 
 	end
 	
-	print("[MobilityController] Executing dash ability")
+	debugLog("ability", "Executing dash")
 	
 	-- Get dash direction (camera look direction or character facing)
 	local camera = Workspace.CurrentCamera
 	local dashDirection = camera.CFrame.LookVector
 	dashDirection = Vector3.new(dashDirection.X, 0, dashDirection.Z).Unit -- Horizontal only
 	
-	print("[MobilityController] Dash direction:", dashDirection)
+	debugLog("ability", "Dash direction", dashDirection)
 	
 	-- Apply dash physics (client prediction)
 	local dashVelocity = dashDirection * MobilityConfig.DashPower
@@ -439,7 +502,7 @@ function MobilityController:PerformDash()
 	bodyVelocity.Velocity = dashVelocity
 	bodyVelocity.Parent = self.HumanoidRootPart
 	
-	print("[MobilityController] BodyVelocity applied with velocity:", dashVelocity)
+	debugLog("ability", "Dash velocity", dashVelocity)
 	
 	-- Remove after dash duration
 	task.spawn(function()
@@ -479,7 +542,7 @@ function MobilityController:PerformDash()
 		end)
 	end
 	
-	print("[MobilityController] Dash executed successfully")
+	debugLog("ability", "Dash complete")
 end
 
 function MobilityController:ApplyCameraZoom()
@@ -498,7 +561,15 @@ function MobilityController:ApplyCameraZoom()
 	local startFOV = camera.FieldOfView
 	local targetFOV = self.OriginalFOV + MobilityConfig.ZoomOutAmount
 	
-	print("[MobilityController] Camera zoom - Start FOV:", startFOV, "Target:", targetFOV, "Original:", self.OriginalFOV)
+	debugLog(
+		"effects",
+		string.format(
+			"Camera zoom start=%.2f target=%.2f original=%.2f",
+			startFOV,
+			targetFOV,
+			self.OriginalFOV
+		)
+	)
 	
 	-- Zoom out
 	local zoomOutTween = TweenService:Create(
@@ -541,7 +612,15 @@ function MobilityController:SendMobilityRequest(abilityType: string, direction: 
 		warn("[MobilityController] Cannot send request - Net not available")
 		return
 	end
-	
+
+	local netRoot = ReplicatedStorage:FindFirstChild("Net")
+	local remotes = netRoot and netRoot:FindFirstChild("Remotes")
+	local mobilityRequestRemote = remotes and remotes:FindFirstChild("MobilityRequest")
+	if not mobilityRequestRemote then
+		warn("[MobilityController] MobilityRequest remote missing; request skipped")
+		return
+	end
+
 	self.SequenceNumber = self.SequenceNumber + 1
 	
 	local request = {
@@ -552,11 +631,12 @@ function MobilityController:SendMobilityRequest(abilityType: string, direction: 
 		SequenceNumber = self.SequenceNumber
 	}
 	
-	print("[MobilityController] Sending mobility request:")
-	print("  Type:", abilityType)
-	print("  Position:", request.StartPosition)
-	print("  Direction:", direction)
-	print("  Sequence:", self.SequenceNumber)
+	debugLog(
+		"net",
+		string.format("Send request type=%s seq=%d", abilityType, self.SequenceNumber),
+		request.StartPosition,
+		direction
+	)
 	
 	-- Store pending request for reconciliation
 	self.PendingRequests[self.SequenceNumber] = request
@@ -567,21 +647,26 @@ function MobilityController:SendMobilityRequest(abilityType: string, direction: 
 	end)
 	
 	if success then
-		print("[MobilityController] Request sent to server")
+		debugLog("net", "Request dispatched", self.SequenceNumber)
 	else
 		warn("[MobilityController] Failed to send request to server")
 	end
 end
 
 function MobilityController:HandleServerResponse(response)
-	print("[MobilityController] Processing server response")
-	print("  Success:", response.Success)
-	print("  Sequence:", response.SequenceNumber)
-	print("  Reason:", response.Reason or "none")
+	debugLog(
+		"net",
+		string.format(
+			"Response success=%s seq=%d reason=%s",
+			tostring(response.Success),
+			response.SequenceNumber,
+			response.Reason or "none"
+		)
+	)
 	
 	local pendingRequest = self.PendingRequests[response.SequenceNumber]
 	if not pendingRequest then 
-		print("[MobilityController] No pending request found for sequence:", response.SequenceNumber)
+		debugLog("net", "No pending request", response.SequenceNumber)
 		return 
 	end
 	
@@ -590,21 +675,18 @@ function MobilityController:HandleServerResponse(response)
 	
 	-- Handle rejection/correction
 	if not response.Success then
-		print("[MobilityController] Request rejected by server:", response.Reason)
+		debugLog("net", "Request rejected", response.Reason)
 		
 		if response.CorrectedPosition and self.HumanoidRootPart then
 			-- Server correction - smooth interpolation instead of teleport
 			local currentPos = self.HumanoidRootPart.Position
 			local correctedPos = response.CorrectedPosition
 			
-			print("[MobilityController] Position correction needed")
-			print("  Current:", currentPos)
-			print("  Corrected:", correctedPos)
-			print("  Distance:", (currentPos - correctedPos).Magnitude)
+			debugLog("net", "Position correction", currentPos, correctedPos, (currentPos - correctedPos).Magnitude)
 			
 			-- Only correct if significantly different
 			if (currentPos - correctedPos).Magnitude > MobilityConfig.TeleportBackThreshold then
-				print("[MobilityController] Applying position correction")
+				debugLog("net", "Applying correction")
 				-- Smooth correction
 				local tween = TweenService:Create(
 					self.HumanoidRootPart,
@@ -613,7 +695,7 @@ function MobilityController:HandleServerResponse(response)
 				)
 				tween:Play()
 			else
-				print("[MobilityController] Correction distance too small, ignoring")
+				debugLog("net", "Correction below threshold")
 			end
 		end
 		
@@ -622,22 +704,22 @@ function MobilityController:HandleServerResponse(response)
 			self.UI:ShowError(response.Reason)
 		end
 	else
-		print("[MobilityController] Request approved by server")
+		debugLog("net", "Request approved", response.SequenceNumber)
 	end
 end
 
 function MobilityController:UpdateUI()
 	if not self.State then 
-		print("[MobilityController] Cannot update UI - no state")
+		debugLog("ui", "Update skipped: no state")
 		return 
 	end
 	
 	if not self.UI then
-		print("[MobilityController] UI module not available")
+		debugLog("ui", "Update skipped: UI missing")
 		return
 	end
 	
-	print("[MobilityController] Updating UI")
+	debugLog("ui", "Updating mobility UI")
 	
 	-- Update cooldown displays
 	self.UI:UpdateLeapCooldown(self.State.Leap)
@@ -645,7 +727,7 @@ function MobilityController:UpdateUI()
 end
 
 function MobilityController:Cleanup()
-	print("[MobilityController] Performing full cleanup")
+	debugLog("cleanup", "Performing cleanup")
 	
 	-- Cancel all FOV tweens
 	for _, tween in pairs(self.ActiveFOVTweens) do
@@ -665,7 +747,7 @@ function MobilityController:Cleanup()
 	for name, connection in pairs(self.Connections) do
 		if connection then
 			connection:Disconnect()
-			print("[MobilityController] Disconnected:", name)
+			debugLog("cleanup", "Disconnected", name)
 		end
 	end
 	self.Connections = {}

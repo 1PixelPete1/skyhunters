@@ -15,53 +15,70 @@ function CurveEval.straight(s: number, H: number, opts: any): Vector3
 end
 
 -- S-curve with bend
-function CurveEval.scurve(s: number, H: number, opts: {bend_deg: number, twist_deg: number, tip_drop: number}): Vector3
-	local bend_rad = math.rad(opts.bend_deg or 15)
-	local twist_rad = math.rad(opts.twist_deg or 0)
+function CurveEval.scurve(s: number, H: number, opts: {bend_deg: number, twist_deg: number, tip_drop: number, min_lateral: number?, height: number?}): Vector3
+	local bend_deg = opts.bend_deg or 15
+	local bend_rad = math.rad(bend_deg)
+	local twist_total = math.rad(opts.twist_deg or 0)
 	local tip_drop = opts.tip_drop or 0.2
+	local referenceHeight = opts.height or H
 	
-	-- S-curve profile (smooth transition)
+	-- Ensure the lateral swing remains visible even on short poles
+	local baseAmplitude = referenceHeight * math.sin(math.clamp(bend_rad, 0, math.rad(80))) * 0.5
+	local minAmplitude = opts.min_lateral or 1.25
+	local amplitude = math.max(baseAmplitude, minAmplitude)
+	
+	-- Smooth S-curve profile
 	local bend_profile = math.sin(s * math.pi) * bend_rad
-	local twist_angle = s * twist_rad
+	local lateral = math.sin(bend_profile) * amplitude
 	
-	-- Apply bend in XZ plane
-	local x = math.sin(bend_profile) * H * 0.15  -- scale bend amplitude
-	local z = math.cos(twist_angle) * x
-	x = math.sin(twist_angle) * x
-	
-	-- Vertical with tip drop
+	-- Apply progressive twist about the vertical axis
+	local twist_angle = s * twist_total
+	local cosTwist = math.cos(twist_angle)
+	local sinTwist = math.sin(twist_angle)
+
+	local x = cosTwist * lateral
+	local z = sinTwist * lateral
+
+	-- Vertical progression with optional tip drop
 	local y = s * H * (1 - tip_drop * s * s)
-	
+
 	return Vector3.new(x, y, z)
 end
 
 -- Planar spiral
-function CurveEval.planar_spiral(s: number, H: number, opts: {twist_deg: number, radius_factor: number?}): Vector3
+function CurveEval.planar_spiral(s: number, H: number, opts: {twist_deg: number, radius_factor: number?, radius_min: number?, height: number?}): Vector3
 	local twist_rad = math.rad(opts.twist_deg or 180)
-	local radius_factor = opts.radius_factor or 0.1
-	
-	-- Spiral outward as we go up
+	local referenceHeight = opts.height or H
+	local radius_factor = opts.radius_factor or 0.12
+	local min_radius = opts.radius_min or 1.5
+
+	-- Grow radius in relation to height so the silhouette reads even on short poles
+	local targetRadius = math.max(referenceHeight * radius_factor, min_radius)
 	local angle = s * twist_rad
-	local radius = s * H * radius_factor
-	
+	local radius = targetRadius * (s ^ 0.85)
+
 	local x = math.cos(angle) * radius
 	local z = math.sin(angle) * radius
 	local y = s * H
-	
+
 	return Vector3.new(x, y, z)
 end
 
 -- 3D helix
-function CurveEval.helix(s: number, H: number, opts: {twist_deg: number, radius: number?, pitch: number?}): Vector3
+function CurveEval.helix(s: number, H: number, opts: {twist_deg: number, radius: number?, pitch: number?, radius_min: number?, height: number?}): Vector3
 	local twist_rad = math.rad(opts.twist_deg or 360)
-	local radius = opts.radius or (H * 0.08)
-	local pitch = opts.pitch or 1.0
-	
+	local referenceHeight = opts.height or H
+	local min_radius = opts.radius_min or 1.5
+	local radius = opts.radius or (referenceHeight * 0.1)
+	radius = math.max(radius, min_radius)
+
+	-- Maintain overall height while allowing optional pitch scaling
+	local pitch_scale = opts.pitch or 1.0
 	local angle = s * twist_rad
 	local x = math.cos(angle) * radius
 	local z = math.sin(angle) * radius
-	local y = s * H * pitch
-	
+	local y = s * H * pitch_scale
+
 	return Vector3.new(x, y, z)
 end
 
@@ -105,11 +122,20 @@ function CurveEval.evalAdaptive(
 	kMax = kMax or 8
 	
 	local samples = {}
+	local lastY: number? = nil
 	
 	-- Helper to add a sample
 	local function addSample(s: number)
 		local p = curve(s, H, opts)
+		if lastY and p.Y < lastY then
+			p = Vector3.new(p.X, lastY + 0.0005, p.Z)
+		end
 		local t = computeTangent(curve, s, H, opts, 0.001)
+		if t.Y <= 0 then
+			t = Vector3.new(t.X, math.abs(t.Y) + 0.0005, t.Z)
+			t = if t.Magnitude > 0 then t.Unit else Vector3.new(0, 1, 0)
+		end
+		lastY = p.Y
 		table.insert(samples, { p = p, t = t })
 	end
 	
