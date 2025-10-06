@@ -12,7 +12,8 @@ function LanternSpawnService.SpawnDynamicLantern(
 	plotId: string,
 	pos: Vector3,
 	kind: string,
-	archetypeName: string?
+	archetypeName: string?,
+	options: LanternFactory.AssembleOptions?
 ): Model?
 	-- Check if dynamic lanterns are enabled
 	if not FeatureFlags.get("Lanterns.DynamicEnabled") then
@@ -31,7 +32,7 @@ function LanternSpawnService.SpawnDynamicLantern(
 	end
 	
 	-- Create the lantern
-	local lantern = LanternFactory.assembleLantern(plotId, pos, archetype)
+	local lantern = LanternFactory.assembleLantern(plotId, pos, archetype, options)
 	
 	if lantern then
 		-- Set additional attributes
@@ -62,13 +63,14 @@ end
 function LanternSpawnService.SpawnMultiple(
 	positions: {Vector3},
 	plotId: string?,
-	archetypeName: string?
+	archetypeName: string?,
+	options: LanternFactory.AssembleOptions?
 ): {Model}
 	local lanterns = {}
 	
 	for i, pos in ipairs(positions) do
 		local id = plotId or ("plot_" .. tostring(i))
-		local lantern = LanternSpawnService.SpawnDynamicLantern(id, pos, "standard", archetypeName)
+		local lantern = LanternSpawnService.SpawnDynamicLantern(id, pos, "standard", archetypeName, options)
 		if lantern then
 			table.insert(lanterns, lantern)
 		end

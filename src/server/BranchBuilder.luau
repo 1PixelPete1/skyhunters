@@ -1,6 +1,6 @@
 --!strict
--- BranchBuilder.luau (FIXED)
--- Branch grammar system with decorations
+-- BranchBuilder.luau
+-- FIXED: Print coordinates to debug gaps
 
 local Shared = game.ReplicatedStorage:WaitForChild("Shared")
 local Types = require(Shared:WaitForChild("LanternTypes"))
@@ -17,45 +17,178 @@ export type BuildCtx = {
 	poleKit: Folder?,
 	headKit: Folder?,
 	decorKit: Folder?,
-	parentSegmentLength: number?
+	parentSegmentLength: number?,
+	branchMode: string?,
+	designMode: boolean?,
+	branchProfile: {
+		mode: string?,
+		radiusStart: number?,
+		radiusEnd: number?,
+		segmentModel: string?,
+	}?,
+	orientationMode: string?,
 }
 
--- Track total branches spawned
 local totalBranches = 0
+local SEGMENT_OVERLAP = 0.15
+local MIN_SEGMENT_LENGTH = 0.05
 
--- Create a branch arm (FIXED: tangent-aligned)
+local function createBranchSegment(
+	startPos: Vector3,
+	endPos: Vector3,
+	radius: number,
+	segmentModel: string?,
+	poleKit: Folder?,
+	branchFrame: FrameTransport.Frame
+): BasePart
+	local offset = endPos - startPos
+	local length = offset.Magnitude
+	local midpoint = (startPos + endPos) * 0.5
+
+	-- PRINT SEGMENT COORDINATES
+	print("[SEGMENT] Start:", startPos)
+	print("[SEGMENT] End:", endPos)
+	print("[SEGMENT] Length:", length)
+	print("[SEGMENT] Midpoint:", midpoint)
+
+	local diameter = math.max(radius * 2, 0.02)
+	local visualLength = math.max(length + SEGMENT_OVERLAP, MIN_SEGMENT_LENGTH)
+
+	local segment: BasePart?
+	local usingPrefab = false
+
+	if segmentModel and segmentModel ~= "" and segmentModel ~= "Cylinder" and poleKit then
+		local prefab = poleKit:FindFirstChild(segmentModel)
+		if prefab and prefab:IsA("BasePart") then
+			segment = prefab:Clone()
+			usingPrefab = true
+		else
+			warn("[BranchBuilder] Model not found or unsupported:", segmentModel)
+		end
+	end
+
+	if not segment then
+		local part = Instance.new("Part")
+		part.Shape = Enum.PartType.Cylinder
+		part.Material = Enum.Material.Wood
+		part.Color = Color3.fromRGB(92, 64, 51)
+		segment = part
+	end
+
+	segment.Name = "BranchSegment"
+	segment.Anchored = true
+	segment.CanCollide = false
+
+	if segment:IsA("Part") and segment.Shape == Enum.PartType.Cylinder then
+		segment.Size = Vector3.new(diameter, visualLength, diameter)
+	elseif not usingPrefab then
+		segment.Size = Vector3.new(diameter, visualLength, diameter)
+	end
+
+	-- Align the cylinder's Y-axis with the branch tangent
+	local direction: Vector3
+	if length > 1e-5 then
+		direction = offset.Unit
+	elseif branchFrame.forward.Magnitude > 1e-5 then
+		direction = branchFrame.forward.Unit
+	else
+		direction = Vector3.yAxis
+	end
+
+	local rightAxis = branchFrame.right - direction * branchFrame.right:Dot(direction)
+	if rightAxis.Magnitude < 1e-5 then
+		rightAxis = branchFrame.up:Cross(direction)
+	end
+	if rightAxis.Magnitude < 1e-5 then
+		rightAxis = direction:Cross(Vector3.yAxis)
+	end
+	if rightAxis.Magnitude < 1e-5 then
+		rightAxis = direction:Cross(Vector3.xAxis)
+	end
+	rightAxis = rightAxis.Unit
+
+	local backAxis = rightAxis:Cross(direction)
+	if backAxis.Magnitude < 1e-5 then
+		backAxis = branchFrame.up
+	end
+	backAxis = backAxis.Unit
+
+	segment.CFrame = CFrame.fromMatrix(midpoint, rightAxis, direction, backAxis)
+
+	print("[SEGMENT] Final CFrame Position:", segment.CFrame.Position)
+	print("---")
+
+	return segment
+end
+
 local function createBranchArm(
 	startFrame: FrameTransport.Frame,
 	length: number,
-	radius: number
-): Part
-	local arm = Instance.new("Part")
-	arm.Name = "BranchArm"
-	arm.Anchored = true
-	arm.CanCollide = false
-	arm.Material = Enum.Material.Wood
-	arm.Color = Color3.fromRGB(92, 64, 51)
-	arm.Size = Vector3.new(radius * 2, length, radius * 2)
+	radiusStart: number,
+	radiusEnd: number,
+	profileMode: string?,
+	segmentModel: string?,
+	poleKit: Folder?,
+	midScale: number?
+): {BasePart}
+	local segments: {BasePart} = {}
 	
-	-- FIXED: Use frame forward as the arm's long axis (Y-axis of part)
-	-- Position at midpoint along the forward direction
-	local endPos = startFrame.origin + startFrame.forward * length
-	local midpoint = (startFrame.origin + endPos) / 2
+	local segmentLength = 0.5
+	local numSegments = math.max(1, math.ceil(length / segmentLength))
 	
-	-- Create CFrame with Y-axis aligned to branch direction
-	local cf = CFrame.fromMatrix(
-		midpoint,
-		startFrame.right,
-		startFrame.forward,  -- Y-axis = forward
-		-startFrame.up       -- Z-axis = -up
-	)
+	print("========== CREATING BRANCH ==========")
+	print("[BRANCH] Total length:", length)
+	print("[BRANCH] Num segments:", numSegments)
+	print("[BRANCH] Start origin:", startFrame.origin)
+	print("[BRANCH] Forward vector:", startFrame.forward)
 	
-	arm.CFrame = cf
+	for i = 1, numSegments do
+		local t0 = (i - 1) / numSegments
+		local t1 = i / numSegments
+		
+		print("[BRANCH] Segment", i, "- t0:", t0, "t1:", t1)
+		
+		local radius: number
+		if profileMode == "uniform" then
+			radius = radiusStart
+		elseif profileMode == "taper" then
+			radius = radiusStart + (radiusEnd - radiusStart) * t0
+		elseif profileMode == "bell" then
+			local midT = 0.5
+			local dist = math.abs(t0 - midT)
+			local scaleFactor = 1 + ((midScale or 1.15) - 1) * (1 - dist * 2)
+			local baseRadius = radiusStart + (radiusEnd - radiusStart) * t0
+			radius = baseRadius * scaleFactor
+		else
+			radius = radiusStart
+		end
+		
+		local startPos = startFrame.origin + startFrame.forward * (t0 * length)
+		local endPos = startFrame.origin + startFrame.forward * (t1 * length)
+		
+		print("[BRANCH] Calculated Start:", startPos)
+		print("[BRANCH] Calculated End:", endPos)
+		
+		-- Check gap from previous segment
+		if i > 1 then
+			local prevSegment = segments[i-1]
+			local prevEnd = prevSegment:GetAttribute("EndPos")
+			if prevEnd then
+				local gap = (startPos - prevEnd).Magnitude
+				print("[GAP CHECK] Distance from previous segment end to this start:", gap)
+			end
+		end
+		
+		local segment = createBranchSegment(startPos, endPos, radius, segmentModel, poleKit, startFrame)
+		segment:SetAttribute("EndPos", endPos)
+		table.insert(segments, segment)
+	end
 	
-	return arm
+	print("========== BRANCH COMPLETE ==========")
+	
+	return segments
 end
 
--- Apply decoration orientation mode (FIXED: better modes)
 local function applyDecorationMode(
 	decoration: Model,
 	mountPoint: Vector3,
@@ -67,60 +200,26 @@ local function applyDecorationMode(
 	local cf: CFrame
 	
 	if mode == "Perpendicular" then
-		-- Perpendicular to branch, Y = branch right
-		cf = CFrame.fromMatrix(
-			mountPoint,
-			branchFrame.forward,   -- X = branch forward
-			branchFrame.right,     -- Y = branch right (perpendicular)
-			branchFrame.up         -- Z = branch up
-		)
-		
+		cf = CFrame.fromMatrix(mountPoint, branchFrame.forward, branchFrame.right, branchFrame.up)
 	elseif mode == "LocalUpright" then
-		-- Y = branch up vector
-		cf = CFrame.fromMatrix(
-			mountPoint,
-			branchFrame.right,
-			branchFrame.up,
-			-branchFrame.forward
-		)
-		
+		cf = CFrame.fromMatrix(mountPoint, branchFrame.right, branchFrame.up, -branchFrame.forward)
 	elseif mode == "WorldUpright" then
-		-- FIXED: Warn if used in spiral/helix (as per requirements)
-		-- Y = world up
 		local worldUp = Vector3.yAxis
 		local forward = branchFrame.forward
-		-- Project forward to horizontal plane
 		forward = Vector3.new(forward.X, 0, forward.Z)
 		if forward.Magnitude < 0.001 then
 			forward = Vector3.zAxis
 		end
 		forward = forward.Unit
-		
 		local right = forward:Cross(worldUp).Unit
 		cf = CFrame.fromMatrix(mountPoint, right, worldUp, -forward)
-		
 	elseif mode == "TangentAligned" then
-		-- Y = branch tangent (along the branch)
-		cf = CFrame.fromMatrix(
-			mountPoint,
-			branchFrame.right,
-			branchFrame.forward,   -- Y = tangent
-			-branchFrame.up
-		)
-		
+		cf = CFrame.fromMatrix(mountPoint, branchFrame.right, branchFrame.forward, -branchFrame.up)
 	else
-		-- Default to perpendicular
-		cf = CFrame.fromMatrix(
-			mountPoint,
-			branchFrame.forward,
-			branchFrame.right,
-			branchFrame.up
-		)
+		cf = CFrame.fromMatrix(mountPoint, branchFrame.forward, branchFrame.right, branchFrame.up)
 	end
 	
-	-- Apply jitter if specified
 	if jitter_deg then
-		-- Create a mini slicer for jitter sampling
 		local miniSlicer = {
 			take = take,
 			sampleCurve = function(_, curve: Types.Curve)
@@ -133,7 +232,6 @@ local function applyDecorationMode(
 		local jitterAngle = miniSlicer:sampleCurve(jitter_deg)
 		local jitterRad = math.rad(jitterAngle)
 		
-		-- Apply random rotation around local Y axis (with small XZ variation)
 		cf = cf * CFrame.Angles(
 			jitterRad * 0.3 * (take(8) / 256 - 0.5),
 			jitterRad,
@@ -144,7 +242,6 @@ local function applyDecorationMode(
 	decoration:PivotTo(cf)
 end
 
--- Place decorations on a branch (FIXED: normalized placement)
 local function placeDecorations(
 	branch: Model,
 	branchFrame: FrameTransport.Frame,
@@ -157,46 +254,35 @@ local function placeDecorations(
 	end
 	
 	for _, rule in ipairs(rules) do
-		-- Load decoration prefab
 		local prefab = ctx.decorKit:FindFirstChild(rule.modelId)
 		if not prefab then
-			warn("Decoration prefab not found:", rule.modelId)
 			continue
 		end
 		
 		if rule.where == "Along" then
-			-- FIXED: Normalized Along placement - Bernoulli trial per segment
 			local density = rule.density or 0.5
-			local segmentLength = 0.5  -- Standard segment length
+			local segmentLength = 0.5
 			local numSegments = math.max(1, math.floor(length / segmentLength))
 			
 			for i = 1, numSegments do
-				-- Bernoulli trial for placement
 				local roll = ctx.take(16) / 65536
 				if roll < density then
 					local t = i / (numSegments + 1)
 					local mountPoint = branchFrame.origin + branchFrame.forward * (t * length)
-					
 					local decor = prefab:Clone()
 					decor.Name = "Decoration_" .. rule.modelId .. "_" .. i
 					applyDecorationMode(decor, mountPoint, branchFrame, rule.mode, rule.jitter_deg, ctx.take)
 					decor.Parent = branch
 				end
 			end
-			
 		elseif rule.where == "Ends" then
-			-- FIXED: Place at tip socket only
 			local mountPoint = branchFrame.origin + branchFrame.forward * length
-			
 			local decor = prefab:Clone()
 			decor.Name = "Decoration_" .. rule.modelId
 			applyDecorationMode(decor, mountPoint, branchFrame, rule.mode, rule.jitter_deg, ctx.take)
 			decor.Parent = branch
-			
 		elseif rule.where == "Center" then
-			-- FIXED: Midpoint placement
 			local mountPoint = branchFrame.origin + branchFrame.forward * (length * 0.5)
-			
 			local decor = prefab:Clone()
 			decor.Name = "Decoration_" .. rule.modelId
 			applyDecorationMode(decor, mountPoint, branchFrame, rule.mode, rule.jitter_deg, ctx.take)
@@ -205,7 +291,6 @@ local function placeDecorations(
 	end
 end
 
--- Spawn a single branch (FIXED: adopt parent end tangent)
 local function spawnBranch(
 	parent: Instance,
 	originFrame: FrameTransport.Frame,
@@ -214,19 +299,15 @@ local function spawnBranch(
 	ctx: BuildCtx,
 	debugInfo: {socketName: string}
 ): Model?
-	-- Check global limit
 	if totalBranches >= ctx.limits.max_total_children then
 		return nil
 	end
 	
 	local branchModel = Instance.new("Model")
 	branchModel.Name = "Branch_" .. profile.id
-	
-	-- Add debug attributes
 	branchModel:SetAttribute("ProfileId", profile.id)
 	branchModel:SetAttribute("SocketOrigin", debugInfo.socketName)
 	
-	-- Create mini slicer for curve sampling
 	local miniSlicer = {
 		take = ctx.take,
 		sampleCurve = function(_, curve: Types.Curve)
@@ -236,27 +317,16 @@ local function spawnBranch(
 		end
 	}
 	
-	-- Calculate branch length
 	local lenFrac = miniSlicer:sampleCurve(profile.len_frac)
 	local length = math.clamp(parentSegmentLength * lenFrac, 0.5, 5)
 	
-	-- Calculate branch orientation
 	local pitch = math.rad(miniSlicer:sampleCurve(profile.pitch_deg))
 	local yaw = math.rad(miniSlicer:sampleCurve(profile.yaw_deg))
 	
-	-- FIXED: Default branch rotation adoption = parent end tangent
 	local startFrame = originFrame
-	
-	if profile.inherit_rotation then
-		-- Inherit parent frame rotation directly
-		startFrame = originFrame
-	end
-	
-	-- Apply rotations relative to parent tangent
 	local cf = FrameTransport.cframeFrom(startFrame)
 	cf = cf * CFrame.Angles(pitch, yaw, 0)
 	
-	-- Apply jitter if specified
 	if profile.jitter_deg then
 		local jitter = math.rad(miniSlicer:sampleCurve(profile.jitter_deg))
 		cf = cf * CFrame.Angles(
@@ -266,19 +336,34 @@ local function spawnBranch(
 		)
 	end
 	
-	-- Extract new frame
 	local newFrame: FrameTransport.Frame = {
 		origin = cf.Position,
 		right = cf.RightVector,
 		up = cf.UpVector,
-		forward = -cf.LookVector  -- CFrame uses -Z as forward
+		forward = -cf.LookVector
 	}
 	
-	-- Create branch arm (FIXED: tangent-aligned)
-	local arm = createBranchArm(newFrame, length, 0.08)
-	arm.Parent = branchModel
+	local radiusStart = (ctx.branchProfile and ctx.branchProfile.radiusStart) or 0.08
+	local radiusEnd = (ctx.branchProfile and ctx.branchProfile.radiusEnd) or radiusStart
+	local profileMode = (ctx.branchProfile and ctx.branchProfile.mode) or "uniform"
+	local midScale = (ctx.branchProfile and ctx.branchProfile.midScale) or 1.15
+	local segmentModel = ctx.branchProfile and ctx.branchProfile.segmentModel
 	
-	-- Place decorations (FIXED: with normalized rules)
+	local segments = createBranchArm(
+		newFrame, 
+		length, 
+		radiusStart, 
+		radiusEnd, 
+		profileMode,
+		segmentModel,
+		ctx.poleKit,
+		midScale
+	)
+	
+	for _, segment in ipairs(segments) do
+		segment.Parent = branchModel
+	end
+	
 	if profile.decorations then
 		placeDecorations(branchModel, newFrame, length, profile.decorations, ctx)
 	end
@@ -289,7 +374,6 @@ local function spawnBranch(
 	return branchModel
 end
 
--- Process branches from a specific origin
 local function processBranchOrigin(
 	parent: Instance,
 	socketName: string,
@@ -300,23 +384,18 @@ local function processBranchOrigin(
 	ctx: BuildCtx
 ): number
 	local spawnedCount = 0
-	
-	-- Determine how many to spawn
 	local numToSpawn = 0
+	
 	if density then
-		-- Use density for probability
 		if ctx.take(10) / 1024 < density then
 			numToSpawn = math.min(maxChildren, #profiles)
 		end
 	else
-		-- Spawn up to maxChildren
 		numToSpawn = math.min(maxChildren, #profiles)
 	end
 	
-	-- Get parent segment length
 	local parentSegmentLength = ctx.parentSegmentLength or 2.0
 	
-	-- Spawn branches
 	for i = 1, numToSpawn do
 		if totalBranches >= ctx.limits.max_total_children then
 			break
@@ -326,14 +405,7 @@ local function processBranchOrigin(
 		local profile = profiles[profileIndex]
 		
 		if profile.max_children > 0 then
-			local branch = spawnBranch(
-				parent, 
-				socketFrame, 
-				profile, 
-				parentSegmentLength, 
-				ctx,
-				{socketName = socketName}
-			)
+			local branch = spawnBranch(parent, socketFrame, profile, parentSegmentLength, ctx, {socketName = socketName})
 			if branch then
 				spawnedCount = spawnedCount + 1
 			end
@@ -343,81 +415,39 @@ local function processBranchOrigin(
 	return spawnedCount
 end
 
--- Main branch building function (FIXED: guarantee tip branch)
 function BranchBuilder.buildBranches(root: Instance, spec: Types.BranchSpec, ctx: BuildCtx): ()
-	-- Reset counter
 	totalBranches = 0
-	
-	-- FIXED: Process tip first if required (guarantee at least one branch spawns)
-	if spec.origins.trunk_tip.require_one then
-		local tipSocket = ctx.sockets["Tip"]
-		if tipSocket and #spec.origins.trunk_tip.profiles > 0 then
-			-- Must spawn at least one at tip
-			local profile = spec.origins.trunk_tip.profiles[1]
-			local parentSegmentLength = ctx.parentSegmentLength or 2.0
-			spawnBranch(
-				root, 
-				tipSocket, 
-				profile, 
-				parentSegmentLength, 
-				ctx,
-				{socketName = "Tip"}
-			)
-			print("✅ Guaranteed tip branch spawned")
-		else
-			warn("⚠️ Tip branch required but no profiles or socket available!")
-		end
+
+	local branchMode = ctx.branchMode or "default"
+	local singleBranchMode = branchMode == "single"
+
+	local function shouldStop(): boolean
+		return singleBranchMode and totalBranches >= 1
 	end
-	
-	-- Process base origins
+
 	for _, socketName in ipairs(spec.origins.base.sockets) do
+		if shouldStop() then break end
 		local socket = ctx.sockets[socketName]
 		if socket then
-			processBranchOrigin(
-				root,
-				socketName,
-				socket,
-				spec.origins.base.profiles,
-				spec.limits.max_total_children - totalBranches,
-				nil,  -- No density for base
-				ctx
-			)
+			processBranchOrigin(root, socketName, socket, spec.origins.base.profiles, spec.limits.max_total_children - totalBranches, nil, ctx)
+			if shouldStop() then break end
 		end
 	end
-	
-	-- Process mid-trunk origins
+
 	for _, socketName in ipairs(spec.origins.trunk_mid.sockets) do
+		if shouldStop() then break end
 		local socket = ctx.sockets[socketName]
 		if socket and totalBranches < ctx.limits.max_total_children then
-			processBranchOrigin(
-				root,
-				socketName,
-				socket,
-				spec.origins.trunk_mid.profiles,
-				ctx.limits.max_total_children - totalBranches,
-				spec.origins.trunk_mid.density,
-				ctx
-			)
+			processBranchOrigin(root, socketName, socket, spec.origins.trunk_mid.profiles, ctx.limits.max_total_children - totalBranches, spec.origins.trunk_mid.density, ctx)
 		end
 	end
-	
-	-- Process tip if not already done (no requirement)
-	if not spec.origins.trunk_tip.require_one then
+
+	if not shouldStop() then
 		local tipSocket = ctx.sockets["Tip"]
 		if tipSocket and totalBranches < ctx.limits.max_total_children then
-			processBranchOrigin(
-				root,
-				"Tip",
-				tipSocket,
-				spec.origins.trunk_tip.profiles,
-				ctx.limits.max_total_children - totalBranches,
-				nil,
-				ctx
-			)
+			processBranchOrigin(root, "Tip", tipSocket, spec.origins.trunk_tip.profiles, ctx.limits.max_total_children - totalBranches, nil, ctx)
 		end
 	end
-	
-	print("🌿 Total branches spawned:", totalBranches)
 end
 
 return BranchBuilder
